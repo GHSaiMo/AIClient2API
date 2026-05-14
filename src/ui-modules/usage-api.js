@@ -1,13 +1,20 @@
 import { CONFIG } from '../core/config-manager.js';
 import logger from '../utils/logger.js';
 import { serviceInstances, getServiceAdapter } from '../providers/adapter.js';
-import { formatKiroUsage, formatGeminiUsage, formatAntigravityUsage, formatCodexUsage, formatGrokUsage } from '../services/usage-service.js';
+import { usageService } from '../services/usage-service.js';
 import { readUsageCache, writeUsageCache, readProviderUsageCache, updateProviderUsageCache } from './usage-cache.js';
 import { PROVIDER_MAPPINGS } from '../utils/provider-utils.js';
+import { MODEL_PROVIDER } from '../utils/common.js';
 import path from 'path';
 import { existsSync, readFileSync } from 'fs';
 
-const supportedProviders = ['claude-kiro-oauth', 'gemini-cli-oauth', 'gemini-antigravity', 'openai-codex-oauth', 'grok-web'];
+const supportedProviders = [
+    MODEL_PROVIDER.KIRO_API, 
+    MODEL_PROVIDER.GEMINI_CLI, 
+    MODEL_PROVIDER.ANTIGRAVITY, 
+    MODEL_PROVIDER.CODEX_API, 
+    MODEL_PROVIDER.GROK_WEB
+];
 
 
 /**
@@ -143,7 +150,7 @@ async function getProviderTypeUsage(providerType, currentConfig, providerPoolMan
         // If adapter exists (including just initialized), and no error, try to get usage
         if (adapter && !instanceResult.error) {
             try {
-                const usage = await getAdapterUsage(adapter, providerType);
+                const usage = await usageService.getFormattedUsage(providerType, provider.uuid);
                 instanceResult.success = true;
                 instanceResult.usage = usage;
                 result.successCount++;
@@ -160,69 +167,8 @@ async function getProviderTypeUsage(providerType, currentConfig, providerPoolMan
 }
 
 /**
- * 从适配器获取用量信息
- * @param {Object} adapter - 服务适配器
- * @param {string} providerType - 提供商类型
- * @returns {Promise<Object>} 用量信息
- */
-async function getAdapterUsage(adapter, providerType) {
-    if (providerType === 'claude-kiro-oauth') {
-        if (typeof adapter.getUsageLimits === 'function') {
-            const rawUsage = await adapter.getUsageLimits();
-            return formatKiroUsage(rawUsage);
-        } else if (adapter.kiroApiService && typeof adapter.kiroApiService.getUsageLimits === 'function') {
-            const rawUsage = await adapter.kiroApiService.getUsageLimits();
-            return formatKiroUsage(rawUsage);
-        }
-        throw new Error('This adapter does not support usage query');
-    }
-    
-    if (providerType === 'gemini-cli-oauth') {
-        if (typeof adapter.getUsageLimits === 'function') {
-            const rawUsage = await adapter.getUsageLimits();
-            return formatGeminiUsage(rawUsage);
-        } else if (adapter.geminiApiService && typeof adapter.geminiApiService.getUsageLimits === 'function') {
-            const rawUsage = await adapter.geminiApiService.getUsageLimits();
-            return formatGeminiUsage(rawUsage);
-        }
-        throw new Error('This adapter does not support usage query');
-    }
-    
-    if (providerType === 'gemini-antigravity') {
-        if (typeof adapter.getUsageLimits === 'function') {
-            const rawUsage = await adapter.getUsageLimits();
-            return formatAntigravityUsage(rawUsage);
-        } else if (adapter.antigravityApiService && typeof adapter.antigravityApiService.getUsageLimits === 'function') {
-            const rawUsage = await adapter.antigravityApiService.getUsageLimits();
-            return formatAntigravityUsage(rawUsage);
-        }
-        throw new Error('This adapter does not support usage query');
-    }
-
-    if (providerType === 'openai-codex-oauth') {
-        if (typeof adapter.getUsageLimits === 'function') {
-            const rawUsage = await adapter.getUsageLimits();
-            return formatCodexUsage(rawUsage);
-        } else if (adapter.codexApiService && typeof adapter.codexApiService.getUsageLimits === 'function') {
-            const rawUsage = await adapter.codexApiService.getUsageLimits();
-            return formatCodexUsage(rawUsage);
-        }
-        throw new Error('This adapter does not support usage query');
-    }
-
-    if (providerType === 'grok-web') {
-        if (typeof adapter.getUsageLimits === 'function') {
-            const rawUsage = await adapter.getUsageLimits();
-            return formatGrokUsage(rawUsage);
-        }
-        throw new Error('This adapter does not support usage query');
-    }
-    
-    throw new Error(`Unsupported provider type: ${providerType}`);
-}
-
-/**
  * 获取提供商显示名称
+
  * @param {Object} provider - 提供商配置
  * @param {string} providerType - 提供商类型
  * @returns {string} 显示名称
@@ -237,11 +183,12 @@ function getProviderDisplayName(provider, providerType) {
     const mapping = PROVIDER_MAPPINGS.find(m => m.providerType === providerType);
     const credPathKey = mapping ? mapping.credPathKey : null;
 
-    if (credPathKey && provider[credPathKey]) {
+    // 只有当键名包含 'PATH' 或 'FILE' 时，才将其视为文件路径进行解析
+    if (credPathKey && provider[credPathKey] && (credPathKey.includes('PATH') || credPathKey.includes('FILE'))) {
         const filePath = provider[credPathKey];
         // 提取文件名（不含扩展名）作为显示名称，例如 account-a.json -> account-a
         const fileName = path.basename(filePath, path.extname(filePath));
-        return fileName;
+        if (fileName) return fileName;
     }
 
     // 3. 兜底显示 UUID
@@ -262,7 +209,35 @@ function getProviderConfigFilePath(provider, providerType) {
     const mapping = PROVIDER_MAPPINGS.find(m => m.providerType === providerType);
     const credPathKey = mapping ? mapping.credPathKey : null;
 
-    return (credPathKey && provider[credPathKey]) ? provider[credPathKey] : null;
+    // 只有当键名包含 'PATH' 或 'FILE' 时，才返回路径
+    if (credPathKey && provider[credPathKey] && (credPathKey.includes('PATH') || credPathKey.includes('FILE'))) {
+        return provider[credPathKey];
+    }
+    return null;
+}
+
+/**
+ * 重新格式化用量结果（基于保存的原始数据）
+ * 确保即使格式化逻辑改变，缓存数据也能以最新格式返回
+ * @param {Object} results - 用量结果对象
+ */
+function reformatUsageResults(results) {
+    if (!results || !results.providers) return;
+    
+    for (const [providerType, providerData] of Object.entries(results.providers)) {
+        if (providerData.instances && Array.isArray(providerData.instances)) {
+            for (const instance of providerData.instances) {
+                // 如果有原始数据（保存在 usage.raw 中），重新执行格式化
+                if (instance.success && instance.usage && instance.usage.raw) {
+                    try {
+                        instance.usage = usageService.formatUsage(providerType, instance.usage.raw);
+                    } catch (err) {
+                        logger.error(`[Usage API] Failed to re-format cached data for ${providerType}:`, err.message);
+                    }
+                }
+            }
+        }
+    }
 }
 
 /**
@@ -302,6 +277,8 @@ export async function handleGetUsage(req, res, currentConfig, providerPoolManage
             if (cachedData) {
                 logger.info('[Usage API] Returning cached usage data');
                 usageResults = { ...cachedData, fromCache: true };
+                // 使用最新的格式化逻辑处理缓存的原始数据
+                reformatUsageResults(usageResults);
             }
         }
         
@@ -319,7 +296,12 @@ export async function handleGetUsage(req, res, currentConfig, providerPoolManage
             serverTime: new Date().toISOString()
         };
         
-        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.writeHead(200, { 
+            'Content-Type': 'application/json',
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache',
+            'Expires': '0'
+        });
         res.end(JSON.stringify(finalResults));
         return true;
     } catch (error) {
@@ -351,6 +333,11 @@ export async function handleGetProviderUsage(req, res, currentConfig, providerPo
             if (cachedData) {
                 logger.info(`[Usage API] Returning cached usage data for ${providerType}`);
                 usageResults = { ...cachedData, fromCache: true };
+                
+                // 包装成 reformatUsageResults 期待的结构并重新格式化
+                const tempResults = { providers: { [providerType]: usageResults } };
+                reformatUsageResults(tempResults);
+                usageResults = tempResults.providers[providerType];
             }
         }
         
@@ -368,7 +355,12 @@ export async function handleGetProviderUsage(req, res, currentConfig, providerPo
             serverTime: new Date().toISOString()
         };
         
-        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.writeHead(200, { 
+            'Content-Type': 'application/json',
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache',
+            'Expires': '0'
+        });
         res.end(JSON.stringify(finalResults));
         return true;
     } catch (error) {
