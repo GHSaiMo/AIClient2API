@@ -326,6 +326,14 @@ export async function handleUIApiRequests(method, pathParam, req, res, currentCo
         return await usageApi.handleGetProviderUsage(req, res, currentConfig, providerPoolManager, providerType);
     }
 
+    // Get usage limits for a specific provider instance
+    const usageInstanceMatch = pathParam.match(/^\/api\/usage\/([^\/]+)\/([^\/]+)$/);
+    if (method === 'GET' && usageInstanceMatch) {
+        const providerType = decodeURIComponent(usageInstanceMatch[1]);
+        const providerUuid = decodeURIComponent(usageInstanceMatch[2]);
+        return await usageApi.handleGetSingleInstanceUsage(req, res, currentConfig, providerPoolManager, providerType, providerUuid);
+    }
+
     // Check for updates - compare local VERSION with latest git tag
     if (method === 'GET' && pathParam === '/api/check-update') {
         return await updateApi.handleCheckUpdate(req, res);
