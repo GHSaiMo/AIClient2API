@@ -34,7 +34,8 @@ const KIRO_THINKING = {
 const KIRO_CONSTANTS = {
     REFRESH_URL: 'https://prod.{{region}}.auth.desktop.kiro.dev/refreshToken',
     REFRESH_IDC_URL: 'https://oidc.{{region}}.amazonaws.com/token',
-    BASE_URL: 'https://runtime.{{region}}.kiro.dev/generateAssistantResponse',
+    BASE_URL: 'https://q.{{region}}.amazonaws.com/generateAssistantResponse',
+    BASE_RUNTIME_URL: 'https://runtime.{{region}}.kiro.dev/generateAssistantResponse',
     DEFAULT_MODEL_NAME: 'claude-sonnet-4-5',
     AXIOS_TIMEOUT: 120000, // 2 minutes timeout for normal requests
     TOKEN_REFRESH_TIMEOUT: 15000, // 15 seconds timeout for token refresh (shorter to avoid blocking)
@@ -728,9 +729,18 @@ async loadCredentials() {
             this.idcRegion = this.region;
         }
 
+        const hasIdcClientCredentials = !!(this.clientId && this.clientSecret);
+        const isSocialAuth = this.authMethod === KIRO_CONSTANTS.AUTH_METHOD_SOCIAL ||
+            (!this.authMethod && !hasIdcClientCredentials);
+
+        let defaultBaseUrl = KIRO_CONSTANTS.BASE_URL;
+        if (isSocialAuth) {
+            defaultBaseUrl = KIRO_CONSTANTS.BASE_RUNTIME_URL;
+        }
+
         this.refreshUrl = (this.config.KIRO_REFRESH_URL || KIRO_CONSTANTS.REFRESH_URL).replace("{{region}}", this.region);
         this.refreshIDCUrl = (this.config.KIRO_REFRESH_IDC_URL || KIRO_CONSTANTS.REFRESH_IDC_URL).replace("{{region}}", this.idcRegion);
-        this.baseUrl = (this.config.KIRO_BASE_URL || KIRO_CONSTANTS.BASE_URL).replace("{{region}}", this.region);
+        this.baseUrl = (this.config.KIRO_BASE_URL || defaultBaseUrl).replace("{{region}}", this.region);
     } catch (error) {
         logger.warn(`[Kiro Auth] Error during credential loading: ${error.message}`);
     }
