@@ -593,22 +593,6 @@ export class KiroApiService {
         const kiroVersion = KIRO_CONSTANTS.KIRO_VERSION;
         const { osName, nodeVersion } = getSystemRuntimeInfo();
 
-        // 配置 HTTP/HTTPS agent 限制连接池大小，避免资源泄漏
-        const httpAgent = new http.Agent({
-            keepAlive: true,
-            maxSockets: 100,        // 每个主机最多 100 个连接
-            maxFreeSockets: 5,     // 最多保留 5 个空闲连接
-            timeout: KIRO_CONSTANTS.AXIOS_TIMEOUT,
-        });
-        const httpsAgent = new https.Agent({
-            keepAlive: true,
-            maxSockets: 100,
-            maxFreeSockets: 5,
-            timeout: KIRO_CONSTANTS.AXIOS_TIMEOUT,
-        });
-        
-        const isTLSSidecarEnabled = isTLSSidecarEnabledForProvider(this.config, this.config.MODEL_PROVIDER || MODEL_PROVIDER.KIRO_API);
-        
         const axiosConfig = {
             timeout: KIRO_CONSTANTS.AXIOS_TIMEOUT,
             headers: {
@@ -623,14 +607,6 @@ export class KiroApiService {
                 'Connection': 'close'
             },
         };
-
-        // 如果启用了 TLS Sidecar，就不配置 httpAgent 和 httpsAgent，避免配置冲突
-        if (!isTLSSidecarEnabled) {
-            axiosConfig.httpAgent = httpAgent;
-            axiosConfig.httpsAgent = httpsAgent;
-            // 配置自定义代理
-            configureAxiosProxy(axiosConfig, this.config, this.config.MODEL_PROVIDER || MODEL_PROVIDER.KIRO_API);
-        }
         
         this.axiosInstance = axios.create(axiosConfig);
 
