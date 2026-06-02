@@ -3472,9 +3472,19 @@ function showKiroAwsImportModal() {
                     mergedCredentials.authMethod = 'builder-id';
                 }
                 
-                const response = await window.apiClient.post('/kiro/import-aws-credentials', {
-                    credentials: mergedCredentials
-                });
+                let response;
+                try {
+                    response = await window.apiClient.post('/kiro/import-aws-credentials', {
+                        credentials: mergedCredentials
+                    });
+                } catch (error) {
+                    // 如果是 409 冲突且是重复错误，我们从 error 对象中提取 data，以便后续的重复处理逻辑可以运行
+                    if (error.status === 409 && error.data && error.data.error === 'duplicate') {
+                        response = error.data;
+                    } else {
+                        throw error;
+                    }
+                }
                 
                 if (response.success) {
                     importSuccess = true;
