@@ -454,6 +454,12 @@ function getProviderTypeFields(providerType) {
                 label: `${t('modal.provider.field.grokBaseUrl')} <span class="optional-tag">${t('config.optional')}</span>`,
                 type: 'text',
                 placeholder: 'https://grok.com'
+            },
+            {
+                id: 'GROK_STATSIG_ID',
+                label: `${t('modal.provider.field.statsigId')} <span class="optional-tag">${t('config.optional')}</span>`,
+                type: 'text',
+                placeholder: 'x-statsig-id header value'
             }
         ],
         'forward-api': [
