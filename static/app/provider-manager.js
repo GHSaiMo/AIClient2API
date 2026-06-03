@@ -4280,10 +4280,17 @@ function showAuthModal(authUrl, authInfo) {
                     // 尝试清理 URL（允许 kiro:// 协议）
                     let cleanUrlStr = urlStr.trim();
 
-                    // 如果只输入了 code (没有 :// 且不包含 ?)，尝试针对 Grok CLI / Codex 等补全 URL
-                    if (isManualInput && !cleanUrlStr.includes('://') && !cleanUrlStr.includes('?') && authInfo.sessionId) {
+                    // 如果只输入了 code (没有 :// 且不包含 ?)，尝试自动补全为包含 code 和 state (sessionId) 的完整 callback URL
+                    if (isManualInput && !cleanUrlStr.includes('://') && !cleanUrlStr.includes('?')) {
+                        let state = authInfo.sessionId || '';
+                        if (!state && authUrl) {
+                            try {
+                                const parsedAuthUrl = new URL(authUrl);
+                                state = parsedAuthUrl.searchParams.get('state') || '';
+                            } catch (e) {}
+                        }
                         const baseUrl = authInfo.redirectUri || `http://127.0.0.1:${authInfo.port || 56121}/callback`;
-                        cleanUrlStr = `${baseUrl}?code=${cleanUrlStr}&state=${authInfo.sessionId}`;
+                        cleanUrlStr = `${baseUrl}?code=${cleanUrlStr}${state ? '&state=' + state : ''}`;
                         console.log('Detected code only input, auto-completing callback URL:', cleanUrlStr);
                     }
 
