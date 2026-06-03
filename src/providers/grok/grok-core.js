@@ -541,7 +541,7 @@ export class GrokApiService {
         };
 
         const payload = {
-            "temporary": requestBody.temporary !== undefined ? requestBody.temporary : true,
+            "temporary": false,
             "message": message,
             "parentResponseId": requestBody.parentResponseId || undefined,
             "disableSearch": false,
@@ -651,7 +651,7 @@ export class GrokApiService {
 
         // 4. 构建精简载荷
         const payload = {
-            "temporary": true,
+            "temporary": false,
             "modelName": "grok-3",
             "message": message,
             "toolOverrides": {
