@@ -541,7 +541,7 @@ export class GrokApiService {
         };
 
         const payload = {
-            "temporary": requestBody.temporary !== undefined ? requestBody.temporary : true,
+            "temporary": true,
             "message": message,
             "parentResponseId": requestBody.parentResponseId || undefined,
             "disableSearch": false,

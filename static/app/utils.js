@@ -42,6 +42,12 @@ function getBaseProviderConfigs() {
             icon: 'fa-code',
             defaultPath: 'configs/codex/'
         },
+        {
+            id: 'grok-cli-oauth',
+            name: t('dashboard.routing.nodeName.grokCli'),
+            icon: 'fa-terminal',
+            defaultPath: 'configs/grok-cli/'
+        },
         { 
             id: 'openai-qwen-oauth', 
             name: t('dashboard.routing.nodeName.qwen'), 
@@ -215,6 +221,7 @@ function getFieldLabel(key) {
         'ANTIGRAVITY_OAUTH_CREDS_FILE_PATH': t('modal.provider.field.oauthPath'),
         'IFLOW_OAUTH_CREDS_FILE_PATH': t('modal.provider.field.oauthPath'),
         'CODEX_OAUTH_CREDS_FILE_PATH': t('modal.provider.field.oauthPath'),
+        'GROK_CLI_OAUTH_CREDS_FILE_PATH': t('modal.provider.field.oauthPath'),
         'GROK_COOKIE_TOKEN': t('modal.provider.field.ssoToken'),
         'GROK_CF_CLEARANCE': t('modal.provider.field.cfClearance'),
         'GROK_CF_BM': t('modal.provider.field.cfBm'),
@@ -429,6 +436,26 @@ function getProviderTypeFields(providerType) {
                 label: `${t('modal.provider.field.codexBaseUrl')} <span class="optional-tag">${t('config.optional')}</span>`,
                 type: 'text',
                 placeholder: 'https://api.openai.com/v1/codex'
+            }
+        ],
+        'grok-cli-oauth': [
+            {
+                id: 'GROK_CLI_OAUTH_CREDS_FILE_PATH',
+                label: t('modal.provider.field.oauthPath'),
+                type: 'text',
+                placeholder: 'configs/grok-cli/..._xai-..._oauth_creds.json'
+            },
+            {
+                id: 'GROK_CLI_EMAIL',
+                label: `${t('modal.provider.field.email')} <span class="optional-tag">${t('config.optional')}</span>`,
+                type: 'email',
+                placeholder: t('modal.provider.field.email.placeholder')
+            },
+            {
+                id: 'GROK_CLI_BASE_URL',
+                label: `xAI Base URL <span class="optional-tag">${t('config.optional')}</span>`,
+                type: 'text',
+                placeholder: 'https://api.x.ai/v1'
             }
         ],
         'grok-web': [
