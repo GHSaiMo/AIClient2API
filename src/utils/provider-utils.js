@@ -80,6 +80,17 @@ export const PROVIDER_MAPPINGS = [
         urlKeys: ['CODEX_BASE_URL']
     },
     {
+        // Grok CLI OAuth 配置
+        dirName: 'grok-cli',
+        patterns: ['configs/grok-cli/', '/grok-cli/', '/.grok-cli/'],
+        providerType: 'grok-cli-oauth',
+        credPathKey: 'GROK_CLI_OAUTH_CREDS_FILE_PATH',
+        defaultCheckModel: 'grok-3-mini',
+        displayName: 'Grok CLI OAuth',
+        needsProjectId: false,
+        urlKeys: ['GROK_CLI_BASE_URL']
+    },
+    {
         // Grok Web 配置
         dirName: 'grok',
         patterns: ['configs/grok/', '/grok/'],
