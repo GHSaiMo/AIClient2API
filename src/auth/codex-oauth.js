@@ -813,12 +813,6 @@ export async function batchImportCodexTokensStream(tokens, onProgress = null, sk
             };
             results.success++;
 
-            // 自动关联到 Pools
-            await autoLinkProviderConfigs(CONFIG, {
-                onlyCurrentCred: true,
-                credPath: relativePath
-            });
-
         } catch (error) {
             logger.error(`${CODEX_OAUTH_CONFIG.logPrefix} Token ${i + 1} import failed:`, error.message);
 
@@ -844,6 +838,12 @@ export async function batchImportCodexTokensStream(tokens, onProgress = null, sk
     }
 
     if (results.success > 0) {
+        try {
+            await autoLinkProviderConfigs(CONFIG);
+        } catch (linkError) {
+            logger.error(`${CODEX_OAUTH_CONFIG.logPrefix} Failed to auto-link imported tokens:`, linkError.message);
+        }
+
         broadcastEvent('oauth_batch_success', {
             provider: 'openai-codex-oauth',
             count: results.success,
