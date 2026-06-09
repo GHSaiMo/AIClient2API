@@ -623,7 +623,7 @@ class CodexAuth {
      * @param {string} refreshToken 
      * @returns {Promise<{isDuplicate: boolean, existingPath?: string}>}
      */
-    async checkDuplicate(accountId, refreshToken) {
+    async checkDuplicate(accountId, refreshToken, email = null) {
         const projectDir = process.cwd();
         const targetDir = path.join(projectDir, 'configs', 'codex');
 
@@ -640,7 +640,18 @@ class CodexAuth {
                         const content = await fs.promises.readFile(fullPath, 'utf8');
                         const credentials = JSON.parse(content);
 
-                        if ((accountId && credentials.account_id === accountId) || (refreshToken && credentials.refresh_token === refreshToken)) {
+                        if (refreshToken && credentials.refresh_token === refreshToken) {
+                            const relativePath = path.relative(process.cwd(), fullPath);
+                            return {
+                                isDuplicate: true,
+                                existingPath: relativePath
+                            };
+                        }
+
+                        if (accountId && credentials.account_id === accountId) {
+                            if (email && credentials.email && credentials.email.toLowerCase() !== email.toLowerCase()) {
+                                continue;
+                            }
                             const relativePath = path.relative(process.cwd(), fullPath);
                             return {
                                 isDuplicate: true,
@@ -723,7 +734,7 @@ export async function batchImportCodexTokensStream(tokens, onProgress = null, sk
 
             // 检查重复
             if (!skipDuplicateCheck) {
-                const duplicateCheck = await auth.checkDuplicate(accountId, refreshToken);
+                const duplicateCheck = await auth.checkDuplicate(accountId, refreshToken, email);
                 if (duplicateCheck.isDuplicate) {
                     progressData.current = {
                         index: i + 1,
