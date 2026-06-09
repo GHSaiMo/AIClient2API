@@ -1444,6 +1444,9 @@ export class AntigravityApiService {
                     'User-Agent': this.userAgent
                 },
                 responseType: 'stream',
+                // 阻止 gaxios 在非 2xx 时自行消耗流并抛异常，
+                // 由下方 res.status !== 200 统一处理，保证流仍可读取
+                validateStatus: () => true,
                 body: JSON.stringify(body)
             };
 
@@ -1452,10 +1455,14 @@ export class AntigravityApiService {
 
             if (res.status !== 200) {
                 let errorBody = '';
-                for await (const chunk of res.data) {
-                    errorBody += chunk.toString();
-                }
-                throw new Error(`Upstream API Error (Status ${res.status}): ${errorBody}`);
+                try {
+                    for await (const chunk of res.data) {
+                        errorBody += chunk.toString();
+                    }
+                } catch (_) { /* 流可能已关闭 */ }
+                const upstreamError = new Error(`Upstream API Error (Status ${res.status}): ${errorBody}`);
+                upstreamError.response = { status: res.status, data: errorBody };
+                throw upstreamError;
             }
 
             yield* this.parseSSEStream(res.data);

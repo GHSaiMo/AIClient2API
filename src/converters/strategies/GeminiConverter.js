@@ -966,7 +966,8 @@ export class GeminiConverter extends BaseConverter {
                 }
                 content.push({
                     type: 'tool_result',
-                    tool_use_id: part.functionResponse.name,
+                    // 优先使用 id（即原始 tool_use_id），回退到 name
+                    tool_use_id: part.functionResponse.id || part.functionResponse.name,
                     content: typeof responseContent === 'string' ? responseContent : JSON.stringify(responseContent)
                 });
             }
