@@ -957,23 +957,32 @@ export class ClaudeConverter extends BaseConverter {
                                     try {
                                         const parsedArgs = JSON.parse(args);
                                         if (parsedArgs && typeof parsedArgs === 'object') {
+                                            const fc = {
+                                                name: block.name,
+                                                args: parsedArgs
+                                            };
+                                            // 保留 tool_use.id，Antigravity 转 Claude 时必需此字段
+                                            if (block.id) {
+                                                fc.id = block.id;
+                                            }
                                             parts.push({
                                                 thoughtSignature: ClaudeConverter.GEMINI_CLAUDE_THOUGHT_SIGNATURE,
-                                                functionCall: {
-                                                    name: block.name,
-                                                    args: parsedArgs
-                                                }
+                                                functionCall: fc
                                             });
                                         }
                                     } catch (e) {
                                         // 如果解析失败，尝试直接使用 input
                                         if (block.input && typeof block.input === 'object') {
+                                            const fc = {
+                                                name: block.name,
+                                                args: block.input
+                                            };
+                                            if (block.id) {
+                                                fc.id = block.id;
+                                            }
                                             parts.push({
                                                 thoughtSignature: ClaudeConverter.GEMINI_CLAUDE_THOUGHT_SIGNATURE,
-                                                functionCall: {
-                                                    name: block.name,
-                                                    args: block.input
-                                                }
+                                                functionCall: fc
                                             });
                                         }
                                     }
@@ -1022,6 +1031,8 @@ export class ClaudeConverter extends BaseConverter {
                                     parts.push({
                                         functionResponse: {
                                             name: funcName,
+                                            // 保留原始 tool_use_id，Antigravity 转 Claude tool_result 时必需
+                                            id: toolCallId,
                                             response: {
                                                 result: responseData
                                             }
