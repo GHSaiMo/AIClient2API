@@ -3,7 +3,7 @@ import logger from '../../utils/logger.js';
 import * as http from 'http';
 import * as https from 'https';
 import { v4 as uuidv4 } from 'uuid';
-import { MODEL_PROTOCOL_PREFIX, isRetryableNetworkError, getRetryAfterMs } from '../../utils/common.js';
+import { MODEL_PROTOCOL_PREFIX, isRetryableNetworkError, getRetryAfterMs, normalizeProviderErrorMessage, getNormalizedErrorResponseText } from '../../utils/common.js';
 import { configureAxiosProxy, configureTLSSidecar, isTLSSidecarEnabledForProvider } from '../../utils/proxy-utils.js';
 import { MODEL_PROVIDER } from '../../utils/common.js';
 import { ConverterFactory } from '../../converters/ConverterFactory.js';
@@ -80,29 +80,28 @@ export class GrokApiService {
         return 3;
     }
 
-    classifyApiError(error) {
+    async classifyApiError(error, context = 'request') {
         let status = error.response?.status;
         const errorCode = error.code;
-        const errorMessage = error.message || '';
+        const originalErrorMessage = error.message || '';
         const isNetworkError = isRetryableNetworkError(error);
 
         // 如果是 WS 错误，尝试从 message 中提取状态码
-        if (!status && errorMessage.includes('Unexpected server response:')) {
-            const match = errorMessage.match(/Unexpected server response: (\d+)/);
+        if (!status && originalErrorMessage.includes('Unexpected server response:')) {
+            const match = originalErrorMessage.match(/Unexpected server response: (\d+)/);
             if (match) status = parseInt(match[1], 10);
         }
 
-        if (!status && errorMessage.includes('Image rate limit exceeded')) {
+        if (!status && originalErrorMessage.includes('Image rate limit exceeded')) {
             status = 429;
+        }
+
+        if (status) {
+            await normalizeProviderErrorMessage(error, { status, context });
         }
 
         if (status === 401 || status === 403 || status === 429 || status === 502) {
             error.shouldSwitchCredential = true;
-            const messages = {
-                429: 'Grok rate limit reached (429)',
-                502: 'Grok bad gateway (502) - possibly account or proxy issue'
-            };
-            error.message = messages[status] || 'Grok authentication failed (SSO token invalid or expired)';
         } else if (isNetworkError) {
             // Network jitter or request timeout should not immediately degrade account health.
             // Let the upper retry layer switch credential without incrementing the provider error count.
@@ -110,7 +109,7 @@ export class GrokApiService {
             error.skipErrorCount = true;
         }
 
-        return { status, errorCode, errorMessage, isNetworkError };
+        return { status, errorCode, errorMessage: error.message || originalErrorMessage, isNetworkError };
     }
 
     async setupNsfw() {
@@ -436,7 +435,7 @@ export class GrokApiService {
             if (postId) logger.info(`[Grok Post] Media post created: ${postId} (type=${mediaType})`);
             return postId;
         } catch (error) {
-            const detail = error.response?.data ? JSON.stringify(error.response.data) : error.message;
+            const detail = await getNormalizedErrorResponseText(error);
             logger.error(`[Grok Post] Failed to create media post: ${detail}`);
             return null;
         }
@@ -489,7 +488,7 @@ export class GrokApiService {
             }
             return null;
         } catch (error) {
-            const detail = error.response?.data ? JSON.stringify(error.response.data) : error.message;
+            const detail = await getNormalizedErrorResponseText(error);
             logger.warn(`[Grok Video Link] Failed to create share link for ${postId}: ${detail}`);
             return null;
         }
@@ -1431,7 +1430,7 @@ export class GrokApiService {
             attachGrokUsageEstimatePayload(doneResult, requestBody);
             yield { result: doneResult };
         } catch (error) {
-            const { status, errorCode, errorMessage, isNetworkError } = this.classifyApiError(error);
+            const { status, errorCode, errorMessage, isNetworkError } = await this.classifyApiError(error, 'stream');
             const canRetryInRequest = !hasYieldedData && retryCount < maxRetries;
 
             // 只有图片生成且未发送过数据时才尝试 WebSocket Fallback (明确排除视频)

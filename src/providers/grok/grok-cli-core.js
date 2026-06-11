@@ -7,7 +7,7 @@ import path from 'path';
 import { refreshGrokCliTokensWithRetry } from '../../auth/oauth-handlers.js';
 import { getProviderPoolManager } from '../../services/service-manager.js';
 import { configureTLSSidecar } from '../../utils/proxy-utils.js';
-import { MODEL_PROVIDER, formatExpiryLog, getRetryAfterMs } from '../../utils/common.js';
+import { MODEL_PROVIDER, formatExpiryLog, getRetryAfterMs, normalizeProviderErrorMessage } from '../../utils/common.js';
 import { getProviderModels } from '../provider-models.js';
 
 const XAI_DEFAULT_BASE_URL = 'https://api.x.ai/v1';
@@ -1095,7 +1095,7 @@ export class GrokCliApiService {
         this.config = config;
         this.baseUrl = normalizeBaseUrl(config.GROK_CLI_BASE_URL || config.XAI_BASE_URL);
         this.accessToken = null;
-        this.refreshToken = null;
+        this.refreshTokenValue = null;
         this.idToken = null;
         this.tokenType = 'Bearer';
         this.email = null;
@@ -1160,7 +1160,7 @@ export class GrokCliApiService {
             this.credsPath = credsPath;
             this.idToken = creds.id_token || this.idToken;
             this.accessToken = creds.access_token;
-            this.refreshToken = creds.refresh_token;
+            this.refreshTokenValue = creds.refresh_token;
             this.tokenType = creds.token_type || this.tokenType || 'Bearer';
             this.email = creds.email;
             this.subject = creds.sub || creds.subject;
@@ -1188,7 +1188,7 @@ export class GrokCliApiService {
         await this.loadCredentials();
 
         if (forceRefresh || !this.accessToken) {
-            if (!this.refreshToken) {
+            if (!this.refreshTokenValue) {
                 if (this.accessToken) {
                     this.logAccessTokenOnlyRefreshSkipped();
                     return;
@@ -1202,7 +1202,7 @@ export class GrokCliApiService {
     }
 
     triggerBackgroundRefresh() {
-        if (!this.refreshToken) {
+        if (!this.refreshTokenValue) {
             this.logAccessTokenOnlyRefreshSkipped();
             return;
         }
@@ -1259,7 +1259,7 @@ export class GrokCliApiService {
             const response = await axios.request(axiosRequestConfig);
             return this.parseNonStreamResponse(response.data);
         } catch (error) {
-            this.handleRequestError(error, 'non-stream');
+            await this.handleRequestError(error, 'non-stream');
         }
     }
 
@@ -1302,7 +1302,7 @@ export class GrokCliApiService {
             const response = await axios.request(axiosRequestConfig);
             yield* this.parseSSEStream(response.data);
         } catch (error) {
-            this.handleRequestError(error, 'stream');
+            await this.handleRequestError(error, 'stream');
         }
     }
 
@@ -1324,7 +1324,7 @@ export class GrokCliApiService {
             const response = await axios.request(axiosRequestConfig);
             return this.normalizeImageResponse(response.data, model);
         } catch (error) {
-            this.handleRequestError(error, endpointPath === XAI_IMAGES_EDITS_PATH ? 'image-edit' : 'image-generation');
+            await this.handleRequestError(error, endpointPath === XAI_IMAGES_EDITS_PATH ? 'image-edit' : 'image-generation');
         }
     }
 
@@ -1412,7 +1412,7 @@ export class GrokCliApiService {
                 : endpointPath === XAI_VIDEOS_EXTENSIONS_PATH
                     ? 'video-extension'
                     : 'video-generation';
-            this.handleRequestError(error, mode);
+            await this.handleRequestError(error, mode);
         }
     }
 
@@ -1442,7 +1442,7 @@ export class GrokCliApiService {
             const response = await axios.request(axiosRequestConfig);
             return this.normalizeVideoResponse(response.data);
         } catch (error) {
-            this.handleRequestError(error, 'video-status');
+            await this.handleRequestError(error, 'video-status');
         }
     }
 
@@ -2139,9 +2139,13 @@ export class GrokCliApiService {
         return headers;
     }
 
-    handleRequestError(error, mode) {
+    async handleRequestError(error, mode) {
         const status = error.response?.status;
         const retryAfter = getRetryAfterMs(error);
+
+        if (status) {
+            await normalizeProviderErrorMessage(error, { status, context: mode });
+        }
 
         if (status === 401 || status === 403) {
             logger.info(`[Grok CLI] Received ${status} during ${mode}. Triggering background refresh...`);
@@ -2156,19 +2160,18 @@ export class GrokCliApiService {
             }
         }
 
-        const errBody = error.response?.data ? String(error.response.data).slice(0, 500) : '';
-        logger.error(`[Grok CLI] Error calling ${mode} API (Status: ${status || 'N/A'}, Code: ${error.code || 'N/A'}): ${error.message}${errBody ? ` | body: ${errBody}` : ''}`);
+        logger.error(`[Grok CLI] Error calling ${mode} API (Status: ${status || 'N/A'}, Code: ${error.code || 'N/A'}): ${error.message}`);
         throw error;
     }
 
     async refreshAccessToken() {
-        if (!this.refreshToken) {
+        if (!this.refreshTokenValue) {
             this.logAccessTokenOnlyRefreshSkipped();
             throw new Error('Cannot refresh Grok CLI access-token-only credential without refresh_token.');
         }
 
         try {
-            const newTokens = await refreshGrokCliTokensWithRetry(this.refreshToken, this.config, {
+            const newTokens = await refreshGrokCliTokensWithRetry(this.refreshTokenValue, this.config, {
                 id_token: this.idToken,
                 email: this.email,
                 sub: this.subject,
@@ -2179,7 +2182,7 @@ export class GrokCliApiService {
 
             this.idToken = newTokens.id_token || this.idToken;
             this.accessToken = newTokens.access_token;
-            this.refreshToken = newTokens.refresh_token || this.refreshToken;
+            this.refreshTokenValue = newTokens.refresh_token || this.refreshTokenValue;
             this.tokenType = newTokens.token_type || this.tokenType || 'Bearer';
             this.email = newTokens.email || this.email;
             this.subject = newTokens.sub || this.subject;
@@ -2244,7 +2247,7 @@ export class GrokCliApiService {
                 {
                     id_token: this.idToken || '',
                     access_token: this.accessToken,
-                    refresh_token: this.refreshToken,
+                    refresh_token: this.refreshTokenValue,
                     token_type: this.tokenType || 'Bearer',
                     expires_in: Math.max(0, Math.floor((this.expiresAt.getTime() - Date.now()) / 1000)),
                     last_refresh: this.last_refresh || new Date().toISOString(),

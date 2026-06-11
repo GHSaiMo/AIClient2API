@@ -75,6 +75,132 @@ function getErrorStatusCode(error) {
     return error?.response?.status || error?.status || error?.statusCode || error?.code || null;
 }
 
+function getHttpStatusLabel(status) {
+    switch (status) {
+        case 400: return 'Bad Request';
+        case 401: return 'Unauthorized';
+        case 402: return 'Payment Required';
+        case 403: return 'Forbidden';
+        case 404: return 'Not Found';
+        case 408: return 'Request Timeout';
+        case 409: return 'Conflict';
+        case 422: return 'Unprocessable Entity';
+        case 429: return 'Too Many Requests';
+        case 500: return 'Internal Server Error';
+        case 502: return 'Bad Gateway';
+        case 503: return 'Service Unavailable';
+        case 504: return 'Gateway Timeout';
+        default: return 'HTTP Error';
+    }
+}
+
+function extractReadableErrorText(data) {
+    if (data === undefined || data === null) return '';
+    if (typeof data === 'string') return data;
+    if (Buffer.isBuffer(data)) return data.toString('utf8');
+
+    if (Array.isArray(data)) {
+        return data
+            .map(item => extractReadableErrorText(item))
+            .filter(Boolean)
+            .join(' | ');
+    }
+
+    if (typeof data !== 'object') {
+        return String(data);
+    }
+
+    const directFields = [
+        data.message,
+        data.error_description,
+        data.description,
+        data.detail,
+        data.reason,
+        data.msg
+    ].filter(value => typeof value === 'string' && value.trim());
+
+    if (directFields.length > 0) {
+        return directFields.join(' | ');
+    }
+
+    if (typeof data.error === 'string' && data.error.trim()) {
+        return data.error;
+    }
+
+    if (data.error && typeof data.error === 'object') {
+        const nestedError = extractReadableErrorText(data.error);
+        if (nestedError) return nestedError;
+    }
+
+    if (Array.isArray(data.details)) {
+        const detailText = data.details
+            .map(detail => extractReadableErrorText(detail))
+            .filter(Boolean)
+            .join(' | ');
+        if (detailText) return detailText;
+    }
+
+    if (data.metadata && typeof data.metadata === 'object') {
+        const metadataText = extractReadableErrorText(data.metadata);
+        if (metadataText) return metadataText;
+    }
+
+    try {
+        return JSON.stringify(data);
+    } catch {
+        return String(data);
+    }
+}
+
+export async function getNormalizedErrorResponseText(error) {
+    const data = error?.response?.data;
+    const fallbackText = extractReadableErrorText(data) || error?.message || '';
+
+    if (!data || typeof data?.on !== 'function' || typeof data?.read !== 'function') {
+        return fallbackText;
+    }
+
+    const chunks = [];
+    try {
+        for await (const chunk of data) {
+            chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
+        }
+
+        const bodyText = Buffer.concat(chunks).toString('utf8');
+        if (!bodyText) return fallbackText;
+
+        try {
+            const parsed = JSON.parse(bodyText);
+            return extractReadableErrorText(parsed) || bodyText;
+        } catch {
+            return bodyText;
+        }
+    } catch (readError) {
+        logger.warn(`[Error Normalize] Failed to read error response stream: ${readError.message}`);
+        return fallbackText;
+    }
+}
+
+export function buildHttpErrorReason(status, context, responseText = '', options = {}) {
+    const statusLabel = getHttpStatusLabel(status);
+    const responseSnippet = responseText ? responseText.substring(0, 500) : '';
+    const suffix = options.suffix ? ` - ${options.suffix}` : '';
+    const prefix = status ? `${status} ${statusLabel}` : statusLabel;
+    return `${prefix}${context ? ` (${context})` : ''}${suffix}${responseSnippet ? `: ${responseSnippet}` : ''}`;
+}
+
+export async function normalizeProviderErrorMessage(error, options = {}) {
+    const status = options.status ?? getErrorStatusCode(error);
+    const responseText = await getNormalizedErrorResponseText(error);
+    const reason = buildHttpErrorReason(status, options.context || '', responseText, {
+        suffix: options.suffix || ''
+    });
+    // Normalize in place so existing throw/logging paths that keep using `error`
+    // automatically see the readable message without forcing every caller to reassign.
+    error.message = reason;
+    return { responseText, reason, status };
+}
+
 function getHeaderValue(headers, headerName) {
     if (!headers) return null;
 
