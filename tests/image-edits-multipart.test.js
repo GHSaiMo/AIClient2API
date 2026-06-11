@@ -55,6 +55,17 @@ function makeMultipartRequest(parts) {
     return req;
 }
 
+function makeJsonRequest(body) {
+    const payload = Buffer.from(JSON.stringify(body));
+    const req = Readable.from(payload);
+    req.headers = {
+        'content-type': 'application/json',
+        'content-length': String(payload.length)
+    };
+    req.complete = true;
+    return req;
+}
+
 function makeResponse() {
     return {
         statusCode: null,
@@ -148,5 +159,48 @@ describe('/v1/images/edits multipart handling', () => {
         expect(imageParts).toHaveLength(2);
         expect(imageParts[0].image_url).toContain(Buffer.from('first-image').toString('base64'));
         expect(imageParts[1].image_url).toContain(Buffer.from('second-image').toString('base64'));
+    });
+});
+
+describe('/v1/images/generations request handling', () => {
+    beforeEach(() => {
+        mockGenerateContent.mockReset();
+        mockGenerateContent.mockResolvedValue({
+            response: {
+                output: [{
+                    type: 'image_generation_call',
+                    result: 'generated-image-b64',
+                    output_format: 'png'
+                }]
+            }
+        });
+    });
+
+    test('uses configured request body limit for large image generation requests', async () => {
+        const largePrompt = 'x'.repeat(10 * 1024 * 1024);
+        const req = makeJsonRequest({
+            model: 'gpt-image-2',
+            prompt: largePrompt,
+            n: 1,
+            response_format: 'b64_json'
+        });
+        const res = makeResponse();
+
+        const handled = await handleAPIRequests(
+            'POST',
+            '/v1/images/generations',
+            req,
+            res,
+            { MODEL_PROVIDER: 'openai-codex-oauth', REQUEST_BODY_MAX_BYTES: 12 * 1024 * 1024 },
+            null,
+            null,
+            null
+        );
+
+        expect(handled).toBe(true);
+        expect(res.statusCode).toBe(200);
+
+        const [, requestBody] = mockGenerateContent.mock.calls[0];
+        expect(requestBody.input[0].content[0].text).toBe(largePrompt);
     });
 });

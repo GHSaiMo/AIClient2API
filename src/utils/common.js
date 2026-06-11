@@ -201,6 +201,7 @@ export const API_ACTIONS = {
     GENERATE_CONTENT: 'generateContent',
     STREAM_GENERATE_CONTENT: 'streamGenerateContent',
 };
+export const DEFAULT_REQUEST_BODY_MAX_BYTES = 10 * 1024 * 1024;
 
 import {
     usesManagedModelList,
@@ -554,8 +555,7 @@ export function getRequestBody(req, options = {}) {
         let body = '';
         let receivedBytes = 0;
         let settled = false;
-        const DEFAULT_MAX_BYTES = 10 * 1024 * 1024; // Default 10MB limit
-        const maxBytes = Number(options.maxBytes) > 0 ? Number(options.maxBytes) : DEFAULT_MAX_BYTES;
+        const maxBytes = Number(options.maxBytes) > 0 ? Number(options.maxBytes) : DEFAULT_REQUEST_BODY_MAX_BYTES;
 
         // 1. Quick check Content-Length header
         const headers = req.headers || {};
@@ -1395,7 +1395,7 @@ export async function handleModelListRequest(req, res, service, endpointType, CO
  * @param {string} PROMPT_LOG_FILENAME - The prompt log filename.
  */
 export async function handleContentGenerationRequest(req, res, service, endpointType, CONFIG, PROMPT_LOG_FILENAME, providerPoolManager, pooluuid, requestPath = null) {
-    const originalRequestBody = await getRequestBody(req);
+    const originalRequestBody = await getRequestBody(req, { maxBytes: CONFIG.REQUEST_BODY_MAX_BYTES });
 
     if (!originalRequestBody) {
         throw new Error("Request body is missing for content generation.");

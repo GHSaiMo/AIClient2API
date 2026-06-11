@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import { promises as pfs } from 'fs';
-import { INPUT_SYSTEM_PROMPT_FILE } from '../utils/common.js';
+import { DEFAULT_REQUEST_BODY_MAX_BYTES, INPUT_SYSTEM_PROMPT_FILE } from '../utils/common.js';
 import { MODEL_PROVIDER } from '../utils/constants.js';
 import logger from '../utils/logger.js';
 
@@ -8,6 +8,37 @@ export let CONFIG = {}; // Make CONFIG exportable
 export let PROMPT_LOG_FILENAME = ''; // Make PROMPT_LOG_FILENAME exportable
 
 const ALL_MODEL_PROVIDERS = Object.values(MODEL_PROVIDER);
+const BYTES_PER_MB = 1024 * 1024;
+
+function parsePositiveInteger(value) {
+    if (value === undefined || value === null || value === '') {
+        return null;
+    }
+
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+        return null;
+    }
+
+    return Math.floor(parsed);
+}
+
+function normalizeRequestBodyMaxBytes(config) {
+    const envBytes = parsePositiveInteger(process.env.REQUEST_BODY_MAX_BYTES);
+    if (envBytes !== null) {
+        config.REQUEST_BODY_MAX_BYTES = envBytes;
+        return;
+    }
+
+    const envMb = parsePositiveInteger(process.env.REQUEST_BODY_MAX_MB);
+    if (envMb !== null) {
+        config.REQUEST_BODY_MAX_BYTES = envMb * BYTES_PER_MB;
+        return;
+    }
+
+    const configuredBytes = parsePositiveInteger(config.REQUEST_BODY_MAX_BYTES);
+    config.REQUEST_BODY_MAX_BYTES = configuredBytes ?? DEFAULT_REQUEST_BODY_MAX_BYTES;
+}
 
 function normalizeConfiguredProviders(config) {
     const fallbackProvider = MODEL_PROVIDER.GEMINI_CLI;
@@ -83,6 +114,7 @@ export async function initializeConfig(args = process.argv.slice(2), configFileP
         PROMPT_LOG_MODE: "none",
         REQUEST_MAX_RETRIES: 3,
         REQUEST_BASE_DELAY: 1000,
+        REQUEST_BODY_MAX_BYTES: DEFAULT_REQUEST_BODY_MAX_BYTES,
         CREDENTIAL_SWITCH_MAX_RETRIES: 5, // 坏凭证切换最大重试次数（用于认证错误后切换凭证）
         RATE_LIMIT_COOLDOWN_ENABLED: false, // 429 限流后是否短暂冷却账号
         RATE_LIMIT_COOLDOWN_MS: 30000, // 429 限流默认冷却时间（毫秒）
@@ -150,6 +182,7 @@ export async function initializeConfig(args = process.argv.slice(2), configFileP
         { flag: '--host',                 configKey: 'HOST',                   type: 'string' },
         { flag: '--prompt-log-base-name', configKey: 'PROMPT_LOG_BASE_NAME',   type: 'string' },
         { flag: '--request-max-retries',  configKey: 'REQUEST_MAX_RETRIES',    type: 'int' },
+        { flag: '--request-body-max-bytes', configKey: 'REQUEST_BODY_MAX_BYTES', type: 'int' },
         { flag: '--rate-limit-cooldown-enabled', configKey: 'RATE_LIMIT_COOLDOWN_ENABLED', type: 'bool' },
         { flag: '--rate-limit-cooldown-ms', configKey: 'RATE_LIMIT_COOLDOWN_MS', type: 'int' },
         { flag: '--rate-limit-cooldown-jitter-ms', configKey: 'RATE_LIMIT_COOLDOWN_JITTER_MS', type: 'int' },
@@ -216,6 +249,7 @@ export async function initializeConfig(args = process.argv.slice(2), configFileP
         currentConfig.SCHEDULED_HEALTH_CHECK.interval = currentConfig.SCHEDULE_HEALTH_CHECK_INTERVAL;
     }
 
+    normalizeRequestBodyMaxBytes(currentConfig);
     normalizeConfiguredProviders(currentConfig);
 
     if (!currentConfig.SYSTEM_PROMPT_FILE_PATH) {
