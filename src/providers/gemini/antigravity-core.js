@@ -49,6 +49,7 @@ const ANTIGRAVITY_MODELS = getProviderModels(MODEL_PROVIDER.ANTIGRAVITY);
 const ANTIGRAVITY_CLIENT_TO_UPSTREAM_MODEL = {
     'gemini-3.1-pro-high': 'gemini-pro-agent',
     'gemini-3.1-pro-preview': 'gemini-pro-agent',
+    'gemini-3.5-flash-high': 'gemini-3.5-flash-low',
 };
 
 const ANTIGRAVITY_UPSTREAM_TO_CLIENT_MODELS = {
