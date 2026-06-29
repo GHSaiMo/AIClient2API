@@ -221,6 +221,22 @@ const MODEL_MAPPING = Object.fromEntries(
     Object.entries(FULL_MODEL_MAPPING).filter(([key]) => KIRO_MODELS.includes(key))
 );
 
+function resolveKiroModel(model, config = {}) {
+    if (MODEL_MAPPING[model]) {
+        return MODEL_MAPPING[model];
+    }
+
+    if (findCustomModelConfigForModel(model, config)) {
+        return model;
+    }
+
+    if (config.MODEL_FALLBACK_ENABLED === false) {
+        throw new Error(`[Kiro] 模型不存在: ${model}`);
+    }
+
+    return model;
+}
+
 const KIRO_AUTH_TOKEN_FILE = "kiro-auth-token.json";
 
 /**
@@ -1151,7 +1167,7 @@ async saveCredentialsToFile(filePath, newData) {
         processedMessages.length = 0;
         processedMessages.push(...mergedMessages);
 
-        const codewhispererModel = MODEL_MAPPING[model] || model;
+        const codewhispererModel = resolveKiroModel(model, this.config);
         const toolNameMaps = buildKiroToolNameMaps(tools);
         
         // 动态压缩 tools（保留全部工具，但过滤掉 web_search/websearch）
@@ -2125,7 +2141,7 @@ async saveCredentialsToFile(filePath, newData) {
             this._markCredentialNeedRefresh('Token near expiry in generateContent');
         }
         
-        const finalModel = MODEL_MAPPING[model] || model;
+        const finalModel = resolveKiroModel(model, this.config);
         logger.info(`[Kiro] Calling generateContent with model: ${finalModel}`);
         
         // Estimate input tokens before making the API call
@@ -2484,7 +2500,7 @@ async saveCredentialsToFile(filePath, newData) {
             this._markCredentialNeedRefresh('Token near expiry in generateContentStream');
         }
         
-        const finalModel = MODEL_MAPPING[model] || model;
+        const finalModel = resolveKiroModel(model, this.config);
         logger.info(`[Kiro] Calling generateContentStream with model: ${finalModel} (real streaming)`);
 
         let inputTokens = 0;

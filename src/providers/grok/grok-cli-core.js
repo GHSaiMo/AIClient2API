@@ -1492,6 +1492,9 @@ export class GrokCliApiService {
         const defaultModel = GROK_CLI_MODELS.includes(GROK_CLI_DEFAULT_MODEL)
             ? GROK_CLI_DEFAULT_MODEL
             : (GROK_CLI_MODELS[0] || GROK_CLI_DEFAULT_MODEL);
+        if (this.config.MODEL_FALLBACK_ENABLED === false) {
+            throw new Error(`[Grok CLI] 模型不存在: ${rawModel}`);
+        }
         logger.warn(`[Grok CLI] Model '${rawModel}' not found in supported list. Falling back to default: '${defaultModel}'`);
         return defaultModel;
     }

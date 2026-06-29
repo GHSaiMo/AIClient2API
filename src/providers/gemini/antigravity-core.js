@@ -1610,6 +1610,9 @@ export class AntigravityApiService {
     buildAntigravityPayload(model, requestBody) {
         let selectedModel = normalizeAntigravityModelId(model);
         if (!this.availableModels.includes(selectedModel) && !isKnownAntigravityModel(selectedModel)) {
+            if (this.config.MODEL_FALLBACK_ENABLED === false) {
+                throw new Error(`[Antigravity] 模型不存在: ${model}`);
+            }
             logger.warn(`[Antigravity] Model '${model}' not found. Using default model: 'gemini-3-flash'`);
             selectedModel = 'gemini-3-flash';
             requestBody.model = selectedModel;
