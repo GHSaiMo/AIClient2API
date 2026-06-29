@@ -292,7 +292,7 @@ export function formatKiroUsage(usageData) {
         if (isWithinWindow(breakdown.nextDateReset)) {
             const used = breakdown.currentUsageWithPrecision ?? breakdown.currentUsage;
             const limit = breakdown.usageLimitWithPrecision ?? breakdown.usageLimit;
-            const percent = limit > 0 ? Math.min(100, (used / limit) * 100) : 0;
+            const percent = limit > 0 ? (used / limit) * 100 : 0;
             
             items.push({
                 id: breakdown.resourceType,
@@ -314,7 +314,7 @@ export function formatKiroUsage(usageData) {
 
                 const bUsed = bonus.currentUsageWithPrecision ?? bonus.currentUsage ?? 0;
                 const bLimit = bonus.usageLimitWithPrecision ?? bonus.usageLimit ?? 0;
-                const bPercent = bLimit > 0 ? Math.min(100, (bUsed / bLimit) * 100) : 0;
+                const bPercent = bLimit > 0 ? (bUsed / bLimit) * 100 : 0;
                 const isExpired = bonus.status === 'EXPIRED';
                 
                 items.push({
@@ -337,7 +337,7 @@ export function formatKiroUsage(usageData) {
             if (isWithinWindow(ft.freeTrialExpiry)) {
                 const ftUsed = ft.currentUsageWithPrecision ?? ft.currentUsage ?? 0;
                 const ftLimit = ft.usageLimitWithPrecision ?? ft.usageLimit ?? 0;
-                const ftPercent = ftLimit > 0 ? Math.min(100, (ftUsed / ftLimit) * 100) : 0;
+                const ftPercent = ftLimit > 0 ? (ftUsed / ftLimit) * 100 : 0;
                 const isExpired = ft.freeTrialStatus === 'EXPIRED';
                 
                 items.push({
@@ -359,7 +359,7 @@ export function formatKiroUsage(usageData) {
     const activeItems = items.filter(item => !item.isExpired);
     const totalUsed = activeItems.reduce((sum, item) => sum + item.used, 0);
     const totalLimit = activeItems.reduce((sum, item) => sum + item.limit, 0);
-    const usedPercent = totalLimit > 0 ? Math.min(100, (totalUsed / totalLimit) * 100) : 0;
+    const usedPercent = totalLimit > 0 ? (totalUsed / totalLimit) * 100 : 0;
 
     // 兼容多种用户信息和计划信息的路径
     let plan = usageData.subscriptionInfo?.subscriptionTitle || 
