@@ -827,6 +827,45 @@ function getPluginHookRequestId(config) {
     return config?._monitorRequestId || null;
 }
 
+/**
+ * 针对 Kiro「空响应」（error.isEmptyKiroResponse）计算是否应该重试，并在应该重试时尝试获取一个
+ * 备用的服务实例。重试预算由 CONFIG.KIRO_EMPTY_RESPONSE_MAX_RETRIES 控制，与凭证切换预算
+ * （CREDENTIAL_SWITCH_MAX_RETRIES）完全独立计数，避免一次空回把凭证切换预算耗光。
+ *
+ * @returns {Promise<{retry: boolean, result?: object, emptyResponseRetry?: number}>}
+ */
+async function resolveKiroEmptyResponseRetry(CONFIG, model, attemptsMade, logPrefix) {
+    const emptyRetryMax = CONFIG?.KIRO_EMPTY_RESPONSE_MAX_RETRIES ?? 2;
+    const emptyRetryDelayMs = CONFIG?.KIRO_EMPTY_RESPONSE_RETRY_DELAY_MS ?? 500;
+
+    if (attemptsMade >= emptyRetryMax) {
+        logger.error(`${logPrefix} Kiro empty response persisted after ${emptyRetryMax} retr${emptyRetryMax === 1 ? 'y' : 'ies'} (same request body). Giving up.`);
+        return { retry: false };
+    }
+
+    logger.warn(`${logPrefix} Kiro empty response detected (no text/tool/thinking content). Retrying with the same request body (${attemptsMade + 1}/${emptyRetryMax})...`);
+    if (emptyRetryDelayMs > 0) {
+        await new Promise(resolve => setTimeout(resolve, emptyRetryDelayMs));
+    }
+
+    try {
+        // 动态导入以避免循环依赖
+        const { getApiServiceWithFallback } = await import('../services/service-manager.js');
+        const result = await getApiServiceWithFallback(CONFIG, model, { acquireSlot: true });
+
+        if (result && result.service) {
+            logger.info(`${logPrefix} Retrying empty Kiro response with credential: ${result.uuid} (provider: ${result.actualProviderType})`);
+            return { retry: true, result, emptyResponseRetry: attemptsMade + 1 };
+        }
+
+        logger.warn(`${logPrefix} No alternative credential available for empty-response retry.`);
+        return { retry: false };
+    } catch (retryError) {
+        logger.error(`${logPrefix} Failed to get alternative service for empty-response retry:`, retryError.message);
+        return { retry: false };
+    }
+}
+
 export async function handleStreamRequest(res, service, model, requestBody, fromProvider, toProvider, PROMPT_LOG_MODE, PROMPT_LOG_FILENAME, providerPoolManager, pooluuid, customName, retryContext = null) {
     let fullResponseText = '';
     let fullResponseJson = '';
@@ -1035,6 +1074,56 @@ export async function handleStreamRequest(res, service, model, requestBody, from
             // 直接发送错误并结束
             const errorPayload = createStreamErrorResponse(error, fromProvider);
             if (!res.writableEnded) {
+                try {
+                    res.write(errorPayload);
+                    res.end();
+                } catch (writeErr) {
+                    logger.error('[Stream] Failed to write error response:', writeErr.message);
+                }
+            }
+            responseClosed = true;
+            return;
+        }
+
+        // Kiro 空响应（无文本/工具调用/思考内容）：使用独立的小额重试预算，
+        // 不占用凭证切换预算（CREDENTIAL_SWITCH_MAX_RETRIES），重试沿用同一份 requestBody，
+        // 不会让历史/token 变大。预算耗尽后直接返回明确错误，不再静默放行空的 end_turn。
+        if (error.isEmptyKiroResponse) {
+            const attemptsMade = retryContext?.emptyResponseRetry ?? 0;
+            const outcome = await resolveKiroEmptyResponseRetry(CONFIG, model, attemptsMade, '[Stream Retry]');
+
+            if (outcome.retry) {
+                const { result, emptyResponseRetry } = outcome;
+                const newRetryContext = {
+                    ...retryContext,
+                    CONFIG,
+                    currentRetry,
+                    maxRetries,
+                    emptyResponseRetry,
+                    clientDisconnected,
+                    anyDataSent
+                };
+
+                return await handleStreamRequest(
+                    res,
+                    result.service,
+                    result.actualModel || model,
+                    requestBody,
+                    fromProvider,
+                    result.actualProviderType || toProvider,
+                    PROMPT_LOG_MODE,
+                    PROMPT_LOG_FILENAME,
+                    providerPoolManager,
+                    result.uuid,
+                    result.serviceConfig?.customName || customName,
+                    newRetryContext
+                );
+            }
+
+            const giveUpError = new Error(`Kiro upstream returned an empty response after ${attemptsMade} retr${attemptsMade === 1 ? 'y' : 'ies'} with the same request. Please try again, or /clear your session if this keeps happening.`);
+            giveUpError.status = 502;
+            const errorPayload = createStreamErrorResponse(giveUpError, fromProvider);
+            if (!clientDisconnected.value && !res.writableEnded) {
                 try {
                     res.write(errorPayload);
                     res.end();
@@ -1263,6 +1352,46 @@ export async function handleUnaryRequest(res, service, model, requestBody, fromP
         }
     } catch (error) {
         logger.error('\n[Server] Error during unary processing:', error.stack);
+
+        // Kiro 空响应（无文本/工具调用/思考内容）：使用独立的小额重试预算，
+        // 不占用凭证切换预算（CREDENTIAL_SWITCH_MAX_RETRIES），重试沿用同一份 requestBody，
+        // 不会让历史/token 变大。预算耗尽后直接返回明确错误，不再静默放行空响应。
+        if (error.isEmptyKiroResponse) {
+            const attemptsMade = retryContext?.emptyResponseRetry ?? 0;
+            const outcome = await resolveKiroEmptyResponseRetry(CONFIG, model, attemptsMade, '[Unary Retry]');
+
+            if (outcome.retry) {
+                const { result, emptyResponseRetry } = outcome;
+                const newRetryContext = {
+                    ...retryContext,
+                    CONFIG,
+                    currentRetry,
+                    maxRetries,
+                    emptyResponseRetry
+                };
+
+                return await handleUnaryRequest(
+                    res,
+                    result.service,
+                    result.actualModel || model,
+                    requestBody,
+                    fromProvider,
+                    result.actualProviderType || toProvider,
+                    PROMPT_LOG_MODE,
+                    PROMPT_LOG_FILENAME,
+                    providerPoolManager,
+                    result.uuid,
+                    result.serviceConfig?.customName || customName,
+                    newRetryContext
+                );
+            }
+
+            const giveUpError = new Error(`Kiro upstream returned an empty response after ${attemptsMade} retr${attemptsMade === 1 ? 'y' : 'ies'} with the same request. Please try again, or /clear your session if this keeps happening.`);
+            giveUpError.status = 502;
+            const errorResponse = createErrorResponse(giveUpError, fromProvider);
+            await handleUnifiedResponse(res, JSON.stringify(errorResponse), false, 502);
+            return;
+        }
         
         // 获取状态码（用于日志记录，不再用于判断是否重试）
         const status = getErrorStatusCode(error);

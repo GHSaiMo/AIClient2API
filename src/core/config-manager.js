@@ -117,6 +117,8 @@ export async function initializeConfig(args = process.argv.slice(2), configFileP
         MODEL_FALLBACK_ENABLED: true, // 模型不存在时是否自动 fallback 到默认/映射模型
         REQUEST_BODY_MAX_BYTES: DEFAULT_REQUEST_BODY_MAX_BYTES,
         CREDENTIAL_SWITCH_MAX_RETRIES: 5, // 坏凭证切换最大重试次数（用于认证错误后切换凭证）
+        KIRO_EMPTY_RESPONSE_MAX_RETRIES: 2, // Kiro 上游返回完全空响应（无文本/工具调用/思考）时的独立重试上限，与 CREDENTIAL_SWITCH_MAX_RETRIES 分开计数
+        KIRO_EMPTY_RESPONSE_RETRY_DELAY_MS: 500, // 空响应重试前的等待时间（毫秒），避免瞬间打满上游
         RATE_LIMIT_COOLDOWN_ENABLED: false, // 429 限流后是否短暂冷却账号
         RATE_LIMIT_COOLDOWN_MS: 30000, // 429 限流默认冷却时间（毫秒）
         RATE_LIMIT_COOLDOWN_JITTER_MS: 5000, // 429 限流冷却随机抖动（毫秒）

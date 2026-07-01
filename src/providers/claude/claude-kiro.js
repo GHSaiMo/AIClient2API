@@ -559,6 +559,18 @@ function deduplicateToolCalls(toolCalls) {
     return uniqueToolCalls;
 }
 
+/**
+ * Kiro 上游返回了 HTTP 200 但内容完全为空（无文本、无工具调用、无思考内容）时使用的错误。
+ * 标记为可切换凭证重试，且不计入凭证错误次数（这不是凭证本身的问题，可能是历史/会话导致 Kiro 静默无输出）。
+ */
+function createKiroEmptyResponseError() {
+    const error = new Error('[Kiro] Upstream returned an empty response (no text, tool call, or thinking content).');
+    error.isEmptyKiroResponse = true;
+    error.shouldSwitchCredential = true;
+    error.skipErrorCount = true;
+    return error;
+}
+
 export class KiroApiService {
     constructor(config = {}) {
         this.isInitialized = false;
@@ -2151,6 +2163,12 @@ async saveCredentialsToFile(filePath, newData) {
 
         try {
             const { responseText, toolCalls } = this._processApiResponse(response);
+
+            if (responseText === '' && toolCalls.length === 0) {
+                logger.warn('[Kiro] Empty response detected in generateContent (no text/tool calls received from upstream); signalling for retry.');
+                throw createKiroEmptyResponseError();
+            }
+
             const thinkingType = requestBody?.thinking?.type;
             const thinkingRequested = typeof thinkingType === 'string' &&
                 (thinkingType.toLowerCase() === 'enabled' || thinkingType.toLowerCase() === 'adaptive');
@@ -2481,8 +2499,13 @@ async saveCredentialsToFile(filePath, newData) {
         }
     }
 
-    // 真正的流式传输实现
-    async * generateContentStream(model, requestBody) {
+    // 真正的流式传输实现（内部原始生成器：立即产出 message_start，随后产出实时事件）
+    //
+    // 注意：这个方法本身不对外暴露——对外的 generateContentStream 是下面的薄包装，
+    // 它会缓存这里第一次产出的 message_start，直到确认收到过至少一个有意义的事件
+    // （文本/工具调用/思考）才真正转发给调用方。这样即使这里在流结束前检测到
+    // 完全空的响应并抛错，调用方也从未收到过任何数据，可以安全地整体重试。
+    async * _generateContentStreamRaw(model, requestBody) {
         if (!this.isInitialized) await this.initialize();
 
         // 临时存储 monitorRequestId
@@ -2951,6 +2974,13 @@ async saveCredentialsToFile(filePath, newData) {
                 yield* pushEvents(createTextDeltaEvents(' '));
             }
 
+            // 真正的空响应：没有文本、没有工具调用、也没有思考内容——Kiro 上游静默地什么都没生成。
+            // 不再伪造一次成功的 end_turn，而是抛出可重试的错误，交给上层的凭证切换重试逻辑处理。
+            if (totalContent === '' && toolCalls.length === 0 && !emittedOnlyThinking) {
+                logger.warn('[Kiro Stream] Empty response detected (no content/toolUse/thinking events received from upstream); signalling for retry.');
+                throw createKiroEmptyResponseError();
+            }
+
             yield* pushEvents(stopBlock(streamState.textBlockIndex));
 
             // 检查文本内容中的 bracket 格式工具调用
@@ -3010,8 +3040,44 @@ async saveCredentialsToFile(filePath, newData) {
             yield { type: "message_stop" };
 
         } catch (error) {
-            logger.error('[Kiro] Error in streaming generation:', error);
+            if (!error.isEmptyKiroResponse) {
+                logger.error('[Kiro] Error in streaming generation:', error);
+            }
             throw error;
+        }
+    }
+
+    // 对外暴露的流式生成入口：包装 _generateContentStreamRaw，缓存其第一个产出的
+    // message_start 事件，直到确认后续确实产出过内容才转发出去。
+    //
+    // 效果：
+    // - 正常有内容的响应：几乎零延迟地把 message_start 和第一个真实事件一起放行，
+    //   真实流式体验不受影响。
+    // - 完全空的响应：_generateContentStreamRaw 在结束前会抛出
+    //   isEmptyKiroResponse 错误而不产出第二个事件；此时 message_start 从未被
+    //   转发给调用方，调用方（handleStreamRequest）尚未向客户端写入任何数据，
+    //   可以安全地整体重试（不会出现同一个 SSE 响应里出现两个 message_start）。
+    async * generateContentStream(model, requestBody) {
+        const rawGenerator = this._generateContentStreamRaw(model, requestBody);
+
+        const first = await rawGenerator.next();
+        if (first.done) {
+            return;
+        }
+
+        // first.value 预期是 message_start；先缓存，等确认有后续真实事件再一起放行。
+        const pendingMessageStart = first.value;
+        let flushedMessageStart = false;
+
+        while (true) {
+            const { value, done } = await rawGenerator.next();
+            if (done) break;
+
+            if (!flushedMessageStart) {
+                yield pendingMessageStart;
+                flushedMessageStart = true;
+            }
+            yield value;
         }
     }
 
