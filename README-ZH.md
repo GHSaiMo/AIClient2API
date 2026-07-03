@@ -740,23 +740,24 @@ kill -9 <PID>
 - **检查代理设置**：如使用代理，确保代理支持长连接
 - **查看服务日志**：检查是否有错误信息
 
-**Kiro（`claude-kiro-oauth`）空响应自动重试**：
+**上游空响应自动重试**（目前 Kiro `claude-kiro-oauth` 在用，机制本身与 provider 无关）：
 
 在 Kiro 反代场景下，上游偶尔会返回 HTTP 200 但内容完全为空（没有文本、没有工具调用、也没有思考内容，`output_tokens: 0`）。这类空回如果直接放行给客户端，Claude Code 等客户端会认为"没有任何动作"，进而自行追加一条"请继续"之类的消息，导致对话历史（以及 `input_tokens`）不断累积膨胀，形成恶性循环。
 
 本项目针对这种情况内置了检测与重试机制：
 
-- 检测到 Kiro 返回真正的空响应时，不再伪造一次成功的 `end_turn`，而是在代理内部**用同一份请求体**（历史不会变大）直接重试，最多重试 `KIRO_EMPTY_RESPONSE_MAX_RETRIES` 次（默认 `2`），每次重试前等待 `KIRO_EMPTY_RESPONSE_RETRY_DELAY_MS` 毫秒（默认 `500`）。
+- 检测到上游返回真正的空响应时，不再伪造一次成功的 `end_turn`，而是在代理内部**用同一份请求体**（历史不会变大）直接重试，最多重试 `EMPTY_RESPONSE_MAX_RETRIES` 次（默认 `2`），每次重试前等待 `EMPTY_RESPONSE_RETRY_DELAY_MS` 毫秒（默认 `500`）。
 - 该重试预算与凭证切换重试次数（`CREDENTIAL_SWITCH_MAX_RETRIES`）**互相独立、分开计数**，不会因为一次空回就把凭证切换的重试预算提前耗光，也不会因为切换凭证重试而额外增加本次请求的历史/token 开销。
-- 正常有内容的响应不受影响：只要 Kiro 返回过任意文本、工具调用或思考内容中的一种，就不会触发重试逻辑，流式响应的首字延迟基本不变。
-- 重试次数用尽后，会向客户端返回明确的错误信息（而不是静默的空 `end_turn`），可以在日志中搜索 `Kiro empty response` 或 `isEmptyKiroResponse` 相关关键字确认是否命中过该问题，以及命中频率。
+- 正常有内容的响应不受影响：只要上游返回过任意文本、工具调用或思考内容中的一种，就不会触发重试逻辑，流式响应的首字延迟基本不变。
+- 重试次数用尽后，会向客户端返回明确的错误信息（而不是静默的空 `end_turn`），可以在日志中搜索 `empty response` 或 `isEmptyUpstreamResponse` 相关关键字确认是否命中过该问题，以及命中频率。
+- 该机制不绑定具体 provider：任何 provider 只要在检测到空响应时抛出带 `isEmptyUpstreamResponse` 标记的错误，就会自动复用这套重试逻辑。
 
 可在 `configs/config.json` 中调整：
 
 ```json
 {
-  "KIRO_EMPTY_RESPONSE_MAX_RETRIES": 2,
-  "KIRO_EMPTY_RESPONSE_RETRY_DELAY_MS": 500
+  "EMPTY_RESPONSE_MAX_RETRIES": 2,
+  "EMPTY_RESPONSE_RETRY_DELAY_MS": 500
 }
 ```
 

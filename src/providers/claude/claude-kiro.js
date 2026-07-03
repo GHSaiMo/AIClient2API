@@ -17,7 +17,7 @@ import {
     getContentText as getContentTextUtil
 } from '../../utils/token-utils.js';
 import { configureAxiosProxy, configureTLSSidecar, isTLSSidecarEnabledForProvider } from '../../utils/proxy-utils.js';
-import { isRetryableNetworkError, MODEL_PROVIDER, formatExpiryLog, getNormalizedErrorResponseText, buildHttpErrorReason, normalizeProviderErrorMessage } from '../../utils/common.js';
+import { isRetryableNetworkError, MODEL_PROVIDER, formatExpiryLog, getNormalizedErrorResponseText, buildHttpErrorReason, normalizeProviderErrorMessage, createEmptyUpstreamResponseError } from '../../utils/common.js';
 import { getProviderPoolManager } from '../../services/service-manager.js';
 
 const KIRO_THINKING = {
@@ -561,14 +561,12 @@ function deduplicateToolCalls(toolCalls) {
 
 /**
  * Kiro 上游返回了 HTTP 200 但内容完全为空（无文本、无工具调用、无思考内容）时使用的错误。
+ * 复用 common.js 中通用的 createEmptyUpstreamResponseError（error.isEmptyUpstreamResponse），
+ * 以便与 handleStreamRequest / handleUnaryRequest 里 provider 无关的空响应重试分支对接。
  * 标记为可切换凭证重试，且不计入凭证错误次数（这不是凭证本身的问题，可能是历史/会话导致 Kiro 静默无输出）。
  */
 function createKiroEmptyResponseError() {
-    const error = new Error('[Kiro] Upstream returned an empty response (no text, tool call, or thinking content).');
-    error.isEmptyKiroResponse = true;
-    error.shouldSwitchCredential = true;
-    error.skipErrorCount = true;
-    return error;
+    return createEmptyUpstreamResponseError('Kiro');
 }
 
 export class KiroApiService {
@@ -3040,7 +3038,7 @@ async saveCredentialsToFile(filePath, newData) {
             yield { type: "message_stop" };
 
         } catch (error) {
-            if (!error.isEmptyKiroResponse) {
+            if (!error.isEmptyUpstreamResponse) {
                 logger.error('[Kiro] Error in streaming generation:', error);
             }
             throw error;
@@ -3054,7 +3052,7 @@ async saveCredentialsToFile(filePath, newData) {
     // - 正常有内容的响应：几乎零延迟地把 message_start 和第一个真实事件一起放行，
     //   真实流式体验不受影响。
     // - 完全空的响应：_generateContentStreamRaw 在结束前会抛出
-    //   isEmptyKiroResponse 错误而不产出第二个事件；此时 message_start 从未被
+    //   isEmptyUpstreamResponse 错误而不产出第二个事件；此时 message_start 从未被
     //   转发给调用方，调用方（handleStreamRequest）尚未向客户端写入任何数据，
     //   可以安全地整体重试（不会出现同一个 SSE 响应里出现两个 message_start）。
     async * generateContentStream(model, requestBody) {
