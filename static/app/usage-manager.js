@@ -1,6 +1,6 @@
 // 用量管理模块
 
-import { showToast, bindOnce } from './utils.js';
+import { showToast, bindOnce, getBaseProviderConfigs } from './utils.js';
 import { getAuthHeaders } from './auth.js';
 import { t, getCurrentLanguage } from './i18n.js';
 
@@ -410,9 +410,8 @@ function createInstanceUsageCard(instance, providerType) {
     const user = usage.user || {};
     const displayName = user.email || instance.name || instance.uuid;
     const providerDisplayName = getProviderDisplayName(providerType);
-    const isCodexProvider = providerType === 'openai-codex-oauth';
     const resetAvailableCount = summary.resetAvailableCount ?? 0;
-    const canResetCodexQuota = isCodexProvider && instance.success;
+    const canResetQuota = instance.success && summary.resetAvailableCount !== undefined;
     const codexResetButtonLabel = `${t('usage.codex.resetActionShort')} ${t('usage.codex.resetCredits', { count: resetAvailableCount })}`;
 
     // 使用后端返回的 planClass，如果缺失则兜底
@@ -443,7 +442,7 @@ function createInstanceUsageCard(instance, providerType) {
                 <div class="instance-header-top">
                     <div class="instance-provider-type" title="${providerDisplayName}"><i class="${getProviderIcon(providerType)}"></i><span>${providerDisplayName}</span></div>
                     <div class="instance-status-badges">
-                        ${canResetCodexQuota ? `<button class="btn-reset-usage btn-reset-usage-inline" title="${t('usage.codex.resetAction')}" data-tooltip="${codexResetButtonLabel}" ${resetAvailableCount > 0 ? '' : 'disabled'}><i class="fas fa-rotate-left"></i></button>` : ''}
+                        ${canResetQuota ? `<button class="btn-reset-usage btn-reset-usage-inline" title="${t('usage.codex.resetAction')}" data-tooltip="${codexResetButtonLabel}" ${resetAvailableCount > 0 ? '' : 'disabled'}><i class="fas fa-rotate-left"></i></button>` : ''}
                         ${instance.configFilePath ? `<button class="btn-download-config" title="${t('usage.card.downloadConfig')}"><i class="fas fa-download"></i></button>` : ''}
                         <button class="btn-refresh-usage" title="${t('usage.card.refresh')}"><i class="fas fa-sync-alt"></i></button>
                         ${instance.isDisabled ? `<span class="badge badge-disabled">${t('usage.card.status.disabled')}</span>` : `<span class="badge ${instance.isHealthy ? 'badge-healthy' : 'badge-unhealthy'}">${t(instance.isHealthy ? 'usage.card.status.healthy' : 'usage.card.status.unhealthy')}</span>`}
@@ -533,31 +532,20 @@ function renderUsageDetails(usage) {
 }
 
 function getProviderDisplayName(type) {
-    if (currentProviderConfigs) {
-        const config = currentProviderConfigs.find(c => c.id === type);
-        if (config?.name) return getCompactProviderDisplayName(type, config.name);
-    }
-    const names = { 'claude-kiro-oauth': 'Claude Kiro', 'gemini-cli-oauth': 'Gemini CLI', 'gemini-antigravity': 'Antigravity', 'openai-codex-oauth': 'Codex', 'grok-cli-oauth': 'Grok CLI', 'grok-web': 'Grok Web' };
-    return getCompactProviderDisplayName(type, names[type] || type);
-}
-
-function getCompactProviderDisplayName(type, label) {
-    if (type === 'openai-codex-oauth') return 'Codex';
-    if (type === 'claude-kiro-oauth') return 'Kiro';
-    if (type === 'gemini-antigravity') return 'Antigravity';
-    if (type === 'gemini-cli-oauth') return 'Gemini CLI';
-    if (type === 'grok-cli-oauth') return 'Grok CLI';
-    if (type === 'grok-web') return 'Grok Web';
-    return label;
+    return getProviderMeta(type).name;
 }
 
 function getProviderIcon(type) {
-    if (currentProviderConfigs) {
-        const config = currentProviderConfigs.find(c => c.id === type);
-        if (config?.icon) return config.icon.startsWith('fa-') ? `fas ${config.icon}` : config.icon;
-    }
-    const icons = { 'claude-kiro-oauth': 'fas fa-robot', 'gemini-cli-oauth': 'fas fa-gem', 'gemini-antigravity': 'fas fa-rocket', 'openai-codex-oauth': 'fas fa-terminal', 'grok-cli-oauth': 'fas fa-terminal', 'grok-web': 'fas fa-brain' };
-    return icons[type] || 'fas fa-server';
+    const icon = getProviderMeta(type).icon;
+    return icon.startsWith('fa-') ? `fas ${icon}` : icon;
+}
+
+function getProviderMeta(type) {
+    const config = currentProviderConfigs?.find(c => c.id === type) || getBaseProviderConfigs().find(c => c.id === type);
+    return {
+        name: config?.usageName || config?.shortName || config?.name || type,
+        icon: config?.icon || 'fa-server'
+    };
 }
 
 async function downloadConfigFile(path) {

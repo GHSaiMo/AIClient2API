@@ -21,30 +21,35 @@ function getBaseProviderConfigs() {
         { 
             id: 'gemini-cli-oauth', 
             name: t('dashboard.routing.nodeName.gemini'), 
+            usageName: 'Gemini CLI',
             icon: 'fa-robot',
             defaultPath: 'configs/gemini/'
         },
         { 
             id: 'gemini-antigravity', 
             name: t('dashboard.routing.nodeName.antigravity'), 
+            usageName: 'Antigravity',
             icon: 'fa-rocket',
             defaultPath: 'configs/antigravity/'
         },
         { 
             id: 'claude-kiro-oauth', 
             name: t('dashboard.routing.nodeName.kiro'), 
+            usageName: 'Kiro',
             icon: 'fa-key',
             defaultPath: 'configs/kiro/'
         },
         { 
             id: 'openai-codex-oauth', 
             name: t('dashboard.routing.nodeName.codex'), 
+            usageName: 'Codex',
             icon: 'fa-code',
             defaultPath: 'configs/codex/'
         },
         {
             id: 'grok-cli-oauth',
             name: t('dashboard.routing.nodeName.grokCli'),
+            usageName: 'Grok CLI',
             icon: 'fa-terminal',
             defaultPath: 'configs/grok-cli/'
         },
@@ -63,6 +68,7 @@ function getBaseProviderConfigs() {
         { 
             id: 'grok-web', 
             name: t('dashboard.routing.nodeName.grok'), 
+            usageName: 'Grok Web',
             icon: 'fa-user-secret'
         },
         { 

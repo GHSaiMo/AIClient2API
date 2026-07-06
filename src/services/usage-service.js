@@ -616,37 +616,57 @@ export function formatGrokUsage(usageData) {
 
 /**
  * 格式化 Grok CLI 用量。
- * xAI Grok CLI OAuth 当前没有稳定的额度查询接口，这里展示账号与凭据状态。
  */
 export function formatGrokCliUsage(usageData) {
     if (!usageData) return null;
 
+    const summaryData = usageData.summary || {};
+    const config = usageData.config || {};
+    const products = Array.isArray(summaryData.products) ? summaryData.products : [];
+    const weeklyLimitPercent = summaryData.weeklyLimitPercent ?? config.creditUsagePercent ?? 0;
+    const periodEnd = summaryData.periodEnd || config.currentPeriod?.end || config.billingPeriodEnd || usageData.expiresAt || null;
+    const plan = summaryData.grokAccountTier || summaryData.subscriptionTier || config.subscription_tier || null;
+
+    const items = products.map(item => {
+        const percent = item.usagePercent ?? 0;
+        return {
+            id: item.product || 'product',
+            label: item.product || 'Product Usage',
+            used: percent,
+            limit: 100,
+            percent,
+            unit: 'percent',
+            status: getStatus(percent),
+            resetAt: periodEnd
+        };
+    });
+
+    if (items.length === 0) {
+        items.push({
+            id: 'weekly_limit',
+            label: 'Weekly Limit',
+            used: weeklyLimitPercent,
+            limit: 100,
+            percent: weeklyLimitPercent,
+            unit: 'percent',
+            status: getStatus(weeklyLimitPercent),
+            resetAt: periodEnd
+        });
+    }
+
     return {
         summary: {
-            usedPercent: 0,
-            status: 'normal',
-            resetAt: usageData.expiresAt || null,
-            plan: 'XAI',
-            planClass: getPlanClass('XAI'),
-            unit: 'status',
-            totalUsed: 0,
-            totalLimit: 0
+            usedPercent: weeklyLimitPercent,
+            status: getStatus(weeklyLimitPercent),
+            resetAt: periodEnd,
+            plan,
+            planClass: plan ? getPlanClass(plan) : 'plan-default',
+            unit: 'percent'
         },
         user: {
             email: usageData.account || null
         },
-        items: [
-            {
-                id: 'credential',
-                label: 'OAuth Credential',
-                used: 0,
-                limit: 1,
-                percent: 0,
-                unit: 'status',
-                status: 'normal',
-                resetAt: usageData.expiresAt || null
-            }
-        ],
+        items,
         raw: usageData
     };
 }
