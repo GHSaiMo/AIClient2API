@@ -43,6 +43,13 @@ const XAI_VIDEOS_MAX_REFERENCES = 7;
 const XAI_VIDEO_POLL_DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
 const XAI_VIDEO_POLL_DEFAULT_INTERVAL_MS = 5000;
 const XAI_DEFAULT_BUILTIN_TOOLS = ['web_search', 'x_search', 'code_interpreter', 'collections_search', 'attachment_search'];
+const XAI_BUILTIN_TOOL_NAME_ALIASES = new Map([
+    ['web_search_preview', 'web_search'],
+    ['web_search_preview_2025_03_11', 'web_search'],
+    ['code_execution', 'code_interpreter'],
+    ['file_search', 'file_search'],
+    ...XAI_DEFAULT_BUILTIN_TOOLS.map(name => [name, name])
+]);
 const XAI_SUPPORTED_TOOL_TYPES = new Set([
     'function',
     'web_search',
@@ -649,14 +656,23 @@ function normalizeGrokCliToolChoice(toolChoice) {
 
 function buildGrokCliTools(config = {}, requestBody = {}, model = '') {
     const toolsByType = new Map();
+    const toolNames = new Set();
     const addTool = tool => {
         const normalized = normalizeGrokCliTool(tool);
         if (!normalized) return;
         const key = normalized.type === 'function'
             ? `function:${normalized.name || normalized.function?.name || crypto.randomUUID()}`
             : normalized.type;
+        const toolName = normalized.type === 'function'
+            ? String(normalized.name || normalized.function?.name || '').trim()
+            : XAI_BUILTIN_TOOL_NAME_ALIASES.get(normalized.type) || normalized.type;
+        if (toolName && toolNames.has(toolName)) {
+            logger.warn(`[Grok CLI] Dropping duplicate tool name '${toolName}' to avoid xAI 400 Duplicate tool names error.`);
+            return;
+        }
         if (!toolsByType.has(key)) {
             toolsByType.set(key, normalized);
+            if (toolName) toolNames.add(toolName);
         }
     };
 
