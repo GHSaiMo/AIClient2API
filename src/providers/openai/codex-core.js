@@ -15,7 +15,7 @@ import {getProviderModels} from '../provider-models.js';
 const baseModels = getProviderModels(MODEL_PROVIDER.CODEX_API);
 const fastModels = baseModels.map(m => `${m}-fast`);
 const CODEX_MODELS = [...new Set([...baseModels, ...fastModels])];
-const CODEX_VERSION = '0.130.0';
+const CODEX_VERSION = '0.144.1';
 export const IMAGE_MODELS = new Set(['gpt-image-2']);
 
 /**
@@ -187,7 +187,7 @@ export class CodexApiService {
             if (this.config.MODEL_FALLBACK_ENABLED === false) {
                 throw new Error(`[Codex] 模型不存在: ${model}`);
             }
-            const defaultModel = CODEX_MODELS[0] || 'gpt-5';
+            const defaultModel = CODEX_MODELS[0] || 'gpt-5.5';
             logger.warn(`[Codex] Model '${model}' not found in supported list. Falling back to default: '${defaultModel}'`);
             selectedModel = defaultModel;
         }
@@ -264,7 +264,7 @@ export class CodexApiService {
             if (this.config.MODEL_FALLBACK_ENABLED === false) {
                 throw new Error(`[Codex] 模型不存在: ${model}`);
             }
-            const defaultModel = CODEX_MODELS[0] || 'gpt-5';
+            const defaultModel = CODEX_MODELS[0] || 'gpt-5.5';
             logger.warn(`[Codex] Model '${model}' not found in supported list. Falling back to default: '${defaultModel}'`);
             selectedModel = defaultModel;
         }
@@ -395,9 +395,9 @@ export class CodexApiService {
         const defaultServiceTier = isFastModel ? 'priority' : 'default';
         const defaultReasoningEffort = isFastModel ? 'xhigh' : 'medium';
 
-        // 图像生成模型：gpt-image-2 通过 image_generation 工具 + gpt-5.4 实现
+        // 图像生成模型：gpt-image-2 通过 image_generation 工具 + gpt-5.5 实现
         const isImageModel = IMAGE_MODELS.has(upstreamModel);
-        const effectiveUpstreamModel = isImageModel ? 'gpt-5.4' : upstreamModel;
+        const effectiveUpstreamModel = isImageModel ? 'gpt-5.5' : upstreamModel;
 
         const cleanedBody = {...requestBody};
         delete cleanedBody.metadata;
