@@ -105,6 +105,8 @@ const translations = {
         'dashboard.routing.nodeName.kiro': 'Claude Kiro OAuth',
         'dashboard.routing.nodeName.openai': 'OpenAI Custom',
         'dashboard.routing.nodeName.atlascloud': 'AtlasCloud',
+        'dashboard.routing.nodeName.qiniu': 'Qiniu Cloud AI',
+        'dashboard.routing.nodeName.fenno': 'Fenno.ai',
         'dashboard.routing.nodeName.qwen': 'Qwen OAuth',
         'dashboard.routing.description.qwen': 'Qwen Code Plus',
         'dashboard.routing.nodeName.iflow': 'iFlow OAuth',
@@ -677,6 +679,8 @@ const translations = {
         'providers.auth.importToken': '导入 Token',
         'providers.register': '网站注册',
         'providers.register.title': '打开提供商网站注册页',
+        'providers.docs': '接口文档',
+        'providers.docs.title': '打开提供商接口文档',
 
         // Modal Provider Manager
         'modal.provider.manage': '管理 {type} 提供商配置',
@@ -1308,6 +1312,8 @@ const translations = {
         'dashboard.routing.nodeName.kiro': 'Claude Kiro OAuth',
         'dashboard.routing.nodeName.openai': 'OpenAI Custom',
         'dashboard.routing.nodeName.atlascloud': 'AtlasCloud',
+        'dashboard.routing.nodeName.qiniu': 'Qiniu Cloud AI',
+        'dashboard.routing.nodeName.fenno': 'Fenno.ai',
         'dashboard.routing.nodeName.qwen': 'Qwen OAuth',
         'dashboard.routing.description.qwen': 'Qwen Code Plus',
         'dashboard.routing.nodeName.iflow': 'iFlow OAuth',
@@ -1881,6 +1887,8 @@ const translations = {
         'providers.auth.importToken': 'Import Token',
         'providers.register': 'Register',
         'providers.register.title': 'Open provider registration page',
+        'providers.docs': 'Docs',
+        'providers.docs.title': 'Open provider API documentation',
 
         // Modal Provider Manager
         'modal.provider.manage': 'Manage {type} Provider Config',

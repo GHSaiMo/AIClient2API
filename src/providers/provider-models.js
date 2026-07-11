@@ -80,6 +80,8 @@ export const PROVIDER_MODELS = {
     ],
     'openai-custom': [],
     'atlascloud': [],
+    'qiniu': [],
+    'fenno': [],
     'openaiResponses-custom': [],
     'openai-qwen-oauth': [
         'coder-model',
@@ -163,7 +165,9 @@ export const MANAGED_MODEL_LIST_PROVIDERS = [
     'openai-custom',
     'openaiResponses-custom',
     'claude-custom',
-    'atlascloud'
+    'atlascloud',
+    'qiniu',
+    'fenno'
 ];
 
 export function getManagedModelListProviderType(providerType) {

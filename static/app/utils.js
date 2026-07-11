@@ -87,6 +87,19 @@ function getBaseProviderConfigs() {
             icon: 'fa-reply-all'
         },
         { 
+            id: 'qiniu', 
+            name: 'Qiniu Cloud AI', 
+            icon: 'fa-cloud',
+            registerUrl: 'https://s.qiniu.com/FRF7bq',
+            docUrl: 'https://docs.modelink.ai/api-endpoints/overview'
+        },
+        { 
+            id: 'fenno', 
+            name: 'Fenno.ai', 
+            icon: 'fa-code',
+            registerUrl: 'https://api.fenno.ai/register?redirect=/purchase?tab=subscription%26group=16&aff=2EW65KEQC938'
+        },
+        { 
             id: 'atlascloud', 
             name: 'AtlasCloud', 
             icon: 'fa-cloud',
@@ -288,7 +301,35 @@ function getProviderTypeFields(providerType) {
                 id: 'OPENAI_BASE_URL',
                 label: 'OpenAI Base URL',
                 type: 'text',
-                placeholder: 'https://api.openai.com/v1'
+                placeholder: 'https://api.atlascloud.ai/v1'
+            }
+        ],
+        'qiniu': [
+            {
+                id: 'OPENAI_API_KEY',
+                label: t('modal.provider.field.apiKey'),
+                type: 'password',
+                placeholder: 'sk-...'
+            },
+            {
+                id: 'OPENAI_BASE_URL',
+                label: 'OpenAI Base URL',
+                type: 'text',
+                placeholder: 'https://api.qnaigc.com/v1'
+            }
+        ],
+        'fenno': [
+            {
+                id: 'OPENAI_API_KEY',
+                label: t('modal.provider.field.apiKey'),
+                type: 'password',
+                placeholder: 'sk-...'
+            },
+            {
+                id: 'OPENAI_BASE_URL',
+                label: 'OpenAI Base URL',
+                type: 'text',
+                placeholder: 'https://api.fenno.ai/v1'
             }
         ],
         'openaiResponses-custom': [

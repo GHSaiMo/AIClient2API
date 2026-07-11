@@ -431,6 +431,7 @@ function renderProviders(providers, supportedProviders = []) {
                 <div class="provider-header-right">
                     ${configMap[providerType]?.registerUrl ? '' : generateAddGroupButton(providerType)}
                     ${generateRegisterButton(configMap[providerType])}
+                    ${generateDocButton(configMap[providerType])}
                     ${generateAuthButton(providerType)}
                     <div class="provider-status ${statusClass}">
                         <i class="fas fa-${statusIcon}"></i>
@@ -534,12 +535,12 @@ function renderProviders(providers, supportedProviders = []) {
             });
         }
 
-        const registerBtn = providerDiv.querySelector('.provider-register-btn');
-        if (registerBtn) {
+        const registerBtns = providerDiv.querySelectorAll('.provider-register-btn');
+        registerBtns.forEach(registerBtn => {
             registerBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
             });
-        }
+        });
     });
 
     // 更新统计卡片数据
@@ -813,6 +814,26 @@ function generateRegisterButton(providerConfig) {
 }
 
 /**
+ * 生成提供商文档链接
+ * @param {Object} providerConfig - 提供商配置
+ * @returns {string} 链接HTML
+ */
+function generateDocButton(providerConfig) {
+    if (!providerConfig?.docUrl) {
+        return '';
+    }
+
+    const safeUrl = escapeHtml(providerConfig.docUrl);
+
+    return `
+        <a class="provider-register-btn" href="${safeUrl}" target="_blank" rel="noopener noreferrer" title="${t('providers.docs.title')}">
+            <i class="fas fa-book-open"></i>
+            <span data-i18n="providers.docs">${t('providers.docs')}</span>
+        </a>
+    `;
+}
+
+/**
  * 显示一个极简的主题风格输入框
  * @param {string} title - 标题
  * @param {string} placeholder - 占位符
@@ -865,7 +886,7 @@ function showSimplePrompt(title, placeholder, callback) {
  * @returns {string} 按钮HTML
  */
 function generateAddGroupButton(providerType) {
-    const allowedTypes = ['claude-custom', 'openai-custom', 'openaiResponses-custom', 'atlascloud'];
+    const allowedTypes = ['claude-custom', 'openai-custom', 'openaiResponses-custom', 'atlascloud', 'qiniu', 'fenno'];
     if (!allowedTypes.includes(providerType)) {
         return '';
     }
@@ -4725,7 +4746,7 @@ function showAddProviderGroupModal(defaultBaseType = null) {
         const isSupported = cachedSupportedProviders.includes(config.id);
         
         // 2. 限制只能添加特定类型的配置组 (Claude Custom, OpenAI Custom, OpenAI Responses)
-        const allowedTypes = ['claude-custom', 'openai-custom', 'openaiResponses-custom', 'atlascloud'];
+        const allowedTypes = ['claude-custom', 'openai-custom', 'openaiResponses-custom', 'atlascloud', 'qiniu', 'fenno'];
         const isAllowed = allowedTypes.includes(config.id);
         
         return isSupported && isAllowed;
