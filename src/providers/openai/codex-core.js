@@ -18,6 +18,100 @@ const CODEX_MODELS = [...new Set([...baseModels, ...fastModels])];
 const CODEX_VERSION = '0.144.1';
 export const IMAGE_MODELS = new Set(['gpt-image-2']);
 
+function normalizeCodexTerminalError(parsed) {
+    if (!parsed || typeof parsed !== 'object') {
+        return null;
+    }
+
+    let errorBody = null;
+    if (parsed.type === 'error') {
+        errorBody = parsed.error && typeof parsed.error === 'object'
+            ? parsed.error
+            : { message: parsed.message || parsed.error || 'Codex API error' };
+    } else if (parsed.type === 'response.failed') {
+        errorBody = parsed.response?.error || parsed.error;
+        if (!errorBody) {
+            errorBody = { message: parsed.response?.error?.message || parsed.message || 'Codex response failed' };
+        }
+    }
+
+    if (!errorBody) {
+        return null;
+    }
+
+    if (typeof errorBody !== 'object') {
+        errorBody = { message: String(errorBody) };
+    }
+    if (!errorBody.message) {
+        errorBody.message = errorBody.code || errorBody.type || 'Codex API error';
+    }
+    return errorBody;
+}
+
+function createCodexTerminalError(parsed) {
+    const errorBody = normalizeCodexTerminalError(parsed);
+    if (!errorBody) {
+        return null;
+    }
+
+    const error = new Error(`Codex API error: ${errorBody.message}`);
+    error.response = {
+        status: isCodexUsageLimitError(errorBody) || isCodexModelCapacityError(errorBody) ? 429 : 400,
+        data: { error: errorBody }
+    };
+    if (shouldSwitchCodexCredential(errorBody)) {
+        error.shouldSwitchCredential = true;
+        error.skipErrorCount = true;
+    }
+    if (isCodexUsageLimitError(errorBody)) {
+        const retryAfterMs = parseCodexRetryAfterMs(errorBody);
+        if (retryAfterMs !== null) {
+            error.retryAfterMs = retryAfterMs;
+        }
+    }
+    return error;
+}
+
+function shouldSwitchCodexCredential(errorBody) {
+    const code = String(errorBody?.code || '').toLowerCase();
+    const type = String(errorBody?.type || '').toLowerCase();
+    return code === 'insufficient_quota' || type === 'insufficient_quota' || isCodexUsageLimitError(errorBody) || isCodexModelCapacityError(errorBody);
+}
+
+function isCodexUsageLimitError(errorBody) {
+    return String(errorBody?.type || '').trim().toLowerCase() === 'usage_limit_reached';
+}
+
+function isCodexModelCapacityError(errorBody) {
+    const msg = String(errorBody?.message || '').trim().toLowerCase();
+    return msg.includes('selected model is at capacity') || msg.includes('model is at capacity. please try a different model');
+}
+
+function parseCodexRetryAfterMs(errorBody) {
+    const resetsAt = Number(errorBody?.resets_at);
+    if (Number.isFinite(resetsAt) && resetsAt > 0) {
+        const delay = resetsAt * 1000 - Date.now();
+        return delay > 0 ? delay : null;
+    }
+    const resetsInSeconds = Number(errorBody?.resets_in_seconds);
+    if (Number.isFinite(resetsInSeconds) && resetsInSeconds > 0) {
+        return resetsInSeconds * 1000;
+    }
+    return null;
+}
+
+function extractSSEData(line) {
+    const trimmedLine = String(line || '').trim();
+    if (!trimmedLine) return null;
+    if (trimmedLine.startsWith('event: ') || trimmedLine.startsWith('id: ') || trimmedLine.startsWith('retry: ')) {
+        return null;
+    }
+    if (trimmedLine.startsWith('data:')) {
+        return trimmedLine.slice(5).trim();
+    }
+    return trimmedLine;
+}
+
 /**
  * Codex API 服务类
  */
@@ -401,6 +495,10 @@ export class CodexApiService {
 
         const cleanedBody = {...requestBody};
         delete cleanedBody.metadata;
+        delete cleanedBody.previous_response_id;
+        delete cleanedBody.prompt_cache_retention;
+        delete cleanedBody.safety_identifier;
+        delete cleanedBody.stream_options;
 
         // 【关键修复】确保传给上游的模型名称不带 -fast 后缀
         // 即使 originalRequestBody 中已经带了 model，这里也必须覆盖
@@ -477,6 +575,12 @@ export class CodexApiService {
         };
 
         delete result.messages;
+        if (!result.instructions) {
+            result.instructions = '';
+        }
+        if (!Array.isArray(result.tools) || result.tools.length === 0) {
+            delete result.parallel_tool_calls;
+        }
 
         if (result.service_tier !== 'priority') {
             delete result.service_tier;
@@ -693,23 +797,16 @@ export class CodexApiService {
             for (const line of lines) {
                 const trimmedLine = line.trim();
                 if (!trimmedLine) continue;
-                // skip SSE metadata lines (event:, id:, retry:)
-                if (!trimmedLine.startsWith('data: ')) continue;
-
-                const dataStr = trimmedLine.slice(6).trim();
+                const dataStr = extractSSEData(trimmedLine);
 
                 if (dataStr && dataStr !== '[DONE]') {
                     try {
                         let parsed = JSON.parse(dataStr);
 
-                        if (parsed.type === 'error') {
-                            logger.error('[Codex] API returned error in stream:', parsed.error || parsed);
-                            const errorMsg = (parsed.error && parsed.error.message) || JSON.stringify(parsed.error || parsed);
-                            const error = new Error(`Codex API error: ${errorMsg}`);
-                            if (parsed.error?.code === 'insufficient_quota' || parsed.error?.type === 'insufficient_quota') {
-                                error.shouldSwitchCredential = true;
-                                error.skipErrorCount = true;
-                            }
+                        const terminalError = createCodexTerminalError(parsed);
+                        if (terminalError) {
+                            logger.error('[Codex] API returned terminal error in stream:', parsed.error || parsed.response?.error || parsed);
+                            const error = terminalError;
                             throw error;
                         }
 
@@ -732,21 +829,17 @@ export class CodexApiService {
 
         // 处理剩余的 buffer
         const finalTrimmed = buffer.trim();
-        if (finalTrimmed && finalTrimmed.startsWith('data: ')) {
-            const dataStr = finalTrimmed.slice(6).trim();
+        if (finalTrimmed) {
+            const dataStr = extractSSEData(finalTrimmed);
 
             if (dataStr && dataStr !== '[DONE]') {
                 try {
                     let parsed = JSON.parse(dataStr);
 
-                    if (parsed.type === 'error') {
-                        logger.error('[Codex] API returned error in final stream buffer:', parsed.error || parsed);
-                        const errorMsg = (parsed.error && parsed.error.message) || JSON.stringify(parsed.error || parsed);
-                        const error = new Error(`Codex API error: ${errorMsg}`);
-                        if (parsed.error?.code === 'insufficient_quota' || parsed.error?.type === 'insufficient_quota') {
-                            error.shouldSwitchCredential = true;
-                            error.skipErrorCount = true;
-                        }
+                    const terminalError = createCodexTerminalError(parsed);
+                    if (terminalError) {
+                        logger.error('[Codex] API returned terminal error in final stream buffer:', parsed.error || parsed.response?.error || parsed);
+                        const error = terminalError;
                         throw error;
                     }
 
@@ -792,10 +885,7 @@ export class CodexApiService {
                 continue;
             }
 
-            let jsonData = trimmedLine;
-            if (trimmedLine.startsWith('data: ')) {
-                jsonData = trimmedLine.slice(6).trim();
-            }
+            const jsonData = extractSSEData(trimmedLine);
 
             if (!jsonData || jsonData === '[DONE]') {
                 continue;
@@ -805,14 +895,12 @@ export class CodexApiService {
                 let parsed = JSON.parse(jsonData);
                 switch (parsed.type) {
                     case 'error':
-                        logger.error('[Codex] API returned error:', parsed.error || parsed);
-                        const errorMsg = (parsed.error && parsed.error.message) || JSON.stringify(parsed.error || parsed);
-                        const error = new Error(`Codex API error: ${errorMsg}`);
-                        if (parsed.error?.code === 'insufficient_quota' || parsed.error?.type === 'insufficient_quota') {
-                            error.shouldSwitchCredential = true;
-                            error.skipErrorCount = true;
-                        }
-                        throw error;
+                    case 'response.failed': {
+                        logger.error('[Codex] API returned terminal error:', parsed.error || parsed.response?.error || parsed);
+                        const error = createCodexTerminalError(parsed);
+                        if (error) throw error;
+                        break;
+                    }
                     case 'response.output_item.added':
                         if (parsed.item) {
                             outputItems.set(parsed.item.id, parsed.item);
