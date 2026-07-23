@@ -2424,6 +2424,9 @@ async saveCredentialsToFile(filePath, newData) {
             stream = response.data;
             let buffer = Buffer.alloc(0);
             let lastContentEvent = null;  // 用于检测连续重复的 content 事件
+            // 是否已经向上层产出过内容（content/reasoning/toolUse）。
+            // 一旦产出过，流中途断线就不能从头重发（会导致内容重复/错位）。
+            let hasYieldedContent = false;
 
             for await (const chunk of stream) {
                 const chunkBuf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
@@ -2442,16 +2445,20 @@ async saveCredentialsToFile(filePath, newData) {
                             continue;
                         }
                         lastContentEvent = event.data;
+                        hasYieldedContent = true;
                         yield { type: 'content', content: event.data };
                     } else if (event.type === 'reasoning') {
+                        hasYieldedContent = true;
                         yield { type: 'reasoning', reasoning: event.data };
                     } else if (event.type === 'toolUse') {
+                        hasYieldedContent = true;
                         const toolUse = {
                             ...event.data,
                             name: toolNameMaps?.fromKiroName ? toolNameMaps.fromKiroName(event.data?.name) : event.data?.name
                         };
                         yield { type: 'toolUse', toolUse };
                     } else if (event.type === 'toolUseInput') {
+                        hasYieldedContent = true;
                         yield { type: 'toolUseInput', input: event.data.input };
                     } else if (event.type === 'toolUseStop') {
                         yield { type: 'toolUseStop', stop: event.data.stop };
@@ -2534,13 +2541,18 @@ async saveCredentialsToFile(filePath, newData) {
             }
 
             // Handle network errors (ECONNRESET, ETIMEDOUT, etc.) with exponential backoff
-            if (isNetworkError && retryCount < maxRetries) {
+            // 只在尚未产出任何内容时才从头重试：若已经 yield 过内容，
+            // 从头重发会导致已发送部分与重试响应重复/错位，故中途断线不重试。
+            if (isNetworkError && retryCount < maxRetries && !hasYieldedContent) {
                 const delay = baseDelay * Math.pow(2, retryCount);
                 const errorIdentifier = errorCode || errorMessage.substring(0, 50);
                 logger.info(`[Kiro] Network error (${errorIdentifier}) in stream. Retrying in ${delay}ms... (attempt ${retryCount + 1}/${maxRetries})`);
                 await new Promise(resolve => setTimeout(resolve, delay));
                 yield* this.streamApiReal(method, model, body, isRetry, retryCount + 1);
                 return;
+            }
+            if (isNetworkError && hasYieldedContent) {
+                logger.warn(`[Kiro] Network error (${errorCode || 'stream'}) after content already sent; not retrying to avoid duplication. Ending stream.`);
             }
 
             if (error.response && error.response.data) {
