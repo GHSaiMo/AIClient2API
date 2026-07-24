@@ -3176,7 +3176,7 @@ async saveCredentialsToFile(filePath, newData) {
 
         } catch (error) {
             if (!error.isEmptyUpstreamResponse) {
-                logger.error('[Kiro] Error in streaming generation:', error);
+                logger.error('[Kiro] Error in streaming generation:', error?.stack || error?.message || String(error));
             }
             throw error;
         }
