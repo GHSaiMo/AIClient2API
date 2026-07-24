@@ -2415,6 +2415,9 @@ async saveCredentialsToFile(filePath, newData) {
 
         let stream = null;
         let releaseThrottle = () => {};
+        // catch 需要根据该状态判断能否安全地从头重试，因此必须与 try/catch 同级。
+        // 一旦产出过内容，流中途断线就不能重发（会导致内容重复/错位）。
+        let hasYieldedContent = false;
         try {
             const axiosConfig = {
                 method: 'post',
@@ -2430,9 +2433,6 @@ async saveCredentialsToFile(filePath, newData) {
             stream = response.data;
             let buffer = Buffer.alloc(0);
             let lastContentEvent = null;  // 用于检测连续重复的 content 事件
-            // 是否已经向上层产出过内容（content/reasoning/toolUse）。
-            // 一旦产出过，流中途断线就不能从头重发（会导致内容重复/错位）。
-            let hasYieldedContent = false;
 
             for await (const chunk of stream) {
                 const chunkBuf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
@@ -2638,7 +2638,8 @@ async saveCredentialsToFile(filePath, newData) {
 
         const ensureBlockStart = (blockType) => {
             if (blockType === 'thinking') {
-                if (streamState.thinkingBlockIndex != null) return [];
+                if (streamState.thinkingBlockIndex != null &&
+                    !streamState.stoppedBlocks.has(streamState.thinkingBlockIndex)) return [];
                 const idx = streamState.nextBlockIndex++;
                 streamState.thinkingBlockIndex = idx;
                 return [{
@@ -2648,7 +2649,8 @@ async saveCredentialsToFile(filePath, newData) {
                 }];
             }
             if (blockType === 'text') {
-                if (streamState.textBlockIndex != null) return [];
+                if (streamState.textBlockIndex != null &&
+                    !streamState.stoppedBlocks.has(streamState.textBlockIndex)) return [];
                 const idx = streamState.nextBlockIndex++;
                 streamState.textBlockIndex = idx;
                 return [{
@@ -2673,6 +2675,8 @@ async saveCredentialsToFile(filePath, newData) {
                 streamState.hasVisibleText = true;
             }
             const events = [];
+            // Anthropic 内容块不能重叠；正文开始前先关闭仍处于打开状态的思考块。
+            events.push(...stopBlock(streamState.thinkingBlockIndex));
             events.push(...ensureBlockStart('text'));
             // 将转义的换行符转换为真实换行符，确保流式输出显示正常
             const decodedText = text.replace(/(?<!\\)\\n/g, '\n');
@@ -2689,6 +2693,8 @@ async saveCredentialsToFile(filePath, newData) {
                 streamState.hasThinkingContent = true;
             }
             const events = [];
+            // 兼容内联 <thinking> 出现在正文后的情况，保证任一时刻只有一个内容块打开。
+            events.push(...stopBlock(streamState.textBlockIndex));
             events.push(...ensureBlockStart('thinking'));
             // 将转义的换行符转换为真实换行符
             const decodedThinking = thinking.replace(/(?<!\\)\\n/g, '\n');
@@ -2881,8 +2887,9 @@ async saveCredentialsToFile(filePath, newData) {
 
                     // 工具调用事件（包含 name 和 toolUseId）
                     if (tc.name && tc.toolUseId) {
-                        // 遇到工具调用时，立即关闭文本块，避免前端等待到流结束才看到 content_block_stop
+                        // 工具块开始前关闭当前文本/思考块，避免 Anthropic 内容块重叠。
                         toolEvents.push(...stopBlock(streamState.textBlockIndex));
+                        toolEvents.push(...stopBlock(streamState.thinkingBlockIndex));
 
                         // 同一工具调用续传
                         if (currentToolCall && currentToolCall.toolUseId === tc.toolUseId) {
@@ -3069,6 +3076,10 @@ async saveCredentialsToFile(filePath, newData) {
                 yield* pushEvents(createTextDeltaEvents(streamState.buffer));
                 streamState.buffer = '';
             }
+
+            // 原生 reasoningContentEvent 没有 </thinking> 标签；流尾必须显式关闭其 thinking 块。
+            // 若接下来需要为纯思考响应补最小文本块，也要先完成这个 stop。
+            yield* pushEvents(stopBlock(streamState.thinkingBlockIndex));
 
             const emittedOnlyThinking = thinkingRequested &&
                 streamState.hasThinkingContent &&
