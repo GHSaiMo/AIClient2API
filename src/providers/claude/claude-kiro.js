@@ -621,6 +621,17 @@ function createKiroEmptyResponseError() {
     return createEmptyUpstreamResponseError('Kiro');
 }
 
+async function getKiroErrorResponsePreview(error, maxLength = 500) {
+    try {
+        const responseText = await getNormalizedErrorResponseText(error);
+        return String(responseText || '').substring(0, maxLength);
+    } catch (previewError) {
+        // 错误日志绝不能覆盖真正的请求异常；无法格式化时只记录摘要失败。
+        logger.warn(`[Kiro] Failed to format error response body: ${previewError?.message || 'unknown error'}`);
+        return '';
+    }
+}
+
 export class KiroApiService {
     constructor(config = {}) {
         this.isInitialized = false;
@@ -1909,7 +1920,12 @@ async saveCredentialsToFile(filePath, newData) {
                 return this.callApi(method, model, body, isRetry, retryCount + 1);
             }
 
-            if (error.response && error.response.data) { logger.error('[Kiro] 400 Response body:', typeof error.response.data === 'string' ? error.response.data.substring(0, 500) : JSON.stringify(error.response.data).substring(0, 500)); }
+            if (error.response && error.response.data) {
+                const responseBodyPreview = await getKiroErrorResponsePreview(error);
+                if (responseBodyPreview) {
+                    logger.error('[Kiro] Error response body:', responseBodyPreview);
+                }
+            }
             logger.error(`[Kiro] API call failed (Status: ${status}, Code: ${errorCode}):`, error.message);
             throw error;
         }
@@ -2562,7 +2578,10 @@ async saveCredentialsToFile(filePath, newData) {
             }
 
             if (error.response && error.response.data) {
-                logger.error('[Kiro] Stream error response body:', typeof error.response.data === 'string' ? error.response.data.substring(0, 500) : JSON.stringify(error.response.data).substring(0, 500));
+                const responseBodyPreview = await getKiroErrorResponsePreview(error);
+                if (responseBodyPreview) {
+                    logger.error('[Kiro] Stream error response body:', responseBodyPreview);
+                }
             }
             logger.error(`[Kiro] Stream API call failed (Status: ${status}, Code: ${errorCode}):`,  error.message);
             throw error;
