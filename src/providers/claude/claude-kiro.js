@@ -198,6 +198,9 @@ function normalizeKiroToolInput(input) {
 
 // Per-model context window sizes for accurate token estimation
 const MODEL_CONTEXT_TOKENS = {
+    "gpt-5.6-sol": 1000000,
+    "gpt-5.6-terra": 1000000,
+    "gpt-5.6-luna": 1000000,
     "claude-sonnet-5": 1000000,
     "claude-opus-4-8": 1000000,
     "claude-opus-4-7": 1000000,
@@ -249,6 +252,9 @@ const KIRO_MODELS = getProviderModels(MODEL_PROVIDER.KIRO_API);
 
 // 完整的模型映射表
 const FULL_MODEL_MAPPING = {
+    "gpt-5.6-sol":"gpt-5.6-sol",
+    "gpt-5.6-terra":"gpt-5.6-terra",
+    "gpt-5.6-luna":"gpt-5.6-luna",
     "claude-haiku-4-5":"claude-haiku-4.5",
     "claude-haiku-4-5-20251001":"claude-haiku-4.5",
     "claude-sonnet-5":"claude-sonnet-5",

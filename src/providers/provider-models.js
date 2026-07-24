@@ -66,6 +66,9 @@ export const PROVIDER_MODELS = {
     ],
     'claude-custom': [],
     'claude-kiro-oauth': [
+        'gpt-5.6-sol',
+        'gpt-5.6-terra',
+        'gpt-5.6-luna',
         'claude-haiku-4-5',
         'claude-haiku-4-5-20251001',
         'claude-sonnet-5',
