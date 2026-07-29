@@ -430,6 +430,52 @@ function normalizeAntigravityThinking(modelName, payload, isClaudeModel) {
     return payload;
 }
 
+
+// --- [FIX tool_use.id] 为原生 Gemini 协议客户端(如 pi coding agent)补 antigravity 私有 id 字段 ---
+// 走原生 Gemini 协议端点(/v1beta/models/...:generateContent)的客户端(如 pi)遵循标准 Gemini API,
+// 不知道要在 functionCall/functionResponse part 里携带 antigravity 私有扩展字段 id,
+// 导致 Google 后端把这段 Gemini 格式 contents 转成 Claude 的 Anthropic messages 格式时报
+// `messages.N.content.M.tool_use.id: Field required` (400),客户端表现为收到空响应。
+// 注意:这跟 #652(ClaudeConverter.js / OpenAIConverter.js 的 id 回填)是两条不同路径——
+// #652 修的是"客户端发 Claude/OpenAI 格式请求,代理转成 Gemini 格式再转发"这条路径;
+// 这里修的是"客户端本来就发原生 Gemini 格式请求"这条路径,#652 未覆盖。
+const TOOL_ID_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+function generateSyntheticToolId() {
+    const bytes = crypto.randomBytes(26);
+    let s = '';
+    for (let i = 0; i < 26; i++) s += TOOL_ID_ALPHABET[bytes[i] % 62];
+    return 'toolu_vrtx_' + s;
+}
+
+// 遍历 contents,为缺失 id 的 functionCall 生成 synthetic id,
+// 并按 name 做 FIFO 配对,把同一 id 补到对应的 functionResponse 上。
+// 纯请求体内闭环处理,不依赖跨请求状态。
+function ensureToolCallIds(contents) {
+    if (!Array.isArray(contents)) return;
+    const pendingByName = new Map(); // name -> [id, ...] (FIFO)
+    for (const content of contents) {
+        if (!content || !Array.isArray(content.parts)) continue;
+        for (const part of content.parts) {
+            if (!part) continue;
+            if (part.functionCall) {
+                const fc = part.functionCall;
+                if (!fc.id) fc.id = generateSyntheticToolId();
+                if (fc.name) {
+                    if (!pendingByName.has(fc.name)) pendingByName.set(fc.name, []);
+                    pendingByName.get(fc.name).push(fc.id);
+                }
+            } else if (part.functionResponse) {
+                const fr = part.functionResponse;
+                if (!fr.id && fr.name) {
+                    const q = pendingByName.get(fr.name);
+                    if (q && q.length) fr.id = q.shift();
+                }
+            }
+        }
+    }
+}
+// --- [FIX tool_use.id] end ---
+
 /**
  * 将 Gemini 格式请求转换为 Antigravity 格式
  * @param {string} modelName - 模型名称
@@ -440,6 +486,8 @@ function normalizeAntigravityThinking(modelName, payload, isClaudeModel) {
 function geminiToAntigravity(modelName, payload, projectId) {
     // 深拷贝请求体,避免修改原始对象
     let template = JSON.parse(JSON.stringify(payload));
+    // [FIX tool_use.id] 补全 functionCall/functionResponse 的私有 id(原生 Gemini 协议客户端场景)
+    ensureToolCallIds(template.request && template.request.contents);
 
     const isClaudeModel = isClaude(modelName);
     const isImgModel = isImageModel(modelName);
