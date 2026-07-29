@@ -1,5 +1,6 @@
 node_modules
 logs/
+logs.txt
 .serena/
 .claude/
 CLAUDE.md
