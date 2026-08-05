@@ -1073,6 +1073,14 @@ export async function handleStreamRequest(res, service, model, requestBody, from
             }
         }
 
+        // 上游流正常结束但一个字节都没发给客户端：这是「静默空响应」，不能算成功。
+        // 直接抛出通用空响应错误，交给下面的 isEmptyUpstreamResponse 分支做小额重试；
+        // 同时避免把实际没有产出的凭证标记为健康。
+        // 客户端主动断开属于正常情况，不在此列。
+        if (!anyDataSent && !clientDisconnected.value) {
+            throw createEmptyUpstreamResponseError(customName ? `${toProvider}/${customName}` : toProvider);
+        }
+
         // 流式请求成功完成，统计使用次数，错误次数重置为0
         if (providerPoolManager && pooluuid) {
             const customNameDisplay = customName ? `, ${customName}` : '';
