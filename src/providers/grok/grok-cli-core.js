@@ -1898,21 +1898,42 @@ export class GrokCliApiService {
         };
     }
 
+    buildHeaders(stream = true, sessionId = '') {
+        const headers = {
+            'content-type': 'application/json',
+            'authorization': `${this.tokenType || 'Bearer'} ${this.accessToken}`,
+            'accept': stream ? 'text/event-stream' : 'application/json',
+            'Connection': 'Keep-Alive',
+            'x-xai-token-auth': 'xai-grok-cli',
+            'x-grok-client-version': this.config.GROK_CLI_CLIENT_VERSION || GROK_CLI_CLIENT_VERSION,
+            'user-agent': `grok-cli/${this.config.GROK_CLI_CLIENT_VERSION || GROK_CLI_CLIENT_VERSION}`,
+        };
+
+        if (sessionId) {
+            headers['x-grok-conv-id'] = sessionId;
+        }
+
+        return headers;
+    }
+
     buildJsonHeaders() {
         return {
             'content-type': 'application/json',
             'authorization': `${this.tokenType || 'Bearer'} ${this.accessToken}`,
             'accept': 'application/json',
-            'Connection': 'Keep-Alive'
+            'Connection': 'Keep-Alive',
+            'x-xai-token-auth': 'xai-grok-cli',
+            'x-grok-client-version': this.config.GROK_CLI_CLIENT_VERSION || GROK_CLI_CLIENT_VERSION,
+            'user-agent': `grok-cli/${this.config.GROK_CLI_CLIENT_VERSION || GROK_CLI_CLIENT_VERSION}`,
         };
     }
 
     buildSubscriptionHeaders() {
         const headers = {
             'authorization': `${this.tokenType || 'Bearer'} ${this.accessToken}`,
+            'accept': 'application/json,text/plain,*/*',
             'x-xai-token-auth': 'xai-grok-cli',
             'x-grok-client-version': this.config.GROK_CLI_CLIENT_VERSION || GROK_CLI_CLIENT_VERSION,
-            'accept': 'application/json,text/plain,*/*',
             'user-agent': `grok-cli/${this.config.GROK_CLI_CLIENT_VERSION || GROK_CLI_CLIENT_VERSION}`,
             'Connection': 'Keep-Alive'
         };
@@ -2272,21 +2293,6 @@ export class GrokCliApiService {
             type: 'response.completed',
             response
         };
-    }
-
-    buildHeaders(stream = true, sessionId = '') {
-        const headers = {
-            'content-type': 'application/json',
-            'authorization': `${this.tokenType || 'Bearer'} ${this.accessToken}`,
-            'accept': stream ? 'text/event-stream' : 'application/json',
-            'Connection': 'Keep-Alive'
-        };
-
-        if (sessionId) {
-            headers['x-grok-conv-id'] = sessionId;
-        }
-
-        return headers;
     }
 
     async handleRequestError(error, mode) {

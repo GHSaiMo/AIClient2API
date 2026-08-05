@@ -2270,32 +2270,6 @@ export class ClaudeConverter extends BaseConverter {
                 instructions = claudeRequest.system;
             }
             codexRequest.instructions = instructions;
-
-            // 处理 Codex 中的系统消息（作为 developer 角色添加到 input）
-            const systemParts = Array.isArray(claudeRequest.system) ? claudeRequest.system : [{ type: 'text', text: claudeRequest.system }];
-            const developerMessage = {
-                type: 'message',
-                role: 'developer',
-                content: []
-            };
-
-            systemParts.forEach(part => {
-                if (part.type === 'text') {
-                    developerMessage.content.push({
-                        type: 'input_text',
-                        text: part.text
-                    });
-                } else if (typeof part === 'string') {
-                    developerMessage.content.push({
-                        type: 'input_text',
-                        text: part
-                    });
-                }
-            });
-
-            if (developerMessage.content.length > 0) {
-                codexRequest.input.push(developerMessage);
-            }
         }
 
         // 处理工具并构建短名称映射
