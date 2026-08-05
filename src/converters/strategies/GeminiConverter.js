@@ -385,12 +385,18 @@ export class GeminiConverter extends BaseConverter {
         let content = '';
         let reasoning_content = '';
         const toolCalls = [];
-        
+        // 本 chunk 是否携带了可识别的 part（含仅有 thoughtSignature 的 part）。
+        // Gemini 3 系列会先回传只带 thoughtSignature、不带 text 的 part，若把这种 chunk 整体丢弃，
+        // 当整个流只由这类 part 组成时下游会收到 0 个 chunk（LangChain 报 "No generations found in stream."）。
+        let sawPart = false;
+
         // 从parts中提取文本和tool calls
         const parts = candidate.content?.parts;
         if (parts && Array.isArray(parts)) {
             for (const part of parts) {
-                if (part.text) {
+                // 用 typeof 判断而非 truthiness，避免 text 为空串时被跳过
+                if (typeof part.text === 'string') {
+                    sawPart = true;
                     if (part.thought === true) {
                         reasoning_content += part.text;
                     } else {
@@ -398,19 +404,23 @@ export class GeminiConverter extends BaseConverter {
                     }
                 }
                 if (part.functionCall) {
+                    sawPart = true;
                     toolCalls.push({
                         index: toolCalls.length,
                         id: part.functionCall.id || `call_${uuidv4()}`,
                         type: 'function',
                         function: {
                             name: part.functionCall.name,
-                            arguments: typeof part.functionCall.args === 'string' 
-                                ? part.functionCall.args 
+                            arguments: typeof part.functionCall.args === 'string'
+                                ? part.functionCall.args
                                 : JSON.stringify(part.functionCall.args)
                         }
                     });
                 }
-                // thoughtSignature is ignored (internal Gemini data)
+                // thoughtSignature 本身不透传给客户端（Gemini 内部数据），但要记为“收到过 part”
+                if (part.thoughtSignature || part.thought_signature) {
+                    sawPart = true;
+                }
             }
         }
 
@@ -446,7 +456,9 @@ export class GeminiConverter extends BaseConverter {
         if (toolCalls.length > 0) delta.tool_calls = toolCalls;
 
         // Don't return empty delta chunks
-        if (Object.keys(delta).length === 0 && !finishReason) {
+        // 例外：本 chunk 确实携带了 part（例如仅有 thoughtSignature）时，仍下发一个空 delta，
+        // 保证下游至少能收到一个 generation，不会把有效流误判为空流。
+        if (Object.keys(delta).length === 0 && !finishReason && !sawPart) {
             return null;
         }
 

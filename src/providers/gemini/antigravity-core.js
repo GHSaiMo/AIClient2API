@@ -43,6 +43,18 @@ const DEFAULT_THINKING_MIN = 1024;
 const DEFAULT_THINKING_MAX = 100000;
 const ANTIGRAVITY_EMPTY_TEXT_PLACEHOLDER = '.';
 
+// 流式请求超时相关常量（仅作用于 Antigravity 流式链路）
+// 背景：走 TLS sidecar 时 proxy-utils 会删除 httpAgent/httpsAgent，
+// 构造函数里配置的 agent timeout 随之失效，streamApi 自身又未设置 timeout，
+// 导致上游/代理静默挂住连接时请求永久等待（并发插槽也不会释放）。
+// 首字节与空闲分开计时：thinking 模型首字节可能较慢，但长时间无新数据即视为连接已死。
+const ANTIGRAVITY_STREAM_FIRST_BYTE_TIMEOUT_MS = 180000;
+const ANTIGRAVITY_STREAM_IDLE_TIMEOUT_MS = 90000;
+
+// 上游偶尔以非 SSE 的 JSON 数组返回整个响应，需缓存原始行才能回退解析。
+// 超过该行数认为不是「一次性 JSON 响应」，放弃缓存以免长流吃内存。
+const ANTIGRAVITY_RAW_FALLBACK_MAX_LINES = 20000;
+
 // 获取 Antigravity 模型列表
 const ANTIGRAVITY_MODELS = getProviderModels(MODEL_PROVIDER.ANTIGRAVITY);
 
@@ -1509,6 +1521,10 @@ export class AntigravityApiService {
                 // 阻止 gaxios 在非 2xx 时自行消耗流并抛异常，
                 // 由下方 res.status !== 200 统一处理，保证流仍可读取
                 validateStatus: () => true,
+                // 首字节超时：响应头迟迟不到时主动失败，避免请求永久挂起。
+                // 注意这是「响应头」超时，SSE 建连后由下方 parseSSEStream 的空闲超时接管。
+                timeout: this.config.ANTIGRAVITY_STREAM_FIRST_BYTE_TIMEOUT_MS
+                    ?? ANTIGRAVITY_STREAM_FIRST_BYTE_TIMEOUT_MS,
                 body: JSON.stringify(body)
             };
 
@@ -1614,33 +1630,144 @@ export class AntigravityApiService {
             crlfDelay: Infinity
         });
 
+        // 空闲看门狗：SSE 建连后 gaxios 的 timeout 已不再起作用，若上游/代理静默挂住连接，
+        // `for await (line of rl)` 会永久阻塞。这里在超过空闲阈值后销毁底层流，
+        // 使迭代器结束/抛错，从而让上层能走到错误处理并释放并发插槽。
+        const idleTimeoutMs = this.config.ANTIGRAVITY_STREAM_IDLE_TIMEOUT_MS
+            ?? ANTIGRAVITY_STREAM_IDLE_TIMEOUT_MS;
+        let idleTimer = null;
+        let idleTimedOut = false;
+
+        const clearIdleTimer = () => {
+            if (idleTimer) {
+                clearTimeout(idleTimer);
+                idleTimer = null;
+            }
+        };
+        const armIdleTimer = () => {
+            clearIdleTimer();
+            if (!(idleTimeoutMs > 0)) return;
+            idleTimer = setTimeout(() => {
+                idleTimedOut = true;
+                logger.error(`[Antigravity Stream] No data received for ${idleTimeoutMs}ms, aborting stream.`);
+                // 销毁底层流以解除 readline 的阻塞；readline 会随之结束迭代
+                try { stream.destroy(new Error('Antigravity stream idle timeout')); } catch (_) { /* 忽略 */ }
+            }, idleTimeoutMs);
+        };
+
         const sseFields = /^(data|event|id|retry):/i;
         let buffer = [];
-        for await (let line of rl) {
-            const trimmedLine = line.trim();
-            if (trimmedLine.startsWith('data: ')) {
-                // 过滤 usageMetadata（仅在最终块中保留）
-                const processedLine = filterSSEUsageMetadata(trimmedLine);
-                buffer.push(processedLine.slice(6));
-            } else if (trimmedLine === '' && buffer.length > 0) {
-                try {
-                    yield JSON.parse(buffer.join('\n'));
-                } catch (e) {
-                    logger.error('[Antigravity Stream] Failed to parse JSON chunk:', buffer.join('\n'), 'Error:', e.message);
-                }
-                buffer = [];
-            } else if (trimmedLine && !trimmedLine.startsWith(':') && !sseFields.test(trimmedLine) && buffer.length > 0) {
-                // 处理不带 SSE 字段前缀且不是注释的后续行（可能是由于换行符导致的分割）
-                buffer.push(trimmedLine);
+        // 诊断用：统计实际读到的行，以及未能匹配任何分支而被丢弃的行。
+        // 上游返回 HTTP 200 但内容不是标准 SSE（纯 JSON 错误体、HTML 错误页、空 body 等）时，
+        // 原实现会静默丢弃且不产出任何 chunk，排查时完全看不到上游到底回了什么。
+        let lineCount = 0;
+        let yieldCount = 0;
+        const droppedLines = [];
+        // 上游偶尔不按 SSE 返回，而是直接吐一个 pretty-printed 的 JSON 数组
+        // （`[{"response":{...}},{...}]`，逐行折行、无 `data: ` 前缀）。
+        // 这里保留全量原始文本，SSE 分支一无所获时回退按 JSON 解析。
+        const rawLines = [];
+        let rawTooLarge = false;
+        const collectRaw = (line) => {
+            if (rawTooLarge) return;
+            if (rawLines.length >= ANTIGRAVITY_RAW_FALLBACK_MAX_LINES) {
+                rawTooLarge = true;
+                rawLines.length = 0;
+                return;
             }
+            rawLines.push(line);
+        };
+        try {
+            armIdleTimer();
+            for await (let line of rl) {
+                // 收到任意一行即重新计时
+                armIdleTimer();
+                lineCount++;
+                const trimmedLine = line.trim();
+                // 只在尚未产出任何 chunk 时留存原始文本：正常 SSE 流不会为此占用内存
+                if (yieldCount === 0 && trimmedLine) collectRaw(trimmedLine);
+                if (trimmedLine.startsWith('data: ')) {
+                    // 过滤 usageMetadata（仅在最终块中保留）
+                    const processedLine = filterSSEUsageMetadata(trimmedLine);
+                    buffer.push(processedLine.slice(6));
+                } else if (trimmedLine === '' && buffer.length > 0) {
+                    try {
+                        yield JSON.parse(buffer.join('\n'));
+                        yieldCount++;
+                    } catch (e) {
+                        logger.error('[Antigravity Stream] Failed to parse JSON chunk:', buffer.join('\n'), 'Error:', e.message);
+                    }
+                    buffer = [];
+                } else if (trimmedLine && !trimmedLine.startsWith(':') && !sseFields.test(trimmedLine) && buffer.length > 0) {
+                    // 处理不带 SSE 字段前缀且不是注释的后续行（可能是由于换行符导致的分割）
+                    buffer.push(trimmedLine);
+                } else if (trimmedLine) {
+                    // 非空但无法归类的行：记录下来用于诊断（限长避免日志爆炸）
+                    if (droppedLines.length < 20) droppedLines.push(trimmedLine.slice(0, 500));
+                }
+            }
+        } catch (error) {
+            // 看门狗 destroy(stream) 会让 readline 迭代抛出该 destroy 错误。
+            // 归一化成带 ETIMEDOUT 的超时错误，便于上层按可重试网络错误处理。
+            if (idleTimedOut) {
+                const idleError = new Error(`[Antigravity] Stream idle timeout after ${idleTimeoutMs}ms without data.`);
+                idleError.code = 'ETIMEDOUT';
+                throw idleError;
+            }
+            throw error;
+        } finally {
+            clearIdleTimer();
+            rl.close();
+        }
+
+        // 流已正常结束但看门狗已触发（极少数竞态）：同样按超时处理，不把截断的流当成正常结束
+        if (idleTimedOut) {
+            const idleError = new Error(`[Antigravity] Stream idle timeout after ${idleTimeoutMs}ms without data.`);
+            idleError.code = 'ETIMEDOUT';
+            throw idleError;
         }
 
         if (buffer.length > 0) {
             try {
                 yield JSON.parse(buffer.join('\n'));
+                yieldCount++;
             } catch (e) {
                 logger.error('[Antigravity Stream] Failed to parse final JSON chunk:', buffer.join('\n'), 'Error:', e.message);
             }
+        }
+
+        // 一个 chunk 都没产出：上游可能压根没走 SSE，而是直接返回了一个 JSON 数组/对象。
+        // 先尝试按 JSON 解析并逐个产出，真正解析不出来时才记录原始内容供排查。
+        if (yieldCount === 0 && rawLines.length > 0) {
+            const rawBody = rawLines.join('\n');
+            let parsed = null;
+            try {
+                parsed = JSON.parse(rawBody);
+            } catch (_) {
+                // 不是完整 JSON，走下面的诊断日志
+            }
+            if (parsed !== null && typeof parsed === 'object') {
+                const items = Array.isArray(parsed) ? parsed : [parsed];
+                for (const item of items) {
+                    if (item && typeof item === 'object') {
+                        yield item;
+                        yieldCount++;
+                    }
+                }
+                if (yieldCount > 0) {
+                    logger.warn(
+                        `[Antigravity Stream] Upstream returned non-SSE JSON (HTTP 200); recovered ${yieldCount} chunk(s) from ${lineCount} lines.`
+                    );
+                }
+            }
+        }
+
+        if (yieldCount === 0) {
+            logger.error(
+                `[Antigravity Stream] Upstream produced no usable chunk (HTTP 200). lines=${lineCount}, unrecognized=${droppedLines.length}.`
+                + (rawTooLarge ? ' Raw body too large to buffer.' : '')
+                + (droppedLines.length ? ` Raw: ${JSON.stringify(droppedLines)}` : ' Body was empty.')
+            );
         }
     }
 
@@ -1743,7 +1870,12 @@ export class AntigravityApiService {
 
         const stream = this.streamApi('streamGenerateContent', payload);
         for await (const chunk of stream) {
-            yield toGeminiApiResponse(chunk.response);
+            // 上游可能出现不含 response 字段的帧（错误帧/心跳等），此时 toGeminiApiResponse 返回 null。
+            // 不能把 null 透传给下游：common.js 的 extractResponseText 会直接读 response.candidates 而抛错，
+            // 导致整条流因为一个无关帧而中断。
+            const converted = toGeminiApiResponse(chunk?.response);
+            if (!converted) continue;
+            yield converted;
         }
     }
 
