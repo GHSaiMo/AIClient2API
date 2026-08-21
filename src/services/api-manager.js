@@ -168,7 +168,7 @@ async function handleImageGenerationRequest(req, res, currentConfig, providerPoo
                 return;
             }
 
-            const aspectRatio = body.aspect_ratio || body.aspectRatio;
+            const aspectRatio = body.aspect_ratio || body.aspectRatio || body.extra_body?.aspect_ratio;
 
             // 构造虚拟 OpenAI 对话请求，参考对话接口实现自动转换
             virtualOpenAIRequest = {
