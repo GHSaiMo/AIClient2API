@@ -216,6 +216,10 @@ async function handleImageGenerationRequest(req, res, currentConfig, providerPoo
             });
         }
 
+        if (!codexRequestBody._requestBaseUrl) {
+            codexRequestBody._requestBaseUrl = currentConfig.requestBaseUrl || (req ? `${req.socket?.encrypted ? 'https' : 'http'}://${req.headers?.host || `127.0.0.1:${currentConfig.SERVER_PORT || 3005}`}` : '');
+        }
+
         logger.info(`[Image Generation] model=${model}, protocol=${finalProviderProtocol}, n=${n}, response_format=${response_format}${size ? `, size=${size}` : ''}`);
 
         // 串行发起 n 张图请求，每张独立占用一次上游调用，与号池 slot 计数对应
@@ -224,7 +228,7 @@ async function handleImageGenerationRequest(req, res, currentConfig, providerPoo
         for (let i = 0; i < n; i++) {
             const response = await service.generateContent(model, {...codexRequestBody});
             responses.push(response);
-            const extracted = extractImagesFromServiceResponse(response, finalProviderProtocol, response_format);
+            const extracted = extractImagesFromServiceResponse(response, finalProviderProtocol, response_format, currentConfig);
             data.push(...extracted);
         }
 
@@ -659,15 +663,28 @@ function extractImagesFromServiceResponse(response, providerProtocol, responseFo
         }
     } else if (providerProtocol === MODEL_PROTOCOL_PREFIX.GROK) {
         // Grok returns collected object with generatedImageUrls or cardAttachments
+        const uuid = response._uuid;
+        const requestBaseUrl = response._requestBaseUrl || (CONFIG ? `http://127.0.0.1:${CONFIG.SERVER_PORT || 3005}` : 'http://127.0.0.1:3005');
+        const formatGrokImageUrl = (rawUrl) => {
+            if (!rawUrl || typeof rawUrl !== 'string') return rawUrl;
+            if (rawUrl.startsWith('data:') || !uuid) return rawUrl;
+            if (rawUrl.includes('assets.grok.com') || rawUrl.includes('imagine-public.x.ai') || rawUrl.includes('grok.com')) {
+                const proxyPath = `/api/grok/assets?url=${encodeURIComponent(rawUrl)}&uuid=${encodeURIComponent(uuid)}`;
+                return requestBaseUrl ? `${requestBaseUrl}${proxyPath}` : proxyPath;
+            }
+            return rawUrl;
+        };
+
         const imageUrls = response.generatedImageUrls || [];
         for (const url of imageUrls) {
+            const finalUrl = formatGrokImageUrl(url);
             if (responseFormat === 'url') {
-                data.push({ url });
+                data.push({ url: finalUrl });
             } else if (url.startsWith('data:image/')) {
                 const b64 = url.split(',')[1];
                 data.push({ b64_json: b64 });
             } else {
-                data.push({ url });
+                data.push({ url: finalUrl });
             }
         }
         // Also check cardAttachments for images
@@ -677,13 +694,14 @@ function extractImagesFromServiceResponse(response, providerProtocol, responseFo
                 const jsonData = typeof card.jsonData === 'string' ? JSON.parse(card.jsonData) : card.jsonData;
                 const imgUrl = jsonData?.image?.original;
                 if (imgUrl) {
+                    const finalUrl = formatGrokImageUrl(imgUrl);
                     if (responseFormat === 'url') {
-                        data.push({ url: imgUrl });
+                        data.push({ url: finalUrl });
                     } else if (imgUrl.startsWith('data:image/')) {
                         const b64 = imgUrl.split(',')[1];
                         data.push({ b64_json: b64 });
                     } else {
-                        data.push({ url: imgUrl });
+                        data.push({ url: finalUrl });
                     }
                 }
             } catch (e) {}

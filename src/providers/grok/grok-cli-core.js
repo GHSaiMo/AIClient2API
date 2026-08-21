@@ -21,6 +21,7 @@ const XAI_REDIRECT_URI = 'http://127.0.0.1:56121/callback';
 const GROK_CLI_DEFAULT_MODEL = 'grok-3-mini';
 const GROK_CLI_MODELS = getProviderModels(MODEL_PROVIDER.GROK_CLI || 'grok-cli-oauth');
 const GROK_CLI_IMAGE_MODELS = new Set([
+    'grok-imagine-image-2.0',
     'grok-imagine-image-quality',
     'grok-imagine-image',
     'grok-imagine-image-pro'
@@ -1796,6 +1797,14 @@ export class GrokCliApiService {
         }
         if (resolution) {
             body.resolution = resolution;
+        }
+
+        const quality = requestBody.quality || xaiOptions.quality;
+        if (quality && (model === 'grok-imagine-image-2.0' || model.includes('2.0'))) {
+            const normalizedQuality = String(quality).trim().toLowerCase();
+            if (normalizedQuality === 'low' || normalizedQuality === 'medium') {
+                body.quality = normalizedQuality;
+            }
         }
 
         if (imageRefs.length === 1) {

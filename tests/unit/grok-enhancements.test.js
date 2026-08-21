@@ -6,6 +6,11 @@ import {
     filterInternalXSearchOutput,
     SAFE_FUNCTION_PARAMETERS
 } from '../../src/providers/grok/grok-tool-sanitizer.js';
+import { SUPPORTED_IMAGE_MODELS } from '../../src/utils/constants.js';
+import { getProviderModels } from '../../src/providers/provider-models.js';
+import { GrokApiService } from '../../src/providers/grok/grok-core.js';
+import { GrokCliApiService } from '../../src/providers/grok/grok-cli-core.js';
+import '../../src/converters/register-converters.js';
 
 describe('Phase 2: Grok Reasoning Replay & Tool Governance Suite', () => {
 
@@ -142,4 +147,56 @@ describe('Phase 2: Grok Reasoning Replay & Tool Governance Suite', () => {
             expect(filterInternalXSearchOutput(internalTraceEvent)).toBeNull();
         });
     });
+
+    describe('3. Grok Imagine 2.0 Model Integration Suite', () => {
+        it('should include grok-imagine-image-2.0 in SUPPORTED_IMAGE_MODELS', () => {
+            expect(SUPPORTED_IMAGE_MODELS.has('grok-imagine-image-2.0')).toBe(true);
+            expect(SUPPORTED_IMAGE_MODELS.has('grok-imagine-image-pro')).toBe(true);
+            expect(SUPPORTED_IMAGE_MODELS.has('grok-imagine-image')).toBe(true);
+            expect(SUPPORTED_IMAGE_MODELS.has('grok-imagine-image-lite')).toBe(true);
+            expect(SUPPORTED_IMAGE_MODELS.has('grok-imagine-image-edit')).toBe(true);
+        });
+
+        it('should include grok-imagine-image-2.0 in grok-web provider models', () => {
+            const webModels = getProviderModels('grok-web');
+            expect(webModels).toContain('grok-imagine-image-2.0');
+            expect(webModels).toContain('grok-imagine-image-pro');
+            expect(webModels).toContain('grok-imagine-image');
+            expect(webModels).toContain('grok-imagine-image-lite');
+            expect(webModels).toContain('grok-imagine-image-edit');
+        });
+
+        it('should include grok-imagine-image-2.0 in grok-cli-oauth provider models', () => {
+            const cliModels = getProviderModels('grok-cli-oauth');
+            expect(cliModels).toContain('grok-imagine-image-2.0');
+        });
+
+        it('should correctly map grok-imagine-image-2.0 in GrokApiService with isPro: true', () => {
+            const service = new GrokApiService({ GROK_COOKIE_TOKEN: 'test' });
+            const mapping = service._getModelMapping('grok-imagine-image-2.0');
+            expect(mapping).toBeDefined();
+            expect(mapping.isPro).toBe(true);
+        });
+
+        it('should correctly prepare image request body with quality in GrokCliApiService', () => {
+            const cliService = new GrokCliApiService({
+                access_token: 'test_token',
+                refresh_token: 'test_refresh'
+            });
+            const request = {
+                prompt: 'A cute futuristic robot',
+                quality: 'medium',
+                aspect_ratio: '16:9',
+                resolution: '2k'
+            };
+            const { endpointPath, body } = cliService.prepareImageRequestBody('grok-imagine-image-2.0', request);
+            expect(endpointPath).toBe('/images/generations');
+            expect(body.model).toBe('grok-imagine-image-2.0');
+            expect(body.prompt).toBe('A cute futuristic robot');
+            expect(body.quality).toBe('medium');
+            expect(body.aspect_ratio).toBe('16:9');
+            expect(body.resolution).toBe('2k');
+        });
+    });
 });
+

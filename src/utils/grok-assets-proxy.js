@@ -34,14 +34,18 @@ export async function handleGrokAssetsProxy(req, res, config, providerPoolManage
             }
         }
 
-        if (!ssoToken) {
+        if (!ssoToken && config?.GROK_COOKIE_TOKEN) {
+            ssoToken = config.GROK_COOKIE_TOKEN;
+        }
+
+        if (!ssoToken && !targetUrl.includes('imagine-public.x.ai')) {
             res.writeHead(400, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: 'Missing sso parameter or valid uuid' }));
             return;
         }
 
         // 清理 token
-        if (ssoToken.startsWith('sso=')) {
+        if (ssoToken && ssoToken.startsWith('sso=')) {
             ssoToken = ssoToken.substring(4);
         }
 
