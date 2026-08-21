@@ -10,6 +10,7 @@ import { ConverterFactory } from '../../converters/ConverterFactory.js';
 import * as readline from 'readline';
 import { getProviderPoolManager } from '../../services/service-manager.js';
 import { ImagineWebSocketService } from './ws-imagine.js';
+import { sanitizeGrokTools } from './grok-tool-sanitizer.js';
 
 const CORE_MODEL_MAPPING = {
     'grok-4.1-mini': { name: 'grok-4-1-thinking-1129', mode: 'MODEL_MODE_GROK_4_1_MINI_THINKING', modeId: 'grok-4-1-mini' },
@@ -244,6 +245,10 @@ export class GrokApiService {
 
     _extractMessagesAndFiles(requestBody, isVideoModel = false) {
         if (!requestBody.messages || !Array.isArray(requestBody.messages)) return;
+
+        if (Array.isArray(requestBody.tools)) {
+            requestBody.tools = sanitizeGrokTools(requestBody.tools);
+        }
 
         let processedMessages = requestBody.messages;
         if (this.converter && requestBody.tools?.length > 0) {

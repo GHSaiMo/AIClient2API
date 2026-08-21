@@ -14,8 +14,8 @@ import { fileURLToPath } from 'url';
 import logger from './logger.js';
 import http from 'http';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const currentFilePath = fileURLToPath(import.meta.url);
+const currentDir = path.dirname(currentFilePath);
 
 const DEFAULT_PORT = 9090;
 const HEALTH_CHECK_INTERVAL = 30000; // 30s
@@ -206,7 +206,7 @@ class TLSSidecar {
     // ──── 内部方法 ────
 
     _findBinary() {
-        const projectRoot = path.resolve(__dirname, '..', '..');
+        const projectRoot = path.resolve(currentDir, '..', '..');
         const isWin = process.platform === 'win32';
         const ext = isWin ? '.exe' : '';
 

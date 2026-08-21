@@ -13,6 +13,26 @@ import {
 } from './provider-models.js';
 import { broadcastEvent } from '../ui-modules/event-broadcast.js';
 import { ENDPOINT_TYPE } from '../utils/common.js';
+import { globalSingleflight } from '../utils/singleflight.js';
+
+/**
+ * 提取 Kiro 账号的纯净剩余 Prompt 额度（严格排除临时/波动 Bonus 额度）
+ * 借鉴 kiro-gateway account_pool.py 机制
+ * @param {Object} config 
+ * @returns {number|null}
+ */
+export function extractKiroPromptRemaining(config) {
+    if (!config) return null;
+    const creditsTotal = config.credits_total ?? config.creditsTotal ?? config.usage?.credits_total ?? config.usage?.creditsTotal;
+    const creditsUsed = config.credits_used ?? config.creditsUsed ?? config.usage?.credits_used ?? config.usage?.creditsUsed;
+    
+    if (creditsTotal !== undefined && creditsTotal !== null && creditsUsed !== undefined && creditsUsed !== null) {
+        const total = Number(creditsTotal) || 0;
+        const used = Number(creditsUsed) || 0;
+        return Math.max(0, total - used);
+    }
+    return null;
+}
 
 function getCustomModelAliasesForProvider(config, providerType) {
     const customModels = Array.isArray(config?.customModels) ? config.customModels : [];
@@ -475,89 +495,89 @@ export class ProviderPoolManager {
             this.markProviderUnhealthyImmediately(providerType, config, 'Maximum refresh count (5) reached');
             return;
         }
-        
-        // 添加5秒内的随机等待时间，避免并发刷新时的冲突
-        // const randomDelay = Math.floor(Math.random() * 5000);
-        // this._log('info', `Starting token refresh for node ${this._getDisplayName(config)} (${providerType}) with ${randomDelay}ms delay`);
-        // await new Promise(resolve => setTimeout(resolve, randomDelay));
 
-        try {
-            // 增加刷新计数
-            config.refreshCount = currentRefreshCount + 1;
+        const sfKey = `refresh:${providerType}:${providerStatus.uuid || config.uuid || 'default'}`;
+        return await globalSingleflight.do(sfKey, async () => {
+            try {
+                // 增加刷新计数
+                config.refreshCount = currentRefreshCount + 1;
 
-            // 使用适配器进行刷新
-            const tempConfig = {
-                ...this.globalConfig,
-                ...config,
-                MODEL_PROVIDER: providerType
-            };
-            delete tempConfig.providerPools;
-            const serviceAdapter = getServiceAdapter(tempConfig);
-            
-            // 调用适配器的 refreshToken 方法（内部封装了具体的刷新逻辑）
-            if (typeof serviceAdapter.refreshToken === 'function') {
-                const startTime = Date.now();
-                let refreshOperation;
-                if (force) {
-                    if (typeof serviceAdapter.forceRefreshToken === 'function') {
-                        refreshOperation = serviceAdapter.forceRefreshToken();
+                // 使用适配器进行刷新
+                const tempConfig = {
+                    ...this.globalConfig,
+                    ...config,
+                    MODEL_PROVIDER: providerType
+                };
+                delete tempConfig.providerPools;
+                const serviceAdapter = getServiceAdapter(tempConfig);
+                
+                // 调用适配器的 refreshToken 方法（内部封装了具体的刷新逻辑）
+                if (typeof serviceAdapter.refreshToken === 'function') {
+                    const startTime = Date.now();
+                    let refreshOperation;
+                    if (force) {
+                        if (typeof serviceAdapter.forceRefreshToken === 'function') {
+                            refreshOperation = serviceAdapter.forceRefreshToken();
+                        } else {
+                            this._log('warn', `forceRefreshToken not implemented for ${providerType}, falling back to refreshToken`);
+                            refreshOperation = serviceAdapter.refreshToken();
+                        }
                     } else {
-                        this._log('warn', `forceRefreshToken not implemented for ${providerType}, falling back to refreshToken`);
                         refreshOperation = serviceAdapter.refreshToken();
                     }
+
+                    const refreshResult = await this._awaitRefreshWithTimeout(refreshOperation, providerType, this._getDisplayName(config));
+
+                    const duration = Date.now() - startTime;
+                    
+                    // 只有在真正执行了刷新操作时，才更新 lastRefreshTime
+                    // 这可以防止 heartbeat 的 no-op 刷新误更新时间，导致后续真正的刷新被 markProviderNeedRefresh 拦截（30秒保护）
+                    if (refreshResult === true) {
+                        this._log('info', `Token refresh successful for node ${this._getDisplayName(config)} (Duration: ${duration}ms)`);
+                        config.lastRefreshTime = Date.now(); // 记录最后实际刷新成功时间
+                    } else {
+                        this._log('info', `Token refresh no-op for node ${this._getDisplayName(config)} (Already valid)`);
+                    }
+                    
+                    // 刷新流程结束（无论是否真正刷新），重置状态
+                    config.needsRefresh = false;
+                    config.refreshCount = 0;
+                    config.errorCount = 0; // 成功/无操作也重置错误计数
+                    
+                    this._debouncedSave(providerType);
+                    return refreshResult;
                 } else {
-                    refreshOperation = serviceAdapter.refreshToken();
+                    throw new Error(`refreshToken method not implemented for ${providerType}`);
                 }
-                const refreshResult = await this._awaitRefreshWithTimeout(refreshOperation, providerType, this._getDisplayName(config));
 
-                const duration = Date.now() - startTime;
+            } catch (error) {
+                this._log('error', `Token refresh failed for node ${this._getDisplayName(config)}: ${error.message}`);
                 
-                // 只有在真正执行了刷新操作时，才更新 lastRefreshTime
-                // 这可以防止 heartbeat 的 no-op 刷新误更新时间，导致后续真正的刷新被 markProviderNeedRefresh 拦截（30秒保护）
-                if (refreshResult === true) {
-                    this._log('info', `Token refresh successful for node ${this._getDisplayName(config)} (Duration: ${duration}ms)`);
-                    config.lastRefreshTime = Date.now(); // 记录最后实际刷新成功时间
+                // 记录错误信息
+                config.lastErrorTime = new Date().toISOString();
+                config.lastErrorMessage = `Refresh failed: ${error.message}`;
+                
+                // 增加错误计数（用于普通的健康检查参考，虽然刷新错误主要参考 refreshCount）
+                config.errorCount = (config.errorCount || 0) + 1;
+
+                // 只有当刷新重试次数达到上限（5次）时，才标记为不健康
+                // 注意：refreshCount 在进入本方法后的 try 块前已经自增（L466）
+                if (config.refreshCount >= 5) {
+                    this.markProviderUnhealthyImmediately(providerType, config, `Refresh failed after maximum attempts (5): ${error.message}`);
                 } else {
-                    this._log('info', `Token refresh no-op for node ${this._getDisplayName(config)} (Already valid)`);
+                    // 关键修复：重置 needsRefresh 为 false，允许该节点回到池中
+                    // 这样它才有机会被下一次请求选中，从而再次触发刷新重试
+                    config.needsRefresh = false;
+
+                    // 增加冷却保护：更新 lastRefreshTime，利用 markProviderNeedRefresh 中的 30s 保护逻辑，
+                    // 防止因瞬时高并发请求导致 5 次重试机会在短时间内被耗尽。
+                    config.lastRefreshTime = Date.now(); 
+                    
+                    this._debouncedSave(providerType);
                 }
-                
-                // 刷新流程结束（无论是否真正刷新），重置状态
-                config.needsRefresh = false;
-                config.refreshCount = 0;
-                config.errorCount = 0; // 成功/无操作也重置错误计数
-                
-                this._debouncedSave(providerType);
-            } else {
-                throw new Error(`refreshToken method not implemented for ${providerType}`);
+                throw error;
             }
-
-        } catch (error) {
-            this._log('error', `Token refresh failed for node ${this._getDisplayName(config)}: ${error.message}`);
-            
-            // 记录错误信息
-            config.lastErrorTime = new Date().toISOString();
-            config.lastErrorMessage = `Refresh failed: ${error.message}`;
-            
-            // 增加错误计数（用于普通的健康检查参考，虽然刷新错误主要参考 refreshCount）
-            config.errorCount = (config.errorCount || 0) + 1;
-
-            // 只有当刷新重试次数达到上限（5次）时，才标记为不健康
-            // 注意：refreshCount 在进入本方法后的 try 块前已经自增（L466）
-            if (config.refreshCount >= 5) {
-                this.markProviderUnhealthyImmediately(providerType, config, `Refresh failed after maximum attempts (5): ${error.message}`);
-            } else {
-                // 关键修复：重置 needsRefresh 为 false，允许该节点回到池中
-                // 这样它才有机会被下一次请求选中，从而再次触发刷新重试
-                config.needsRefresh = false;
-
-                // 增加冷却保护：更新 lastRefreshTime，利用 markProviderNeedRefresh 中的 30s 保护逻辑，
-                // 防止因瞬时高并发请求导致 5 次重试机会在短时间内被耗尽。
-                config.lastRefreshTime = Date.now(); 
-                
-                this._debouncedSave(providerType);
-            }
-            throw error;
-        }
+        });
     }
 
     /**
@@ -641,7 +661,19 @@ export class ProviderPoolManager {
         // 新鲜节点的微调：配合 usageScore 和 sequenceScore 在多个新鲜节点间轮询
         const freshBonus = isFresh ? (now - lastHealthCheckTime) : 0;
 
-        return baseScore + usageScore + sequenceScore + loadScore + freshBonus;
+        // 4. Kiro 纯净额度智能打分优选：剩余额度越多，分数越低（优先级越高）
+        const kiroRemaining = extractKiroPromptRemaining(config);
+        let quotaScore = 0;
+        if (kiroRemaining !== null) {
+            if (kiroRemaining <= 0) {
+                quotaScore = 1e16; // 额度已耗尽，排在最后
+            } else {
+                // 每剩余 1 额度给予负偏置，使额度充足的节点优先被调度
+                quotaScore = -Math.min(kiroRemaining * 1e8, 1e13);
+            }
+        }
+
+        return baseScore + usageScore + sequenceScore + loadScore + freshBonus + quotaScore;
     }
 
     /**

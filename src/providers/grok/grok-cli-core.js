@@ -9,6 +9,8 @@ import { getProviderPoolManager } from '../../services/service-manager.js';
 import { configureTLSSidecar } from '../../utils/proxy-utils.js';
 import { MODEL_PROVIDER, formatExpiryLog, getRetryAfterMs, normalizeProviderErrorMessage } from '../../utils/common.js';
 import { getProviderModels } from '../provider-models.js';
+import { grokReasoningCache } from './grok-reasoning-cache.js';
+import { sanitizeGrokTools, filterInternalXSearchOutput } from './grok-tool-sanitizer.js';
 
 const XAI_DEFAULT_BASE_URL = 'https://api.x.ai/v1';
 const XAI_DEFAULT_TOKEN_ENDPOINT = 'https://auth.x.ai/oauth/token';
@@ -1683,7 +1685,7 @@ export class GrokCliApiService {
 
         const grokTools = buildGrokCliTools(this.config, cleanedBody, model);
         if (grokTools.length > 0) {
-            cleanedBody.tools = grokTools;
+            cleanedBody.tools = sanitizeGrokTools(grokTools);
         } else {
             delete cleanedBody.tools;
         }
@@ -1724,6 +1726,14 @@ export class GrokCliApiService {
             '';
         if (sessionId) {
             cleanedBody.prompt_cache_key = String(sessionId);
+        }
+
+        // 应用思考重放缓存（Reasoning Replay Cache）
+        if (cleanedBody.input && Array.isArray(cleanedBody.input)) {
+            const callerId = this.uuid || 'grok-cli';
+            const effectiveSession = sessionId || grokReasoningCache.generateSessionKeyFromMessages(cleanedBody.input);
+            const scopedKey = grokReasoningCache.buildScopedKey(callerId, effectiveSession, model);
+            cleanedBody.input = grokReasoningCache.applyReplayToInput(cleanedBody.input, scopedKey);
         }
 
         if (this.config?._monitorRequestId) {
