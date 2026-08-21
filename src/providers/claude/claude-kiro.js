@@ -19,6 +19,9 @@ import {
 import { configureAxiosProxy, configureTLSSidecar, isTLSSidecarEnabledForProvider } from '../../utils/proxy-utils.js';
 import { isRetryableNetworkError, MODEL_PROVIDER, formatExpiryLog, getNormalizedErrorResponseText, buildHttpErrorReason, normalizeProviderErrorMessage, createEmptyUpstreamResponseError } from '../../utils/common.js';
 import { getProviderPoolManager } from '../../services/service-manager.js';
+import { sanitizeJsonSchema } from '../../utils/schema-sanitizer.js';
+import { processToolsWithLongDescriptions } from '../../utils/tool-doc-offloader.js';
+import { injectTruncationRecovery, saveToolTruncation, saveContentTruncation } from './kiro-truncation-recovery.js';
 
 const KIRO_THINKING = {
     MIN_BUDGET_TOKENS: 1024,
@@ -143,6 +146,43 @@ function restoreKiroToolCallNames(toolCalls, toolNameMaps) {
             name: toolNameMaps.fromKiroName(toolCall.function?.name)
         }
     }));
+}
+
+/**
+ * 确保所有包含 tool_result 的 user 消息前都有对应的 assistant (tool_use) 轮次
+ * 避免 AWS CodeWhisperer/Kiro 报 400 轮次不合法错误
+ */
+export function ensureAssistantBeforeToolResults(messages) {
+    if (!Array.isArray(messages) || messages.length === 0) return messages;
+    const result = [];
+    for (let i = 0; i < messages.length; i++) {
+        const msg = messages[i];
+        if (msg && msg.role === 'user' && Array.isArray(msg.content)) {
+            const toolResults = msg.content.filter(p => p && p.type === 'tool_result');
+            if (toolResults.length > 0) {
+                const prev = result[result.length - 1];
+                const prevHasToolUse = prev && prev.role === 'assistant' && (
+                    (Array.isArray(prev.content) && prev.content.some(p => p && p.type === 'tool_use')) ||
+                    (Array.isArray(prev.tool_calls) && prev.tool_calls.length > 0)
+                );
+                if (!prevHasToolUse) {
+                    logger.info(`[Kiro] Synthesizing missing assistant tool_use before ${toolResults.length} tool_result(s)`);
+                    const syntheticToolUses = toolResults.map(tr => ({
+                        type: 'tool_use',
+                        id: tr.tool_use_id || uuidv4(),
+                        name: 'synthetic_tool',
+                        input: {}
+                    }));
+                    result.push({
+                        role: 'assistant',
+                        content: syntheticToolUses
+                    });
+                }
+            }
+        }
+        result.push(msg);
+    }
+    return result;
 }
 
 function getKiroRequestMinIntervalMs(config) {
@@ -1197,7 +1237,8 @@ async saveCredentialsToFile(filePath, newData) {
             systemPrompt = `${builtInPrefix}`;
         }
         
-        const processedMessages = messages.map(message => ({
+        const messagesWithRecovery = injectTruncationRecovery(messages);
+        let processedMessages = messagesWithRecovery.map(message => ({
             ...message,
             content: Array.isArray(message.content) ? [...message.content] : message.content
         }));
@@ -1205,6 +1246,9 @@ async saveCredentialsToFile(filePath, newData) {
         if (processedMessages.length === 0) {
             throw new Error('No user messages found');
         }
+
+        // 确保 tool_result 轮次前有对应的 assistant(tool_use) 轮次
+        processedMessages = ensureAssistantBeforeToolResults(processedMessages);
 
         const thinkingPrefix = this._generateThinkingPrefix(thinking);
         if (thinkingPrefix) {
@@ -1294,10 +1338,15 @@ async saveCredentialsToFile(filePath, newData) {
                 logger.info('[Kiro] All tools were filtered out, adding placeholder tool');
                 toolsContext = { tools: [buildKiroPlaceholderTool()] };
             } else {
-                const MAX_DESCRIPTION_LENGTH = 9216;
+                // 借助 tool-doc-offloader 将超长文档自动转写至 System Prompt
+                const { processedTools: docOffloadedTools, toolDocumentation } = processToolsWithLongDescriptions(filteredTools);
+                if (toolDocumentation) {
+                    systemPrompt = systemPrompt ? `${systemPrompt}\n${toolDocumentation}` : toolDocumentation.trim();
+                }
 
+                const MAX_DESCRIPTION_LENGTH = 9216;
                 let truncatedCount = 0;
-                const kiroTools = filteredTools
+                const kiroTools = docOffloadedTools
                     .filter(tool => {
                         // 过滤掉描述为空的工具
                         if (!tool.description || tool.description.trim() === '') {
@@ -1316,12 +1365,15 @@ async saveCredentialsToFile(filePath, newData) {
                             logger.info(`[Kiro] Truncated tool '${tool.name}' description: ${originalLength} -> ${desc.length} chars`);
                         }
                         
+                        // 严格清洗 inputSchema 规避 additionalProperties 和空 required 导致的 400
+                        const sanitizedSchema = sanitizeJsonSchema(tool.input_schema || {});
+                        
                         return {
                             toolSpecification: {
                                 name: toolNameMaps.toKiroName(tool.name),
                                 description: desc,
                                 inputSchema: {
-                                    json: tool.input_schema || {}
+                                    json: sanitizedSchema
                                 }
                             }
                         };
