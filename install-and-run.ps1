@@ -64,7 +64,7 @@ Write-Host ""
 Write-Host "========================================" -ForegroundColor Green
 Write-Host "  Starting AIClient2API Server..." -ForegroundColor Green
 Write-Host "========================================" -ForegroundColor Green
-Write-Host "Server will start at http://localhost:3000"
+Write-Host "Server will start at http://localhost:3005"
 Write-Host "Press Ctrl+C to stop the server"
 Write-Host ""
 

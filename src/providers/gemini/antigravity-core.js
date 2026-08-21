@@ -62,15 +62,24 @@ const ANTIGRAVITY_MODELS = getProviderModels(MODEL_PROVIDER.ANTIGRAVITY);
 const ANTIGRAVITY_CLIENT_TO_UPSTREAM_MODEL = {
     'gemini-3.1-pro-high': 'gemini-pro-agent',
     'gemini-3.1-pro-preview': 'gemini-pro-agent',
+    'gemini-3.5-flash': 'gemini-3.5-flash-low',
     'gemini-3.5-flash-high': 'gemini-3.5-flash-low',
-    'gemini-3.6-flash': 'gemini-3.6-flash-low',
-    'gemini-3.7-flash': 'gemini-3.7-flash-low',
+    'gemini-3.6-flash': 'gemini-3.6-flash-tiered',
+    'gemini-3.6-flash-high': 'gemini-3.6-flash-tiered',
+    'gemini-3.6-flash-low': 'gemini-3.6-flash-tiered',
+    'gemini-3.7-flash': 'gemini-3.7-flash-tiered',
+    'gemini-3.7-flash-high': 'gemini-3.7-flash-tiered',
+    'gemini-3.7-flash-low': 'gemini-3.7-flash-tiered',
+    'gemini-3.7-flash-thinking': 'gemini-3.7-flash-tiered',
 };
 
 const ANTIGRAVITY_UPSTREAM_TO_CLIENT_MODELS = {
     'gemini-pro-agent': ['gemini-3.1-pro-high', 'gemini-3.1-pro-preview'],
-    'gemini-3.6-flash-low': ['gemini-3.6-flash', 'gemini-3.6-flash-low'],
-    'gemini-3.7-flash-low': ['gemini-3.7-flash', 'gemini-3.7-flash-low'],
+    'gemini-3.5-flash-low': ['gemini-3.5-flash', 'gemini-3.5-flash-low', 'gemini-3.5-flash-high'],
+    'gemini-3.6-flash-low': ['gemini-3.6-flash', 'gemini-3.6-flash-low', 'gemini-3.6-flash-high'],
+    'gemini-3.6-flash-tiered': ['gemini-3.6-flash', 'gemini-3.6-flash-low', 'gemini-3.6-flash-high'],
+    'gemini-3.7-flash-low': ['gemini-3.7-flash', 'gemini-3.7-flash-low', 'gemini-3.7-flash-high', 'gemini-3.7-flash-thinking'],
+    'gemini-3.7-flash-tiered': ['gemini-3.7-flash', 'gemini-3.7-flash-low', 'gemini-3.7-flash-high', 'gemini-3.7-flash-thinking'],
 };
 
 const ANTIGRAVITY_CLIENT_MODEL_THINKING_LEVEL = {
@@ -82,6 +91,7 @@ const ANTIGRAVITY_CLIENT_MODEL_THINKING_LEVEL = {
     'gemini-3.5-flash-high': 'high',
     'gemini-3.6-flash-high': 'high',
     'gemini-3.7-flash-high': 'high',
+    'gemini-3.7-flash-thinking': 'high',
     'gemini-3.1-pro-low': 'low',
     'gemini-3-pro-low': 'low',
     'gemini-3.5-flash-low': 'low',
@@ -132,11 +142,27 @@ const ANTIGRAVITY_MODEL_METADATA = {
     'gpt-oss-120b-medium': {
         maxOutputTokens: 32768
     },
+    'gemini-2.5-pro': {
+        maxOutputTokens: 65535,
+        thinking: { min: 128, max: 32768, dynamicAllowed: true }
+    },
     'gemini-3.1-flash-lite': {
         maxOutputTokens: 65535,
         thinking: { min: 1, max: 65535, zeroAllowed: true, dynamicAllowed: true, levels: ['minimal', 'low', 'medium', 'high'] }
     },
+    'gemini-3.5-flash': {
+        maxOutputTokens: 65535,
+        thinking: { min: 1, max: 65535, dynamicAllowed: true, levels: ['low', 'medium', 'high'] }
+    },
     'gemini-3.5-flash-low': {
+        maxOutputTokens: 65535,
+        thinking: { min: 1, max: 65535, dynamicAllowed: true, levels: ['low', 'medium', 'high'] }
+    },
+    'gemini-3.5-flash-high': {
+        maxOutputTokens: 65535,
+        thinking: { min: 1, max: 65535, dynamicAllowed: true, levels: ['low', 'medium', 'high'] }
+    },
+    'gemini-3.6-flash': {
         maxOutputTokens: 65535,
         thinking: { min: 1, max: 65535, dynamicAllowed: true, levels: ['low', 'medium', 'high'] }
     },
@@ -148,11 +174,27 @@ const ANTIGRAVITY_MODEL_METADATA = {
         maxOutputTokens: 65535,
         thinking: { min: 1, max: 65535, dynamicAllowed: true, levels: ['low', 'medium', 'high'] }
     },
+    'gemini-3.6-flash-tiered': {
+        maxOutputTokens: 65535,
+        thinking: { min: 1, max: 65535, dynamicAllowed: true, levels: ['low', 'medium', 'high'] }
+    },
+    'gemini-3.7-flash': {
+        maxOutputTokens: 65535,
+        thinking: { min: 1, max: 65535, dynamicAllowed: true, levels: ['low', 'medium', 'high'] }
+    },
     'gemini-3.7-flash-low': {
         maxOutputTokens: 65535,
         thinking: { min: 1, max: 65535, dynamicAllowed: true, levels: ['low', 'medium', 'high'] }
     },
     'gemini-3.7-flash-high': {
+        maxOutputTokens: 65535,
+        thinking: { min: 1, max: 65535, dynamicAllowed: true, levels: ['low', 'medium', 'high'] }
+    },
+    'gemini-3.7-flash-thinking': {
+        maxOutputTokens: 65535,
+        thinking: { min: 1, max: 65535, dynamicAllowed: true, levels: ['low', 'medium', 'high'] }
+    },
+    'gemini-3.7-flash-tiered': {
         maxOutputTokens: 65535,
         thinking: { min: 1, max: 65535, dynamicAllowed: true, levels: ['low', 'medium', 'high'] }
     }
@@ -1025,11 +1067,11 @@ export class AntigravityApiService {
             clientSecret: OAUTH_CLIENT_SECRET,
         };
 
-        if (isTLSSidecarEnabled) {
-            logger.info('[Antigravity] TLS Sidecar enabled, skipping proxy/agent configuration for OAuth2Client');
-        } else if (proxyConfig) {
+        if (proxyConfig) {
             oauth2Options.transporterOptions = proxyConfig;
             logger.info('[Antigravity] Using proxy for OAuth2Client');
+        } else if (isTLSSidecarEnabled) {
+            logger.info('[Antigravity] TLS Sidecar enabled, skipping agent configuration for OAuth2Client');
         } else {
             // 根据 base URL 判断使用 http 还是 https agent
             const firstBaseURL = this.baseURLs && this.baseURLs.length > 0 ? this.baseURLs[0] : '';
@@ -1346,8 +1388,9 @@ export class AntigravityApiService {
                     body: JSON.stringify(this.projectId ? { project: this.projectId } : {})
                 };
 
+                this._applySidecar(requestOptions);
                 const res = await this.authClient.request(requestOptions);
-                // logger.info(`[Antigravity] Raw response from ${baseURL}:`, Object.keys(res.data.models));
+                logger.info(`[Antigravity] Raw upstream models from ${baseURL}:`, Object.keys(res.data.models));
                 if (res.data && res.data.models) {
                     const models = Object.keys(res.data.models);
                     const seenModels = new Set();

@@ -277,11 +277,11 @@ export class GeminiApiService {
             clientSecret: OAUTH_CLIENT_SECRET,
         };
         
-        if (isTLSSidecarEnabled) {
-            logger.info('[Gemini] TLS Sidecar enabled, skipping proxy/agent configuration for OAuth2Client');
-        } else if (proxyConfig) {
+        if (proxyConfig) {
             oauth2Options.transporterOptions = proxyConfig;
             logger.info('[Gemini] Using proxy for OAuth2Client');
+        } else if (isTLSSidecarEnabled) {
+            logger.info('[Gemini] TLS Sidecar enabled, skipping agent configuration for OAuth2Client');
         } else {
             // 根据 base URL 判断使用 http 还是 https agent
             const useHttp = this.codeAssistEndpoint && this.codeAssistEndpoint.startsWith('http://');
