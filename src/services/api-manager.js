@@ -5,6 +5,8 @@ import {
     ENDPOINT_TYPE,
     getRequestBody,
     getRateLimitCooldownRecoveryTime,
+    getQuotaCooldownRecoveryTime,
+    calculateRetryDelay,
     getProtocolPrefix,
     MODEL_PROTOCOL_PREFIX
 } from '../utils/common.js';
@@ -34,7 +36,7 @@ export async function handleAPIRequests(method, path, req, res, currentConfig, a
 
     // Route model list requests
     if (method === 'GET') {
-        if (path === '/v1/models') {
+        if (path === '/v1/models' || path === '/api/v1/models') {
             await handleModelListRequest(req, res, apiService, ENDPOINT_TYPE.OPENAI_MODEL_LIST, currentConfig, providerPoolManager, currentConfig.uuid);
             return true;
         }
@@ -287,9 +289,14 @@ async function handleImageGenerationRequest(req, res, currentConfig, providerPoo
 
         if (providerPoolManager && slotUuid) {
             const rateLimitRecoveryTime = getRateLimitCooldownRecoveryTime(error, CONFIG);
+            const quotaRecoveryTime = getQuotaCooldownRecoveryTime(error, CONFIG);
             if (rateLimitRecoveryTime) {
                 logger.info(`[Provider Pool] Applying 429 cooldown for ${slotProviderType} (${slotUuid})`);
                 providerPoolManager.markProviderUnhealthyWithRecoveryTime(slotProviderType, {uuid: slotUuid}, '429 Too Many Requests - short cooldown', rateLimitRecoveryTime);
+                credentialMarkedUnhealthy = true;
+            } else if (quotaRecoveryTime) {
+                logger.info(`[Provider Pool] Applying 402 quota cooldown for ${slotProviderType} (${slotUuid})`);
+                providerPoolManager.markProviderUnhealthyWithRecoveryTime(slotProviderType, {uuid: slotUuid}, error.message || '402 Payment Required - quota cooldown', quotaRecoveryTime);
                 credentialMarkedUnhealthy = true;
             } else if (!credentialMarkedUnhealthy && !error.skipErrorCount) {
                 if (error.response?.status !== 400) {
@@ -305,9 +312,9 @@ async function handleImageGenerationRequest(req, res, currentConfig, providerPoo
         }
 
         if (credentialMarkedUnhealthy && currentRetry < maxRetries && providerPoolManager && CONFIG) {
-            const randomDelay = Math.floor(Math.random() * 10000);
-            logger.info(`[Image Generation Retry] Credential marked unhealthy. Waiting ${randomDelay}ms before retry ${currentRetry + 1}/${maxRetries}...`);
-            await new Promise(resolve => setTimeout(resolve, randomDelay));
+            const retryDelay = calculateRetryDelay(currentRetry, 1000, 8000);
+            logger.info(`[Image Generation Retry] Credential marked unhealthy. Waiting ${retryDelay}ms before retry ${currentRetry + 1}/${maxRetries}...`);
+            await new Promise(resolve => setTimeout(resolve, retryDelay));
 
             try {
                 return await handleImageGenerationRequest(req, res, CONFIG, providerPoolManager, {
