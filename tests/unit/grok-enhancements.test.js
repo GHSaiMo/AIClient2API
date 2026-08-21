@@ -197,6 +197,73 @@ describe('Phase 2: Grok Reasoning Replay & Tool Governance Suite', () => {
             expect(body.aspect_ratio).toBe('16:9');
             expect(body.resolution).toBe('2k');
         });
+
+        it('should break early in _generateAndCollectWS when requested n images are collected', async () => {
+            const service = new GrokApiService({ GROK_COOKIE_TOKEN: 'test_token' });
+            let streamCalls = 0;
+
+            // Mock stream generator that would keep yielding forever if not broken
+            async function* mockStream() {
+                streamCalls++;
+                yield { type: 'image', id: 'img-1', url: 'https://assets.grok.com/img1.jpg', blob: 'base64data1', percentage_complete: 100, stage: 'final' };
+                streamCalls++;
+                yield { type: 'image', id: 'img-2', url: 'https://assets.grok.com/img2.jpg', blob: 'base64data2', percentage_complete: 100, stage: 'final' };
+                streamCalls++;
+                yield { type: 'image', id: 'img-3', url: 'https://assets.grok.com/img3.jpg', blob: 'base64data3', percentage_complete: 100, stage: 'final' };
+            }
+
+            const mockWsService = {
+                stream: jest.fn().mockImplementation(() => mockStream())
+            };
+
+            const originalCreatePost = service.createPost;
+            service.createPost = jest.fn().mockResolvedValue(null);
+
+            // Temporarily replace ImagineWebSocketService
+            const { ImagineWebSocketService } = await import('../../src/providers/grok/ws-imagine.js');
+            const streamSpy = jest.spyOn(ImagineWebSocketService.prototype, 'stream').mockImplementation(() => mockStream());
+
+            const result = await service._generateAndCollectWS('grok-imagine-image-2.0', { n: 1, message: 'test prompt' });
+            expect(result.cardAttachments.length).toBe(1);
+            const cardData = JSON.parse(result.cardAttachments[0].jsonData);
+            expect(cardData.image.original).toBe('https://assets.grok.com/img1.jpg');
+            expect(cardData.image.blob).toBe('base64data1');
+            // Stream should have stopped after the first image
+            expect(streamCalls).toBe(1);
+
+            streamSpy.mockRestore();
+            service.createPost = originalCreatePost;
+        });
+
+        it('should break early in _generateContentStreamWS when requested n images are yielded', async () => {
+            const service = new GrokApiService({ GROK_COOKIE_TOKEN: 'test_token' });
+            let streamCalls = 0;
+
+            async function* mockStream() {
+                streamCalls++;
+                yield { type: 'image', id: 'img-1', url: 'https://assets.grok.com/img1.jpg', blob: 'base64data1', percentage_complete: 100, stage: 'final' };
+                streamCalls++;
+                yield { type: 'image', id: 'img-2', url: 'https://assets.grok.com/img2.jpg', blob: 'base64data2', percentage_complete: 100, stage: 'final' };
+            }
+
+            const { ImagineWebSocketService } = await import('../../src/providers/grok/ws-imagine.js');
+            const streamSpy = jest.spyOn(ImagineWebSocketService.prototype, 'stream').mockImplementation(() => mockStream());
+
+            const generator = service._generateContentStreamWS('grok-imagine-image-2.0', { n: 1, message: 'test prompt' });
+            const yieldedItems = [];
+            for await (const item of generator) {
+                yieldedItems.push(item);
+            }
+
+            // Should have yielded progress, cardAttachment and done response
+            const cardItem = yieldedItems.find(i => i.result?.response?.cardAttachment);
+            expect(cardItem).toBeDefined();
+            const cardData = JSON.parse(cardItem.result.response.cardAttachment.jsonData);
+            expect(cardData.image.blob).toBe('base64data1');
+            expect(streamCalls).toBe(1);
+
+            streamSpy.mockRestore();
+        });
     });
 });
 

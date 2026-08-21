@@ -72,10 +72,13 @@ export async function handleGrokAssetsProxy(req, res, config, providerPoolManage
 
         const headers = {
             'User-Agent': config.GROK_USER_AGENT || 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36',
-            'Cookie': `sso=${ssoToken}; sso-rw=${ssoToken}`,
             'Referer': 'https://grok.com/',
-            'Accept': '*/*'
+            'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8'
         };
+
+        if (ssoToken) {
+            headers['Cookie'] = `sso=${ssoToken}; sso-rw=${ssoToken}`;
+        }
 
         const axiosConfig = {
             method: 'get',

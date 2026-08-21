@@ -704,14 +704,28 @@ function extractImagesFromServiceResponse(response, providerProtocol, responseFo
             try {
                 const jsonData = typeof card.jsonData === 'string' ? JSON.parse(card.jsonData) : card.jsonData;
                 const imgUrl = jsonData?.image?.original;
-                if (imgUrl) {
+                const rawBlob = jsonData?.image?.blob;
+                if (imgUrl || rawBlob) {
                     const finalUrl = formatGrokImageUrl(imgUrl);
-                    if (responseFormat === 'url') {
+                    if (responseFormat === 'b64_json') {
+                        if (rawBlob) {
+                            const cleanB64 = rawBlob.startsWith('data:') ? rawBlob.split(',')[1] : rawBlob;
+                            data.push({ b64_json: cleanB64 });
+                        } else if (imgUrl && imgUrl.startsWith('data:image/')) {
+                            const b64 = imgUrl.split(',')[1];
+                            data.push({ b64_json: b64 });
+                        } else if (finalUrl) {
+                            data.push({ url: finalUrl });
+                        }
+                    } else if (responseFormat === 'url') {
                         data.push({ url: finalUrl });
-                    } else if (imgUrl.startsWith('data:image/')) {
+                    } else if (imgUrl && imgUrl.startsWith('data:image/')) {
                         const b64 = imgUrl.split(',')[1];
                         data.push({ b64_json: b64 });
-                    } else {
+                    } else if (rawBlob) {
+                        const cleanB64 = rawBlob.startsWith('data:') ? rawBlob.split(',')[1] : rawBlob;
+                        data.push({ b64_json: cleanB64 });
+                    } else if (finalUrl) {
                         data.push({ url: finalUrl });
                     }
                 }
