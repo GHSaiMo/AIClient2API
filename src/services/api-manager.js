@@ -130,11 +130,11 @@ async function handleImageGenerationRequest(req, res, currentConfig, providerPoo
     const CONFIG = retryContext?.CONFIG ?? currentConfig;
     let slotProviderType = null;
     let slotUuid = null;
-    let model, n, response_format, size, codexRequestBody, virtualOpenAIRequest;
+    let model, prompt, n, response_format, size, codexRequestBody, virtualOpenAIRequest;
 
     try {
         if (retryContext?.parsedBody) {
-            ({model, n, response_format, size, virtualOpenAIRequest} = retryContext.parsedBody);
+            ({model, prompt, n, response_format, size, virtualOpenAIRequest} = retryContext.parsedBody);
             codexRequestBody = virtualOpenAIRequest;
         } else {
             const body = await getRequestBody(req, { maxBytes: CONFIG.REQUEST_BODY_MAX_BYTES });
@@ -143,7 +143,7 @@ async function handleImageGenerationRequest(req, res, currentConfig, providerPoo
             size = body.size;
             // cap n：至少 1，最多 IMAGE_GEN_MAX_N，非数字降级为 1
             n = Math.min(Math.max(1, parseInt(body.n) || 1), IMAGE_GEN_MAX_N);
-            const prompt = body.prompt;
+            prompt = body.prompt;
 
             if (!SUPPORTED_IMAGE_MODELS.has(model)) {
                 res.writeHead(400, {'Content-Type': 'application/json'});
@@ -168,6 +168,8 @@ async function handleImageGenerationRequest(req, res, currentConfig, providerPoo
                 return;
             }
 
+            const aspectRatio = body.aspect_ratio || body.aspectRatio;
+
             // 构造虚拟 OpenAI 对话请求，参考对话接口实现自动转换
             virtualOpenAIRequest = {
                 model,
@@ -175,6 +177,8 @@ async function handleImageGenerationRequest(req, res, currentConfig, providerPoo
                 n,
                 size,
                 response_format,
+                aspect_ratio: aspectRatio,
+                aspectRatio: aspectRatio,
                 _imageSize: size, // 兼容 Codex 内部使用的字段
                 _monitorRequestId: currentConfig._monitorRequestId // 注入监控 ID
             };
@@ -654,7 +658,7 @@ async function handleImageEditsRequest(req, res, currentConfig, providerPoolMana
  * Extract image data from a service's generateContent response.
  * Handles different provider output formats.
  */
-function extractImagesFromServiceResponse(response, providerProtocol, responseFormat) {
+function extractImagesFromServiceResponse(response, providerProtocol, responseFormat, currentConfig = null) {
     const data = [];
     
     if (providerProtocol === MODEL_PROTOCOL_PREFIX.CODEX || providerProtocol === MODEL_PROTOCOL_PREFIX.OPENAI_RESPONSES) {
@@ -671,7 +675,7 @@ function extractImagesFromServiceResponse(response, providerProtocol, responseFo
     } else if (providerProtocol === MODEL_PROTOCOL_PREFIX.GROK) {
         // Grok returns collected object with generatedImageUrls or cardAttachments
         const uuid = response._uuid;
-        const requestBaseUrl = response._requestBaseUrl || (CONFIG ? `http://127.0.0.1:${CONFIG.SERVER_PORT || 3005}` : 'http://127.0.0.1:3005');
+        const requestBaseUrl = response._requestBaseUrl || (currentConfig ? `http://127.0.0.1:${currentConfig.SERVER_PORT || 3005}` : 'http://127.0.0.1:3005');
         const formatGrokImageUrl = (rawUrl) => {
             if (!rawUrl || typeof rawUrl !== 'string') return rawUrl;
             if (rawUrl.startsWith('data:') || !uuid) return rawUrl;
