@@ -14,6 +14,7 @@ import { PROMPT_LOG_FILENAME } from '../core/config-manager.js';
 import { getPluginManager } from '../core/plugin-manager.js';
 import { randomUUID } from 'crypto';
 import { handleGrokAssetsProxy } from '../utils/grok-assets-proxy.js';
+import { handleClientProbeRequest } from './probe-handler.js';
 
 /**
  * Generate a short unique request ID (8 characters)
@@ -203,6 +204,17 @@ export function createRequestHandler(config, providerPoolManager) {
                         } else if (firstSegment && !isValidProvider) {
                             logger.info(`[Config] Ignoring invalid MODEL_PROVIDER in path segment: ${firstSegment}`);
                         }
+                    }
+
+                    // Normalize alternative models endpoint path (e.g. /api/v1/models -> /v1/models)
+                    if (path === '/api/v1/models') {
+                        path = '/v1/models';
+                        requestUrl.pathname = path;
+                    }
+
+                    // Handle client probe requests (Ollama /props /version /api/tags /api/show /api/ps)
+                    if (handleClientProbeRequest(method, path, req, res)) {
+                        return true;
                     }
 
                     // 1. 执行认证流程（只有 type='auth' 的插件参与）

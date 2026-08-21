@@ -321,6 +321,60 @@ export function getRateLimitCooldownRecoveryTime(error, config = {}, now = Date.
     return new Date(now + cappedCooldownMs + jitter);
 }
 
+/**
+ * Checks whether an error indicates quota exhaustion (402 Payment Required, spending-limit, monthly request limit).
+ * @param {Error|object} error - The error to inspect
+ * @returns {boolean}
+ */
+export function isQuotaExhaustedError(error) {
+    if (!error) return false;
+    const status = Number(getErrorStatusCode(error));
+    if (status === 402) return true;
+    const msg = String(error.message || '').toLowerCase();
+    const dataStr = typeof error.response?.data === 'string'
+        ? error.response.data.toLowerCase()
+        : JSON.stringify(error.response?.data || '').toLowerCase();
+    return msg.includes('spending-limit') ||
+           msg.includes('monthly_request_count') ||
+           msg.includes('payment required') ||
+           dataStr.includes('spending-limit') ||
+           dataStr.includes('monthly_request_count') ||
+           dataStr.includes('payment_required') ||
+           dataStr.includes('usage_limit_reached');
+}
+
+/**
+ * Calculates a scheduled recovery time for 402/quota exhaustion cooldown.
+ * Defaults to a 5-minute cooldown with optional jitter.
+ * @param {Error|object} error - The error to inspect
+ * @param {object} config - Server config
+ * @param {number} now - Current timestamp
+ * @returns {Date|null}
+ */
+export function getQuotaCooldownRecoveryTime(error, config = {}, now = Date.now()) {
+    if (!isQuotaExhaustedError(error)) {
+        return null;
+    }
+    const defaultCooldownMs = getPositiveInteger(config.QUOTA_COOLDOWN_MS, 300000); // 5 minutes
+    const jitterMs = getPositiveInteger(config.QUOTA_COOLDOWN_JITTER_MS, 30000);
+    const jitter = jitterMs > 0 ? Math.floor(Math.random() * (jitterMs + 1)) : 0;
+    return new Date(now + defaultCooldownMs + jitter);
+}
+
+/**
+ * Calculates retry delay with exponential backoff and jitter.
+ * Avoids excessively short (< 500ms) or excessively long/random delays.
+ * @param {number} currentRetry - Current retry index (0-based)
+ * @param {number} baseDelay - Base delay in ms (default: 1000)
+ * @param {number} maxDelay - Maximum delay in ms (default: 8000)
+ * @returns {number} Delay in milliseconds
+ */
+export function calculateRetryDelay(currentRetry = 0, baseDelay = 1000, maxDelay = 8000) {
+    const expDelay = Math.min(maxDelay, baseDelay * Math.pow(1.5, currentRetry));
+    const jitter = Math.floor(Math.random() * Math.min(expDelay * 0.4, 1000));
+    return Math.max(500, Math.floor(expDelay + jitter));
+}
+
 // ==================== API 常量 ====================
 
 export const API_ACTIONS = {
@@ -1180,11 +1234,18 @@ export async function handleStreamRequest(res, service, model, requestBody, from
         let credentialMarkedUnhealthy = error.credentialMarkedUnhealthy === true;
 
         const rateLimitRecoveryTime = getRateLimitCooldownRecoveryTime(error, CONFIG);
+        const quotaRecoveryTime = getQuotaCooldownRecoveryTime(error, CONFIG);
         if (rateLimitRecoveryTime && providerPoolManager && pooluuid) {
             logger.info(`[Provider Pool] Applying 429 cooldown for ${toProvider} (${pooluuid}) until ${rateLimitRecoveryTime.toISOString()}`);
             providerPoolManager.markProviderUnhealthyWithRecoveryTime(toProvider, {
                 uuid: pooluuid
             }, '429 Too Many Requests - short cooldown', rateLimitRecoveryTime);
+            credentialMarkedUnhealthy = true;
+        } else if (quotaRecoveryTime && providerPoolManager && pooluuid) {
+            logger.info(`[Provider Pool] Applying 402 quota cooldown for ${toProvider} (${pooluuid}) until ${quotaRecoveryTime.toISOString()}`);
+            providerPoolManager.markProviderUnhealthyWithRecoveryTime(toProvider, {
+                uuid: pooluuid
+            }, error.message || '402 Payment Required - quota cooldown', quotaRecoveryTime);
             credentialMarkedUnhealthy = true;
         }
         
@@ -1211,10 +1272,10 @@ export async function handleStreamRequest(res, service, model, requestBody, from
         // 凭证已被标记为不健康后，尝试切换到新凭证重试
         // 不再依赖状态码判断，只要凭证被标记不健康且可以重试，就尝试切换
         if (credentialMarkedUnhealthy && currentRetry < maxRetries && providerPoolManager && CONFIG) {
-            // 增加10秒内的随机等待时间，避免所有请求同时切换凭证
-            const randomDelay = Math.floor(Math.random() * 10000); // 0-10000毫秒
-            logger.info(`[Stream Retry] Credential marked unhealthy. Waiting ${randomDelay}ms before retry ${currentRetry + 1}/${maxRetries} with different credential...`);
-            await new Promise(resolve => setTimeout(resolve, randomDelay));
+            // 使用指数退避 + 抖动，避免过短或剧烈波动的等待时间
+            const retryDelay = calculateRetryDelay(currentRetry, 1000, 8000);
+            logger.info(`[Stream Retry] Credential marked unhealthy. Waiting ${retryDelay}ms before retry ${currentRetry + 1}/${maxRetries} with different credential...`);
+            await new Promise(resolve => setTimeout(resolve, retryDelay));
             
             try {
                 // 动态导入以避免循环依赖
@@ -1439,11 +1500,18 @@ export async function handleUnaryRequest(res, service, model, requestBody, fromP
         let credentialMarkedUnhealthy = error.credentialMarkedUnhealthy === true;
 
         const rateLimitRecoveryTime = getRateLimitCooldownRecoveryTime(error, CONFIG);
+        const quotaRecoveryTime = getQuotaCooldownRecoveryTime(error, CONFIG);
         if (rateLimitRecoveryTime && providerPoolManager && pooluuid) {
             logger.info(`[Provider Pool] Applying 429 cooldown for ${toProvider} (${pooluuid}) until ${rateLimitRecoveryTime.toISOString()}`);
             providerPoolManager.markProviderUnhealthyWithRecoveryTime(toProvider, {
                 uuid: pooluuid
             }, '429 Too Many Requests - short cooldown', rateLimitRecoveryTime);
+            credentialMarkedUnhealthy = true;
+        } else if (quotaRecoveryTime && providerPoolManager && pooluuid) {
+            logger.info(`[Provider Pool] Applying 402 quota cooldown for ${toProvider} (${pooluuid}) until ${quotaRecoveryTime.toISOString()}`);
+            providerPoolManager.markProviderUnhealthyWithRecoveryTime(toProvider, {
+                uuid: pooluuid
+            }, error.message || '402 Payment Required - quota cooldown', quotaRecoveryTime);
             credentialMarkedUnhealthy = true;
         }
         
@@ -1470,10 +1538,10 @@ export async function handleUnaryRequest(res, service, model, requestBody, fromP
         // 凭证已被标记为不健康后，尝试切换到新凭证重试
         // 不再依赖状态码判断，只要凭证被标记不健康且可以重试，就尝试切换
         if (credentialMarkedUnhealthy && currentRetry < maxRetries && providerPoolManager && CONFIG) {
-            // 增加10秒内的随机等待时间，避免所有请求同时切换凭证
-            const randomDelay = Math.floor(Math.random() * 10000); // 0-10000毫秒
-            logger.info(`[Unary Retry] Credential marked unhealthy. Waiting ${randomDelay}ms before retry ${currentRetry + 1}/${maxRetries} with different credential...`);
-            await new Promise(resolve => setTimeout(resolve, randomDelay));
+            // 使用指数退避 + 抖动，避免过短或剧烈波动的等待时间
+            const retryDelay = calculateRetryDelay(currentRetry, 1000, 8000);
+            logger.info(`[Unary Retry] Credential marked unhealthy. Waiting ${retryDelay}ms before retry ${currentRetry + 1}/${maxRetries} with different credential...`);
+            await new Promise(resolve => setTimeout(resolve, retryDelay));
             
             try {
                 // 动态导入以避免循环依赖
@@ -2007,14 +2075,19 @@ export function handleError(res, error, provider = null, fromProvider = null, re
     }
 
     errorMessage = hasOriginalMessage ? error.message.trim() : errorMessage;
-    logger.error(`\n[Server] Request failed (${statusCode}): ${errorMessage}`);
-    if (suggestions.length > 0) {
-        logger.error('[Server] Suggestions:');
-        suggestions.forEach((suggestion, index) => {
-            logger.error(`  ${index + 1}. ${suggestion}`);
-        });
+    if (statusCode >= 400 && statusCode < 500) {
+        const hint = suggestions.length > 0 ? ` (Hint: ${suggestions[0]})` : '';
+        logger.warn(`[Server] Request failed (${statusCode}): ${errorMessage}${hint}`);
+        if (error.stack) {
+            logger.debug('[Server] Full error details:', error.stack);
+        }
+    } else {
+        const suggestionsSummary = suggestions.length > 0 ? ` | Suggestions: ${suggestions.join('; ')}` : '';
+        logger.error(`\n[Server] Request failed (${statusCode}): ${errorMessage}${suggestionsSummary}`);
+        if (error.stack) {
+            logger.error('[Server] Full error details:', error.stack);
+        }
     }
-    logger.error('[Server] Full error details:', error.stack);
 
     // 检查响应流是否已关闭或结束
     if (res.writableEnded || res.destroyed) {
