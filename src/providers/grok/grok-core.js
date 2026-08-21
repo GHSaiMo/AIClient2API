@@ -1091,7 +1091,8 @@ export class GrokApiService {
                 image: {
                     original: imageUrl,
                     title: "Generated Image",
-                    shareLink: shareLink
+                    shareLink: shareLink,
+                    blob: item.blob || null
                 }
             };
             const jsonStr = JSON.stringify(cardData);
@@ -1138,6 +1139,10 @@ export class GrokApiService {
 
                 if (hasMedia && isFinal) {
                     await addImgToCollected(item);
+                    if (imagesCollected >= n) {
+                        logger.info(`[Grok WS] Collected requested ${imagesCollected}/${n} image(s). Concluding stream early.`);
+                        break;
+                    }
                 }
             }
         }
@@ -1241,7 +1246,8 @@ export class GrokApiService {
                         image: {
                             original: imageUrl,
                             title: "Generated Image",
-                            shareLink: shareLink
+                            shareLink: shareLink,
+                            blob: item.blob || null
                         }
                     };
                     yield {
@@ -1255,6 +1261,10 @@ export class GrokApiService {
                         }
                     };
                     imagesYielded++;
+                    if (imagesYielded >= n) {
+                        logger.info(`[Grok WS Stream] Yielded requested ${imagesYielded}/${n} image(s). Concluding stream early.`);
+                        break;
+                    }
                 }
             }
         }
