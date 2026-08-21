@@ -20,10 +20,16 @@ const CORE_MODEL_MAPPING = {
     'grok-4.20-fast': { name: 'grok-420', mode: 'MODEL_MODE_FAST', modeId: 'fast' },
     'grok-4.20-expert': { name: 'grok-420', mode: 'MODEL_MODE_EXPERT', modeId: 'expert' },
     'grok-4.20-heavy': { name: 'grok-420', mode: 'MODEL_MODE_HEAVY', modeId: 'heavy' },
-    'grok-imagine-1.0-fast': { name: 'imagine-image', mode: 'MODEL_MODE_FAST', modeId: 'fast' },
-    'grok-imagine-1.0-fast-edit': { name: 'imagine-image', mode: 'MODEL_MODE_FAST', modeId: 'fast' },
-    'grok-imagine-1.0': { name: 'imagine-image', mode: 'MODEL_MODE_FAST', modeId: 'expert' },
-    'grok-imagine-1.0-edit': { name: 'imagine-image', mode: 'MODEL_MODE_FAST', modeId: 'expert' },
+    'grok-imagine-image-2.0': { name: 'imagine-image', mode: 'MODEL_MODE_PRO', modeId: 'expert', isPro: true },
+    'grok-imagine-image-pro': { name: 'imagine-image', mode: 'MODEL_MODE_PRO', modeId: 'expert', isPro: true },
+    'grok-imagine-image': { name: 'imagine-image', mode: 'MODEL_MODE_FAST', modeId: 'expert', isPro: false },
+    'grok-imagine-image-quality': { name: 'imagine-image', mode: 'MODEL_MODE_FAST', modeId: 'expert', isPro: false },
+    'grok-imagine-image-lite': { name: 'imagine-image', mode: 'MODEL_MODE_FAST', modeId: 'fast', isPro: false, isLite: true },
+    'grok-imagine-image-edit': { name: 'imagine-image', mode: 'MODEL_MODE_FAST', modeId: 'expert', isEdit: true },
+    'grok-imagine-1.0-fast': { name: 'imagine-image', mode: 'MODEL_MODE_FAST', modeId: 'fast', isPro: false, isLite: true },
+    'grok-imagine-1.0-fast-edit': { name: 'imagine-image', mode: 'MODEL_MODE_FAST', modeId: 'fast', isPro: false },
+    'grok-imagine-1.0': { name: 'imagine-image', mode: 'MODEL_MODE_FAST', modeId: 'expert', isPro: false },
+    'grok-imagine-1.0-edit': { name: 'imagine-image', mode: 'MODEL_MODE_FAST', modeId: 'expert', isPro: false },
     // 'grok-imagine-1.0-video': { name: 'grok-3', mode: 'MODEL_MODE_FAST', modeId: 'fast' }
 };
 
@@ -38,6 +44,12 @@ const GROK_MODELS = Object.keys(MODEL_MAPPING);
 
 function isGrokNsfwModel(modelId) {
     return typeof modelId === 'string' && modelId.toLowerCase().endsWith('-nsfw');
+}
+
+function isGrokProModel(modelId) {
+    if (typeof modelId !== 'string') return false;
+    const lower = modelId.toLowerCase();
+    return lower.includes('2.0') || lower.includes('-pro') || lower.includes('_pro');
 }
 
 function normalizeGrokModelId(modelId) {
@@ -920,20 +932,35 @@ export class GrokApiService {
         const normalizedModel = normalizeGrokModelId(model);
         const modelLower = normalizedModel.toLowerCase();
         const isImagine = (modelLower.includes('imagine') || modelLower.includes('edit')) && !modelLower.includes('video');
-        // 识别优先使用 WS 的模型 (仅限图片生成，排除视频)
-        // const isWSPreferred = isImagine && !modelLower.includes('video');
+        const isPro = isGrokProModel(normalizedModel);
+        // 识别优先使用 WS 的模型 (包括 2.0 / Pro 以及标准 Imagine 模型，排除视频、纯编辑和精简版)
+        const isWSPreferred = isImagine && !modelLower.includes('video') && !modelLower.includes('edit') && !modelLower.includes('lite') && !modelLower.includes('fast');
         
         let collected;
         try {
             // 如果是优先 WS 的模型，尝试直接走 WS 逻辑
-            /* if (isWSPreferred) {
+            if (isWSPreferred) {
                 try {
-                    return await this._generateAndCollectWS(model, requestBody);
+                    if (n <= 2) {
+                        return await this._generateAndCollectWS(model, requestBody);
+                    } else {
+                        logger.info(`[Grok WS] Multi-image request detected (n=${n}), splitting into multiple tasks`);
+                        const perCall = 2;
+                        const callsNeeded = Math.ceil(n / perCall);
+                        const tasks = [];
+                        for (let i = 0; i < callsNeeded; i++) {
+                            const count = Math.min(perCall, n - i * perCall);
+                            const subRequestBody = { ...requestBody, n: count };
+                            tasks.push(this._generateAndCollectWS(model, subRequestBody));
+                        }
+                        const results = await Promise.all(tasks);
+                        return this._mergeCollectedResults(results);
+                    }
                 } catch (wsError) {
                     logger.warn(`[Grok] Initial WS generation failed, falling back to app_chat: ${wsError.message}`);
                     // 失败后继续向下走传统的 app_chat 逻辑
                 }
-            } */
+            }
 
             if (n <= 2 || !isImagine) {
                 // 单次请求处理
@@ -1010,7 +1037,7 @@ export class GrokApiService {
     }
 
     /**
-     * WebSocket 方式生成图片 (Fallback)
+     * WebSocket 方式生成图片 (Fallback / Direct)
      */
     async _generateAndCollectWS(model, requestBody) {
         const n = parseInt(requestBody.n || 1);
@@ -1024,17 +1051,18 @@ export class GrokApiService {
 
         const aspectRatio = requestBody.aspect_ratio || requestBody.aspectRatio || "1:1";
         const enableNsfw = requestBody.nsfw !== false;
+        const isPro = isGrokProModel(model) || requestBody.pro === true || requestBody.enable_pro === true;
         
-        logger.info(`[Grok WS] Starting fallback image generation for: ${prompt.substring(0, 50)}...`);
+        logger.info(`[Grok WS] Starting image generation for: ${prompt.substring(0, 50)}... (pro=${isPro}, n=${n})`);
         
         const wsService = new ImagineWebSocketService(this.config);
-        const stream = wsService.stream(this.token, prompt, aspectRatio, n, enableNsfw);
+        const stream = wsService.stream(this.token, prompt, aspectRatio, n, enableNsfw, isPro);
         
         const collected = { 
             message: "", 
             responseId: `ws-${uuidv4()}`, 
             postId: "", 
-            llmInfo: { modelHash: "ws-imagine" }, 
+            llmInfo: { modelHash: isPro ? "ws-imagine-2.0" : "ws-imagine" }, 
             rolloutId: "", 
             _uuid: this.uuid,
             _requestBaseUrl: this.config.requestBaseUrl,
@@ -1130,7 +1158,7 @@ export class GrokApiService {
     }
 
     /**
-     * WebSocket 方式流式生成图片 (Fallback)
+     * WebSocket 方式流式生成图片 (Fallback / Direct)
      */
     async * _generateContentStreamWS(model, requestBody) {
         const n = parseInt(requestBody.n || 1);
@@ -1143,9 +1171,12 @@ export class GrokApiService {
 
         const aspectRatio = requestBody.aspect_ratio || requestBody.aspectRatio || "1:1";
         const enableNsfw = requestBody.nsfw !== false;
+        const isPro = isGrokProModel(model) || requestBody.pro === true || requestBody.enable_pro === true;
+
+        logger.info(`[Grok WS Stream] Starting stream image generation for: ${prompt.substring(0, 50)}... (pro=${isPro}, n=${n})`);
 
         const wsService = new ImagineWebSocketService(this.config);
-        const stream = wsService.stream(this.token, prompt, aspectRatio, n, enableNsfw);
+        const stream = wsService.stream(this.token, prompt, aspectRatio, n, enableNsfw, isPro);
         
         const responseId = `ws-${uuidv4()}`;
 
@@ -1272,16 +1303,17 @@ export class GrokApiService {
         const normalizedModel = normalizeGrokModelId(rawModel);
         const modelLower = normalizedModel.toLowerCase();
         const isImagine = (modelLower.includes('imagine') || modelLower.includes('edit')) && !modelLower.includes('video');
-        // 识别优先使用 WS 的模型 (仅限图片生成，排除视频)
-        // const isWSPreferred = isImagine && !modelLower.includes('video');
+        const isPro = isGrokProModel(normalizedModel);
+        // 识别优先使用 WS 的模型 (包括 2.0 / Pro 以及标准 Imagine 模型，排除视频、纯编辑和精简版)
+        const isWSPreferred = isImagine && !modelLower.includes('video') && !modelLower.includes('edit') && !modelLower.includes('lite') && !modelLower.includes('fast');
         const isNsfw = isGrokNsfwModel(rawModel) || requestBody.nsfw === true || requestBody.disableNsfwFilter === true;
         if (isNsfw) await this.setupNsfw();
 
         // 提前提取图片和消息，确保上传逻辑能获取到图片
         this._extractMessagesAndFiles(requestBody, modelLower.includes('video'));
 
-        // 如果是优先 WS 的模型，尝试直接走 WS 流逻辑
-        /* if (isWSPreferred && retryCount === 0) {
+        // 如果是优先 WS 的模型，直接走 WS 流逻辑
+        if (isWSPreferred && retryCount === 0) {
             try {
                 yield* this._generateContentStreamWS(model, requestBody);
                 return;
@@ -1289,7 +1321,7 @@ export class GrokApiService {
                 logger.warn(`[Grok] Initial WS stream failed, falling back to app_chat: ${wsError.message}`);
                 // 失败后继续向下执行传统的 app_chat 逻辑
             }
-        } */
+        }
 
         let fileAttachments = requestBody.fileAttachments || [];
         const toUpload = [...(requestBody._extractedImages || []), ...(requestBody._extractedFiles || [])];

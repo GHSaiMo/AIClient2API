@@ -1,7 +1,7 @@
 import WebSocket from 'ws';
 import logger from '../../utils/logger.js';
 import { v4 as uuidv4 } from 'uuid';
-import { getProxyConfigForProvider } from '../../utils/proxy-utils.js';
+import { getProxyConfigForProvider, parseProxyUrl } from '../../utils/proxy-utils.js';
 import { MODEL_PROVIDER } from '../../utils/common.js';
 
 /**
@@ -23,10 +23,15 @@ export class ImagineWebSocketService {
      * @param {string} aspectRatio - Aspect ratio (e.g. "1:1")
      * @param {number} n - Number of images
      * @param {boolean} enableNsfw - Enable NSFW filter
+     * @param {boolean} enablePro - Enable Pro (2.0) mode
      * @returns {AsyncGenerator<object>}
      */
-    async *stream(token, prompt, aspectRatio = '1:1', n = 1, enableNsfw = true) {
-        const proxyConfig = getProxyConfigForProvider(this.config, MODEL_PROVIDER.GROK_WEB);
+    async *stream(token, prompt, aspectRatio = '1:1', n = 1, enableNsfw = true, enablePro = false) {
+        let proxyConfig = getProxyConfigForProvider(this.config, this.config?.MODEL_PROVIDER || MODEL_PROVIDER.GROK_WEB);
+        if (!proxyConfig && (this.config?.PROXY_URL || this.config?.TLS_SIDECAR_PROXY_URL)) {
+            const fallbackUrl = this.config?.PROXY_URL || this.config?.TLS_SIDECAR_PROXY_URL;
+            proxyConfig = parseProxyUrl(fallbackUrl);
+        }
         const agent = proxyConfig?.httpsAgent;
 
         let ssoToken = token || "";
@@ -45,7 +50,7 @@ export class ImagineWebSocketService {
             'User-Agent': this.config.GROK_USER_AGENT || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36',
         };
 
-        logger.debug(`[Grok WS] Connecting to ${this.wsUrl} for prompt: ${prompt.substring(0, 50)}...`);
+        logger.debug(`[Grok WS] Connecting to ${this.wsUrl} for prompt: ${prompt.substring(0, 50)}... (pro=${enablePro})`);
 
         const ws = new WebSocket(this.wsUrl, {
             headers,
@@ -59,7 +64,7 @@ export class ImagineWebSocketService {
         let resolveNext = null;
 
         ws.on('open', () => {
-            logger.debug(`[Grok WS] Connected. Sending reset and imagine request.`);
+            logger.debug(`[Grok WS] Connected. Sending reset and imagine request (pro=${enablePro}).`);
             
             // 遵循协议：首先发送重置消息
             const resetPayload = {
@@ -94,7 +99,8 @@ export class ImagineWebSocketService {
                                     "enable_side_by_side": true,
                                     "is_initial": false,
                                     "aspect_ratio": aspectRatio,
-                                    "enable_pro": false
+                                    "enable_pro": !!enablePro,
+                                    "num_generations": n
                                 }
                             }
                         ]
