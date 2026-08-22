@@ -56,6 +56,18 @@ export function createRequestHandler(config, providerPoolManager) {
                 }
                 const method = req.method;
 
+                // 注册请求与响应流的底层错误监听器，防止客户端提前断开或延迟流写入导致未捕获异常
+                if (typeof req.on === 'function') {
+                    req.on('error', (err) => {
+                        logger.debug('[Request Stream] Socket/request error handled:', err?.message || err);
+                    });
+                }
+                if (typeof res.on === 'function') {
+                    res.on('error', (err) => {
+                        logger.debug('[Response Stream] Socket/response error handled:', err?.message || err);
+                    });
+                }
+
                 try {
                     // Set CORS headers for all requests
                     res.setHeader('Access-Control-Allow-Origin', '*');

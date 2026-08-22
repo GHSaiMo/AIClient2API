@@ -39,6 +39,14 @@ export const RETRYABLE_NETWORK_ERRORS = [
     'EAI_AGAIN',       // DNS 临时失败
     'ECONNABORTED',    // 连接中止
     'ESOCKETTIMEDOUT', // Socket 超时
+    'ERR_STREAM_WRITE_AFTER_END', // 流关闭后写入
+    'ERR_STREAM_DESTROYED',       // 流已销毁
+    'ERR_STREAM_PREMATURE_CLOSE', // 流过早关闭
+    'ERR_STREAM_ALREADY_FINISHED',// 流已完成
+    'ERR_HTTP_HEADERS_SENT',      // 响应头已发送
+    'ECANCELED',                  // 操作取消
+    'UND_ERR_SOCKET',             // undici socket 错误
+    'UND_ERR_ABORTED',            // undici 请求中止
 ];
 
 /**
@@ -49,8 +57,8 @@ export const RETRYABLE_NETWORK_ERRORS = [
 export function isRetryableNetworkError(error) {
     if (!error) return false;
     
-    const errorCode = error.code || '';
-    const errorMessage = error.message || '';
+    const errorCode = error.code || error.cause?.code || '';
+    const errorMessage = error.message || error.cause?.message || (typeof error === 'string' ? error : '');
     
     return RETRYABLE_NETWORK_ERRORS.some(err => 
         errorCode === err || errorMessage.includes(err)
@@ -1321,7 +1329,7 @@ export async function handleStreamRequest(res, service, model, requestBody, from
 
         // 使用新方法创建符合 fromProvider 格式的流式错误响应
         const errorPayload = createStreamErrorResponse(error, fromProvider);
-        if (!clientDisconnected.value && !res.writableEnded) {
+        if (!clientDisconnected.value && !res.writableEnded && !res.finished && !res.destroyed) {
             try {
                 res.write(errorPayload);
                 res.end();
@@ -1340,6 +1348,12 @@ export async function handleStreamRequest(res, service, model, requestBody, from
         if (!isRetry) {
             res.off('close', onClientClose);
             res.off('error', onClientError);
+            // 确保移除特定监听器后保留静默错误处理器，防止流在关闭后产生异步 error 导致未捕获异常
+            if (typeof res.listenerCount === 'function' && res.listenerCount('error') === 0) {
+                res.on('error', (err) => {
+                    logger.debug('[Stream] Post-closure response error absorbed:', err?.message || err);
+                });
+            }
         }
         
         // 只在非重试或重试失败时才发送结束标记
@@ -1347,7 +1361,7 @@ export async function handleStreamRequest(res, service, model, requestBody, from
         if (!responseClosed && !clientDisconnected.value && !isRetry) {
             // 根据客户端协议发送相应的流式结束标记
             const clientProtocol = getProtocolPrefix(fromProvider);
-            if (!res.writableEnded) {
+            if (!res.writableEnded && !res.finished && !res.destroyed) {
                 try {
                     if (clientProtocol === MODEL_PROTOCOL_PREFIX.OPENAI) {
                         if (!hasMessageStop) {
@@ -1369,7 +1383,9 @@ export async function handleStreamRequest(res, service, model, requestBody, from
                             hasMessageStop = true;
                         }
                     }
-                    res.end();
+                    if (!res.writableEnded && !res.finished && !res.destroyed) {
+                        res.end();
+                    }
                 } catch (writeErr) {
                     logger.error('[Stream] Failed to write completion marker:', writeErr.message);
                 }
@@ -2028,11 +2044,17 @@ export function handleError(res, error, provider = null, fromProvider = null, re
 
     // 如果指定了客户端协议，则使用 createErrorResponse 创建符合该协议的错误响应
     if (fromProvider) {
+        if (res.writableEnded || res.destroyed || res.finished) {
+            logger.warn('[Server] Response already ended or destroyed, skipping protocol error response');
+            return;
+        }
         const errorResponse = createErrorResponse(error, fromProvider);
         if (!res.headersSent) {
             res.writeHead(statusCode, { 'Content-Type': 'application/json' });
         }
-        res.end(JSON.stringify(errorResponse));
+        try {
+            res.end(JSON.stringify(errorResponse));
+        } catch (e) {}
         return;
     }
 
@@ -2090,7 +2112,7 @@ export function handleError(res, error, provider = null, fromProvider = null, re
     }
 
     // 检查响应流是否已关闭或结束
-    if (res.writableEnded || res.destroyed) {
+    if (res.writableEnded || res.destroyed || res.finished) {
         logger.warn('[Server] Response already ended or destroyed, skipping error response');
         return;
     }
