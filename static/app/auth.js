@@ -96,11 +96,10 @@ class ApiClient {
     }
 
     /**
-     * 处理401错误重定向到登录页
+     * 处理401错误
      */
     handleUnauthorized() {
-        this.authManager.clearToken();
-        window.location.href = '/login.html';
+        console.warn('Unauthorized request');
     }
 
     /**
@@ -120,12 +119,6 @@ class ApiClient {
 
         try {
             const response = await fetch(url, config);
-            
-            // 如果是401错误，重定向到登录页
-            if (response.status === 401) {
-                this.handleUnauthorized();
-                throw new Error(t('common.unauthorized'));
-            }
 
             const contentType = response.headers.get('content-type');
             let data;
@@ -246,12 +239,6 @@ class ApiClient {
 
         try {
             const response = await fetch(url, config);
-            
-            // 如果是401错误，重定向到登录页
-            if (response.status === 401) {
-                this.handleUnauthorized();
-                throw new Error(t('common.unauthorized'));
-            }
 
             const contentType = response.headers.get('content-type');
             let data;
@@ -274,10 +261,6 @@ class ApiClient {
 
             return data;
         } catch (error) {
-            if (error.message === t('common.unauthorized')) {
-                // 已经在handleUnauthorized中处理了重定向
-                throw error;
-            }
             console.error('API请求错误:', error);
             throw error;
         }
@@ -288,26 +271,7 @@ class ApiClient {
  * 初始化认证检查
  */
 async function initAuth() {
-    const authManager = new AuthManager();
-    
-    // 检查是否已经有有效的token
-    if (authManager.isTokenValid()) {
-        // 验证token是否仍然有效（发送一个测试请求）
-        try {
-            const apiClient = new ApiClient();
-            await apiClient.get('/health');
-            return true;
-        } catch (error) {
-            // Token无效，清除并重定向到登录页
-            authManager.clearToken();
-            window.location.href = '/login.html';
-            return false;
-        }
-    } else {
-        // 没有有效token，重定向到登录页
-        window.location.href = '/login.html';
-        return false;
-    }
+    return true;
 }
 
 /**

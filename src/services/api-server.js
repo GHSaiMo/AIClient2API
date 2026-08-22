@@ -344,20 +344,20 @@ async function startServer() {
                 // 作为子进程启动时，需要更长的延迟确保服务完全就绪
                 const openDelay = IS_WORKER_PROCESS ? 3000 : 1000;
                 setTimeout(() => {
-                    let openUrl = `http://${CONFIG.HOST}:${CONFIG.SERVER_PORT}/login.html`;
+                    let openUrl = `http://${CONFIG.HOST}:${CONFIG.SERVER_PORT}/`;
                     if(CONFIG.HOST === '0.0.0.0'){
-                        openUrl = `http://localhost:${CONFIG.SERVER_PORT}/login.html`;
+                        openUrl = `http://localhost:${CONFIG.SERVER_PORT}/`;
                     }
                     open(openUrl)
                         .then(() => {
-                            logger.info('[UI] Opened login page in default browser');
+                            logger.info('[UI] Opened console page in default browser');
                         })
                         .catch(err => {
-                            logger.info('[UI] Please open manually: http://' + CONFIG.HOST + ':' + CONFIG.SERVER_PORT + '/login.html');
+                            logger.info('[UI] Please open manually: http://' + CONFIG.HOST + ':' + CONFIG.SERVER_PORT + '/');
                         });
                 }, openDelay);
             } catch (err) {
-                logger.info(`[UI] Login page available at: http://${CONFIG.HOST}:${CONFIG.SERVER_PORT}/login.html`);
+                logger.info(`[UI] Console page available at: http://${CONFIG.HOST}:${CONFIG.SERVER_PORT}/`);
             }
         } else {
             logger.info(`[UI] UI is disabled.`);
