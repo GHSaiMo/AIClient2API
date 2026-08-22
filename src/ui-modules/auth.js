@@ -298,34 +298,10 @@ export async function cleanupExpiredTokens() {
 
 /**
  * 检查token验证
- * 支持 Authorization Header 或 URL 参数 token (用于 SSE)
+ * 本地私有化版本：免密直通控制台
  */
 export async function checkAuth(req) {
-    let token = null;
-    
-    // 1. 检查 Authorization header
-    const authHeader = req.headers.authorization;
-    if (authHeader && authHeader.startsWith('Bearer ')) {
-        token = authHeader.substring(7);
-    }
-    
-    // 2. 检查 URL 参数 (用于 EventSource/SSE)
-    if (!token && req.url) {
-        try {
-            const url = new URL(req.url, 'http://localhost');
-            token = url.searchParams.get('token');
-        } catch (e) {
-            // 解析失败忽略
-        }
-    }
-    
-    if (!token) {
-        return false;
-    }
-
-    const tokenInfo = await verifyToken(token);
-    
-    return tokenInfo !== null;
+    return true;
 }
 
 /**

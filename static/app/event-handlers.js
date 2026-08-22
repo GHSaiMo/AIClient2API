@@ -197,18 +197,6 @@ function initEventListeners() {
     //     providerPoolsInput.addEventListener('input', handleProviderPoolsConfigChange);
     // }
 
-    // 检查更新按钮
-    const checkUpdateBtn = document.getElementById('checkUpdateBtn');
-    if (checkUpdateBtn) {
-        checkUpdateBtn.addEventListener('click', () => checkUpdate(false));
-    }
-
-    // 执行更新按钮
-    const performUpdateBtn = document.getElementById('performUpdateBtn');
-    if (performUpdateBtn) {
-        performUpdateBtn.addEventListener('click', performUpdate);
-    }
-
     // 刷新提供商状态按钮
     const refreshProviderStatusBtn = document.getElementById('refreshProviderStatusBtn');
     if (refreshProviderStatusBtn) {

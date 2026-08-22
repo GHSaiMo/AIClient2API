@@ -77,17 +77,6 @@
                 // 重新应用当前语言（因为组件是动态加载的）
                 setLanguage(getCurrentLanguage());
                 
-                // 显示登出按钮（如果配置了密码保护）
-                const logoutBtn = document.getElementById('logoutBtn');
-                if (logoutBtn && localStorage.getItem('authToken')) {
-                    logoutBtn.style.display = 'inline-block';
-                    logoutBtn.addEventListener('click', async () => {
-                        if (confirm(t('common.confirm') + ' ' + t('header.logout') + '?')) {
-                            await logout();
-                        }
-                    });
-                }
-
                 // 更新路径路由示例中的URL前缀
                 updateRoutingExamplesURLs();
                 

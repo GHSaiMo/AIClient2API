@@ -105,19 +105,11 @@ async function loadSystemInfo() {
     try {
         const data = await window.apiClient.get('/system');
 
-        const appVersionEl = document.getElementById('appVersion');
         const nodeVersionEl = document.getElementById('nodeVersion');
         const serverTimeEl = document.getElementById('serverTime');
         const memoryUsageEl = document.getElementById('memoryUsage');
         const cpuUsageEl = document.getElementById('cpuUsage');
         const uptimeEl = document.getElementById('uptime');
-
-        if (appVersionEl) appVersionEl.textContent = data.appVersion ? `v${data.appVersion}` : '--';
-        
-        // 自动检查更新
-        if (data.appVersion) {
-            checkUpdate(true);
-        }
 
         if (nodeVersionEl) nodeVersionEl.textContent = data.nodeVersion || '--';
         if (memoryUsageEl) memoryUsageEl.textContent = data.memoryUsage || '--';
@@ -886,7 +878,7 @@ function showSimplePrompt(title, placeholder, callback) {
  * @returns {string} 按钮HTML
  */
 function generateAddGroupButton(providerType) {
-    const allowedTypes = ['claude-custom', 'openai-custom', 'openaiResponses-custom', 'atlascloud', 'qiniu', 'fenno'];
+    const allowedTypes = [];
     if (!allowedTypes.includes(providerType)) {
         return '';
     }
@@ -4539,146 +4531,14 @@ function updateUpdateBtnText(selectedVersion, localVersion) {
  * @param {boolean} silent - 是否静默检查（不显示 Toast）
  */
 async function checkUpdate(silent = false) {
-    const checkBtn = document.getElementById('checkUpdateBtn');
-    const updateBtn = document.getElementById('performUpdateBtn');
-    const updateBadge = document.getElementById('updateBadge');
-    const latestVersionText = document.getElementById('latestVersionText');
-    const versionSelectWrapper = document.getElementById('versionSelectWrapper');
-    const versionSelect = document.getElementById('versionSelect');
-    const checkBtnIcon = checkBtn?.querySelector('i');
-    const checkBtnText = checkBtn?.querySelector('span');
-
-    try {
-        if (!silent && checkBtn) {
-            checkBtn.disabled = true;
-            if (checkBtnIcon) checkBtnIcon.className = 'fas fa-spinner fa-spin';
-            if (checkBtnText) checkBtnText.textContent = t('dashboard.update.checking');
-        }
-
-        const data = await window.apiClient.get('/check-update');
-
-        // 处理版本列表
-        if (versionSelect && data.availableVersions && data.availableVersions.length > 0) {
-            versionSelect.innerHTML = '';
-            data.availableVersions.forEach(version => {
-                const option = document.createElement('option');
-                option.value = version;
-                option.textContent = version;
-                // 如果是最新版本，增加标识
-                if (version === data.latestVersion) {
-                    option.textContent += ` (${t('dashboard.update.latest') || 'Latest'})`;
-                }
-                // 如果是当前版本，增加标识
-                if (version === data.localVersion || version === `v${data.localVersion}`) {
-                    option.textContent += ` (${t('dashboard.update.current') || 'Current'})`;
-                    option.selected = true;
-                }
-                versionSelect.appendChild(option);
-            });
-            
-            if (versionSelectWrapper) versionSelectWrapper.style.display = 'block';
-            
-            // 更新本地版本数据集，确保监听器能拿到最新值
-            if (versionSelect) {
-                versionSelect.dataset.localVersion = data.localVersion;
-            }
-
-            if (updateBtn) {
-                updateBtn.style.display = 'inline-flex';
-                // 初始化按钮文字
-                updateUpdateBtnText(versionSelect.value, data.localVersion);
-            }
-            
-            // 绑定版本切换事件
-            if (versionSelect && !versionSelect.dataset.listenerAdded) {
-                versionSelect.addEventListener('change', () => {
-                    updateUpdateBtnText(versionSelect.value, versionSelect.dataset.localVersion);
-                });
-                versionSelect.dataset.listenerAdded = 'true';
-            }
-        }
-
-        if (data.hasUpdate) {
-            if (updateBadge) updateBadge.style.display = 'inline-flex';
-            if (latestVersionText) latestVersionText.textContent = data.latestVersion;
-            
-            // 如果有新版本且未选择特定版本，默认选中最新
-            if (versionSelect && data.latestVersion) {
-                versionSelect.value = data.latestVersion;
-                updateUpdateBtnText(versionSelect.value, data.localVersion);
-            }
-
-            if (!silent) {
-                showToast(t('common.info'), t('dashboard.update.hasUpdate', { version: data.latestVersion }), 'info');
-            }
-        } else {
-            if (updateBadge) updateBadge.style.display = 'none';
-            if (!silent) {
-                showToast(t('common.info'), t('dashboard.update.upToDate'), 'success');
-            }
-        }
-    } catch (error) {
-        console.error('Check update failed:', error);
-        if (!silent) {
-            showToast(t('common.error'), t('dashboard.update.failed', { error: error.message }), 'error');
-        }
-    } finally {
-        if (checkBtn) {
-            checkBtn.disabled = false;
-            if (checkBtnIcon) checkBtnIcon.className = 'fas fa-sync-alt';
-            if (checkBtnText) checkBtnText.textContent = t('dashboard.update.check');
-        }
-    }
+    // 移除版本检查
 }
 
 /**
  * 执行更新
  */
 async function performUpdate() {
-    const updateBtn = document.getElementById('performUpdateBtn');
-    const versionSelect = document.getElementById('versionSelect');
-    const selectedVersion = versionSelect?.value || '';
-
-    if (!confirm(t('dashboard.update.confirmMsg', { version: selectedVersion }))) {
-        return;
-    }
-
-    const updateBtnIcon = updateBtn?.querySelector('i');
-    const updateBtnText = updateBtn?.querySelector('span');
-
-    try {
-        if (updateBtn) {
-            updateBtn.disabled = true;
-            if (updateBtnIcon) updateBtnIcon.className = 'fas fa-spinner fa-spin';
-            if (updateBtnText) updateBtnText.textContent = t('dashboard.update.updating');
-        }
-
-        showToast(t('common.info'), t('dashboard.update.updating'), 'info');
-
-        const data = await window.apiClient.post('/update', { version: selectedVersion });
-
-        if (data.success) {
-            if (data.updated) {
-                // 代码已更新，直接调用重启服务
-                showToast(t('common.success'), t('dashboard.update.success'), 'success');
-                
-                // 自动重启服务
-                await restartServiceAfterUpdate();
-            } else {
-                // 已是目标版本
-                showToast(t('common.info'), data.message || t('dashboard.update.upToDate'), 'info');
-            }
-        }
-    } catch (error) {
-        console.error('Update failed:', error);
-        showToast(t('common.error'), t('dashboard.update.failed', { error: error.message }), 'error');
-    } finally {
-        if (updateBtn) {
-            updateBtn.disabled = false;
-            if (updateBtnIcon) updateBtnIcon.className = 'fas fa-download';
-            updateUpdateBtnText(versionSelect.value, versionSelect.dataset.localVersion);
-        }
-    }
+    // 移除在线更新
 }
 
 /**
@@ -4745,8 +4605,8 @@ function showAddProviderGroupModal(defaultBaseType = null) {
         // 1. 必须在后端支持的列表中
         const isSupported = cachedSupportedProviders.includes(config.id);
         
-        // 2. 限制只能添加特定类型的配置组 (Claude Custom, OpenAI Custom, OpenAI Responses)
-        const allowedTypes = ['claude-custom', 'openai-custom', 'openaiResponses-custom', 'atlascloud', 'qiniu', 'fenno'];
+        // 2. 限制只能添加特定类型的配置组
+        const allowedTypes = [];
         const isAllowed = allowedTypes.includes(config.id);
         
         return isSupported && isAllowed;

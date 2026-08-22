@@ -14,25 +14,6 @@ import { apiClient } from './auth.js';
 function getBaseProviderConfigs() {
     return [
         { 
-            id: 'qiniu', 
-            name: 'Qiniu Cloud AI', 
-            icon: 'fa-cloud',
-            registerUrl: 'https://s.qiniu.com/FRF7bq',
-            docUrl: 'https://docs.modelink.ai/api-endpoints/overview'
-        },
-        { 
-            id: 'fenno', 
-            name: 'Fenno.ai', 
-            icon: 'fa-code',
-            registerUrl: 'https://api.fenno.ai/register?redirect=/purchase?tab=subscription%26group=16&aff=2EW65KEQC938'
-        },
-        { 
-            id: 'atlascloud', 
-            name: 'AtlasCloud', 
-            icon: 'fa-cloud',
-            registerUrl: 'https://www.atlascloud.ai/console/coding-plan'
-        },
-        { 
             id: 'forward-api', 
             name: 'NewAPI', 
             icon: 'fa-share-square'
@@ -89,22 +70,7 @@ function getBaseProviderConfigs() {
             name: t('dashboard.routing.nodeName.grok'), 
             usageName: 'Grok Web',
             icon: 'fa-user-secret'
-        },
-        { 
-            id: 'openai-custom', 
-            name: t('dashboard.routing.nodeName.openai'), 
-            icon: 'fa-microchip'
-        },
-        { 
-            id: 'claude-custom', 
-            name: t('dashboard.routing.nodeName.claude'), 
-            icon: 'fa-brain'
-        },
-        { 
-            id: 'openaiResponses-custom', 
-            name: 'OpenAI Responses', 
-            icon: 'fa-reply-all'
-        },
+        }
     ];
 }
 
@@ -276,90 +242,6 @@ function getFieldLabel(key) {
 function getProviderTypeFields(providerType) {
     // 基础配置字段定义
     const fieldConfigs = {
-        'openai-custom': [
-            {
-                id: 'OPENAI_API_KEY',
-                label: t('modal.provider.field.apiKey'),
-                type: 'password',
-                placeholder: 'sk-...'
-            },
-            {
-                id: 'OPENAI_BASE_URL',
-                label: 'OpenAI Base URL',
-                type: 'text',
-                placeholder: 'https://api.openai.com/v1'
-            }
-        ],
-        'atlascloud': [
-            {
-                id: 'OPENAI_API_KEY',
-                label: t('modal.provider.field.apiKey'),
-                type: 'password',
-                placeholder: 'sk-...'
-            },
-            {
-                id: 'OPENAI_BASE_URL',
-                label: 'OpenAI Base URL',
-                type: 'text',
-                placeholder: 'https://api.atlascloud.ai/v1'
-            }
-        ],
-        'qiniu': [
-            {
-                id: 'OPENAI_API_KEY',
-                label: t('modal.provider.field.apiKey'),
-                type: 'password',
-                placeholder: 'sk-...'
-            },
-            {
-                id: 'OPENAI_BASE_URL',
-                label: 'OpenAI Base URL',
-                type: 'text',
-                placeholder: 'https://api.qnaigc.com/v1'
-            }
-        ],
-        'fenno': [
-            {
-                id: 'OPENAI_API_KEY',
-                label: t('modal.provider.field.apiKey'),
-                type: 'password',
-                placeholder: 'sk-...'
-            },
-            {
-                id: 'OPENAI_BASE_URL',
-                label: 'OpenAI Base URL',
-                type: 'text',
-                placeholder: 'https://api.fenno.ai/v1'
-            }
-        ],
-        'openaiResponses-custom': [
-            {
-                id: 'OPENAI_API_KEY',
-                label: t('modal.provider.field.apiKey'),
-                type: 'password',
-                placeholder: 'sk-...'
-            },
-            {
-                id: 'OPENAI_BASE_URL',
-                label: 'OpenAI Base URL',
-                type: 'text',
-                placeholder: 'https://api.openai.com/v1'
-            }
-        ],
-        'claude-custom': [
-            {
-                id: 'CLAUDE_API_KEY',
-                label: 'Claude API Key',
-                type: 'password',
-                placeholder: 'sk-ant-...'
-            },
-            {
-                id: 'CLAUDE_BASE_URL',
-                label: 'Claude Base URL',
-                type: 'text',
-                placeholder: 'https://api.anthropic.com/v1'
-            }
-        ],
         'gemini-cli-oauth': [
             {
                 id: 'PROJECT_ID',
