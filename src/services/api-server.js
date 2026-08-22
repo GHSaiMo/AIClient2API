@@ -179,7 +179,7 @@ function setupWorkerCommunication() {
 /**
  * 优雅关闭服务器
  */
-async function gracefulShutdown() {
+async function gracefulShutdown(exitCode = 0) {
     logger.info('[Server] Initiating graceful shutdown...');
 
     // 停止所有插件
@@ -200,16 +200,16 @@ async function gracefulShutdown() {
     if (serverInstance) {
         serverInstance.close(() => {
             logger.info('[Server] HTTP server closed');
-            process.exit(0);
+            process.exit(exitCode);
         });
 
         // 设置超时，防止无限等待
         setTimeout(() => {
             logger.info('[Server] Shutdown timeout, forcing exit...');
-            process.exit(1);
+            process.exit(exitCode || 1);
         }, 10000);
     } else {
-        process.exit(0);
+        process.exit(exitCode);
     }
 }
 
@@ -219,12 +219,12 @@ async function gracefulShutdown() {
 function setupSignalHandlers() {
     process.on('SIGTERM', () => {
         logger.info('[Server] Received SIGTERM');
-        gracefulShutdown();
+        gracefulShutdown(0);
     });
 
     process.on('SIGINT', () => {
         logger.info('[Server] Received SIGINT');
-        gracefulShutdown();
+        gracefulShutdown(0);
     });
 
     process.on('uncaughtException', (error) => {
@@ -238,7 +238,7 @@ function setupSignalHandlers() {
         
         // 对于其他严重错误，执行优雅关闭
         logger.error('[Server] Fatal error detected, initiating shutdown...');
-        gracefulShutdown();
+        gracefulShutdown(1);
     });
 
     process.on('unhandledRejection', (reason, promise) => {
