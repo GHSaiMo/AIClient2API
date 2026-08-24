@@ -1,9 +1,10 @@
 import axios from 'axios';
 import logger from '../../utils/logger.js';
 import { parseProxyUrl } from '../../utils/proxy-utils.js';
+import { getChatGPTRunnerManager } from './chatgpt-runner-manager.js';
 
 const OAUTH_TOKEN_URL = 'https://auth.openai.com/oauth/token';
-const OAUTH_CLIENT_ID = 'app_2SKx67EdpoN0G6j64rFvigXD';
+const OAUTH_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann';
 const DEFAULT_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36';
 
 /**
@@ -48,6 +49,23 @@ export function isJwtExpiredOrNear(token, skewSeconds = 24 * 60 * 60) {
 export async function refreshAccessToken(refreshToken, proxyUrl = null) {
     if (!refreshToken) {
         throw new Error('refresh_token is required');
+    }
+
+    // Try via ChatGPTRunner first if available
+    try {
+        const runner = getChatGPTRunnerManager();
+        const isReady = await runner.ensureReady();
+        if (isReady) {
+            const res = await axios.post(`${runner.baseUrl}/refresh-token`, {
+                refresh_token: refreshToken,
+                proxy_url: proxyUrl
+            }, { timeout: 30000 });
+            if (res.data && res.data.access_token) {
+                return res.data;
+            }
+        }
+    } catch (e) {
+        logger.warn(`[ChatGPT Token Service] Runner refresh failed, falling back to direct OAuth: ${e.message}`);
     }
 
     const axiosConfig = {
@@ -110,7 +128,7 @@ export function extractQuotaAndRestoreAt(limitsProgress) {
 }
 
 /**
- * 获取账号详细信息及图片配额
+ * 获取账号详细信息及图片配额（通过 Python curl_cffi runner）
  * @param {string} accessToken 
  * @param {string} [proxyUrl] 
  * @param {Object} [fp] 
@@ -121,93 +139,34 @@ export async function fetchUserInfo(accessToken, proxyUrl = null, fp = {}) {
         throw new Error('access_token is required to fetch user info');
     }
 
-    const userAgent = fp['user-agent'] || DEFAULT_USER_AGENT;
-    const baseHeaders = {
-        'Authorization': `Bearer ${accessToken}`,
-        'User-Agent': userAgent,
-        'Origin': 'https://chatgpt.com',
-        'Referer': 'https://chatgpt.com/',
-        'Accept': 'application/json',
-        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-        'OAI-Device-Id': fp['oai-device-id'] || 'device-uuid',
-        'OAI-Session-Id': fp['oai-session-id'] || 'session-uuid',
-        'OAI-Language': 'zh-CN'
-    };
-
-    const axiosConfig = {
-        headers: baseHeaders,
-        timeout: 20000
-    };
-
-    if (proxyUrl) {
-        const proxyConfig = parseProxyUrl(proxyUrl);
-        if (proxyConfig) {
-            axiosConfig.httpAgent = proxyConfig.httpAgent;
-            axiosConfig.httpsAgent = proxyConfig.httpsAgent;
-            axiosConfig.proxy = false;
-        }
+    const runner = getChatGPTRunnerManager();
+    const isReady = await runner.ensureReady();
+    if (!isReady) {
+        throw new Error('ChatGPT-Web Python runner engine is not ready');
     }
 
-    const getMe = async () => {
-        const path = '/backend-api/me';
-        const res = await axios.get(`https://chatgpt.com${path}`, {
-            ...axiosConfig,
-            headers: { ...baseHeaders, 'X-OpenAI-Target-Path': path, 'X-OpenAI-Target-Route': path }
-        });
-        return res.data || {};
-    };
+    const res = await axios.post(`${runner.baseUrl}/user-info`, {
+        access_token: accessToken,
+        proxy_url: proxyUrl
+    }, { timeout: 30000 });
 
-    const getInit = async () => {
-        const path = '/backend-api/conversation/init';
-        const res = await axios.post(`https://chatgpt.com${path}`, {
-            gizmo_id: null,
-            requested_default_model: null,
-            conversation_id: null,
-            timezone_offset_min: -480
-        }, {
-            ...axiosConfig,
-            headers: {
-                ...baseHeaders,
-                'Content-Type': 'application/json',
-                'X-OpenAI-Target-Path': path,
-                'X-OpenAI-Target-Route': path
-            }
-        });
-        return res.data || {};
-    };
-
-    const getDefaultAccount = async () => {
-        const path = '/backend-api/accounts/check/v4-2023-04-27';
-        const res = await axios.get(`https://chatgpt.com${path}?timezone_offset_min=-480`, {
-            ...axiosConfig,
-            headers: { ...baseHeaders, 'X-OpenAI-Target-Path': path, 'X-OpenAI-Target-Route': path }
-        });
-        const payload = res.data || {};
-        return payload?.accounts?.default?.account || {};
-    };
-
-    const [meRes, initRes, accountRes] = await Promise.allSettled([
-        getMe(),
-        getInit(),
-        getDefaultAccount()
-    ]);
-
-    const mePayload = meRes.status === 'fulfilled' ? meRes.value : {};
-    const initPayload = initRes.status === 'fulfilled' ? initRes.value : {};
-    const defaultAccount = accountRes.status === 'fulfilled' ? accountRes.value : {};
-
-    const planType = String(defaultAccount.plan_type || 'free');
-    const limitsProgress = Array.isArray(initPayload.limits_progress) ? initPayload.limits_progress : [];
-    const [quota, restoreAt] = extractQuotaAndRestoreAt(limitsProgress);
-
+    const info = res.data || {};
     return {
-        email: mePayload.email || decodeJwtPayload(accessToken)?.email || null,
-        user_id: mePayload.id || null,
-        type: planType,
-        quota,
-        limits_progress: limitsProgress,
-        default_model_slug: initPayload.default_model_slug || 'auto',
-        restore_at: restoreAt,
-        status: quota === 0 ? '限流' : '正常'
+        email: info.email || decodeJwtPayload(accessToken)?.['https://api.openai.com/profile']?.email || null,
+        user_id: info.user_id || null,
+        type: info.type || 'free',
+        quota: typeof info.quota === 'number' ? info.quota : 0,
+        limits_progress: info.limits_progress || [],
+        default_model_slug: info.default_model_slug || 'auto',
+        restore_at: info.restore_at || null,
+        status: info.status || (info.quota === 0 ? '限流' : '正常')
     };
 }
+
+export default {
+    decodeJwtPayload,
+    isJwtExpiredOrNear,
+    refreshAccessToken,
+    fetchUserInfo,
+    extractQuotaAndRestoreAt
+};
