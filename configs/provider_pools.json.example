@@ -260,5 +260,26 @@
       "errorCount": 0,
       "lastErrorTime": null
     }
+  ],
+  "chatgpt-web": [
+    {
+      "customName": "ChatGPT-Web节点1",
+      "access_token": "eyJhbGciOiJSUzI1NiIs...",
+      "refresh_token": "rt_...",
+      "email": "user@example.com",
+      "accountType": "Plus",
+      "quota": 5,
+      "restore_at": null,
+      "PROXY_URL": "http://127.0.0.1:7890",
+      "uuid": "7f579c65-d3c5-41b1-9985-9f6e3d7bf39a",
+      "checkModelName": "gpt-image-2",
+      "checkHealth": false,
+      "isHealthy": true,
+      "isDisabled": false,
+      "lastUsed": null,
+      "usageCount": 0,
+      "errorCount": 0,
+      "lastErrorTime": null
+    }
   ]
 }

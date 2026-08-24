@@ -590,6 +590,10 @@ export function getProtocolPrefix(provider) {
         provider === 'fenno' || provider.startsWith('fenno-')) {
         return MODEL_PROTOCOL_PREFIX.OPENAI;
     }
+    // ChatGPT Web
+    if (provider === 'chatgpt-web' || provider.startsWith('chatgpt-web-')) {
+        return MODEL_PROTOCOL_PREFIX.CHATGPT;
+    }
 
     const hyphenIndex = provider.indexOf('-');
     if (hyphenIndex !== -1) {

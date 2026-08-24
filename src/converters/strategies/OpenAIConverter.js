@@ -64,6 +64,9 @@ export class OpenAIConverter extends BaseConverter {
      */
     convertRequest(data, targetProtocol, requestId) {
         switch (targetProtocol) {
+            case MODEL_PROTOCOL_PREFIX.OPENAI:
+            case MODEL_PROTOCOL_PREFIX.CHATGPT:
+                return data;
             case MODEL_PROTOCOL_PREFIX.CLAUDE:
                 return this.toClaudeRequest(data);
             case MODEL_PROTOCOL_PREFIX.GEMINI:
@@ -86,6 +89,9 @@ export class OpenAIConverter extends BaseConverter {
         // OpenAI作为源格式时，通常不需要转换响应
         // 因为其他协议会转换到OpenAI格式
         switch (targetProtocol) {
+            case MODEL_PROTOCOL_PREFIX.OPENAI:
+            case MODEL_PROTOCOL_PREFIX.CHATGPT:
+                return data;
             case MODEL_PROTOCOL_PREFIX.CLAUDE:
                 return this.toClaudeResponse(data, model);
             case MODEL_PROTOCOL_PREFIX.GEMINI:
@@ -111,6 +117,9 @@ export class OpenAIConverter extends BaseConverter {
      */
     convertStreamChunk(chunk, targetProtocol, model, requestId) {
         switch (targetProtocol) {
+            case MODEL_PROTOCOL_PREFIX.OPENAI:
+            case MODEL_PROTOCOL_PREFIX.CHATGPT:
+                return chunk;
             case MODEL_PROTOCOL_PREFIX.CLAUDE:
                 return this.toClaudeStreamChunk(chunk, model);
             case MODEL_PROTOCOL_PREFIX.GEMINI:

@@ -28,7 +28,7 @@ function sanitizeProviderData(provider, maskSensitive = false) {
     if (maskSensitive) {
         for (const key in sanitized) {
             // 排除已知非敏感字段
-            if (key === 'uuid' || key === 'customName' || key === 'isHealthy' || key === 'isDisabled' || key === 'needsRefresh') continue;
+            if (key === 'uuid' || key === 'customName' || key === 'isHealthy' || key === 'isDisabled' || key === 'needsRefresh' || key === 'quota' || key === 'restore_at' || key === 'accountType' || key === 'email') continue;
             
             const val = sanitized[key];
             if (typeof val !== 'string' || !val) continue;
