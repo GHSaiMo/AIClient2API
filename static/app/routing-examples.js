@@ -286,6 +286,17 @@ function getAvailableRoutes() {
             description: t('dashboard.routing.free'),
             badge: t('dashboard.routing.free'),
             badgeClass: 'oauth'
+        },
+        {
+            provider: 'chatgpt-web',
+            name: t('dashboard.routing.nodeName.chatgptWeb') || 'ChatGPT Web',
+            paths: {
+                openai: '/chatgpt-web/v1/images/generations',
+                claude: '/chatgpt-web/v1/chat/completions'
+            },
+            description: t('dashboard.routing.description.chatgptWeb') || 'ChatGPT Web 图像生成与编辑',
+            badge: 'Image Gen',
+            badgeClass: 'oauth'
         }
     ];
 }
@@ -484,6 +495,17 @@ async function copyCurlExample(provider, options = {}) {
   }'`;
             }
             break;
+        case 'chatgpt-web':
+            curlCommand = `curl ${hostname}${path} \\
+  -H "Content-Type: application/json" \\
+  -H "Authorization: Bearer YOUR_API_KEY" \\
+  -d '{
+    "model": "gpt-image-2",
+    "prompt": "${message || 'A cute cat in space'}",
+    "n": 1,
+    "response_format": "b64_json"
+  }'`;
+            break;
         default:
             // 通用默认模板
             curlCommand = `curl ${hostname}${path} \\
@@ -542,7 +564,8 @@ function renderRoutingExamples(providerConfigs) {
         'openai-iflow': 'fa-wind',
         'openai-codex-oauth': 'fa-keyboard',
         'grok-cli-oauth': 'fa-terminal',
-        'grok-web': 'fa-search'
+        'grok-web': 'fa-search',
+        'chatgpt-web': 'fa-paintbrush'
     };
 
     // 默认模型映射 (用于 curl 示例)
@@ -561,6 +584,7 @@ function renderRoutingExamples(providerConfigs) {
         'openaiResponses-custom': 'gpt-5.5',
         'grok-web': 'grok-4.3',
         'grok-cli-oauth': 'grok-4.3',
+        'chatgpt-web': 'gpt-image-2',
         'forward-api': 'gpt-5.5'
     };
 

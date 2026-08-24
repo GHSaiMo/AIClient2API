@@ -82,6 +82,7 @@ export class ProviderPoolManager {
         'openaiResponses-custom': 'gpt-5.5',
         'grok-web': 'grok-4.3',
         'grok-cli-oauth': 'grok-4.3',
+        'chatgpt-web': 'gpt-image-2',
         'forward-api': 'gpt-5.5'
     };
 
@@ -182,6 +183,20 @@ export class ProviderPoolManager {
                     configPath = config.CODEX_OAUTH_CREDS_FILE_PATH;
                 } else if (providerType.startsWith('grok-cli')) {
                     configPath = config.GROK_CLI_OAUTH_CREDS_FILE_PATH;
+                } else if (providerType.startsWith('chatgpt-web')) {
+                    // ChatGPT Web 直接通过 access_token / refresh_token 判断
+                    if (config.access_token && config.refresh_token) {
+                        try {
+                            const { isJwtExpiredOrNear } = await import('./chatgpt/chatgpt-token-service.js');
+                            if (isJwtExpiredOrNear(config.access_token, 60 * 60 * 24)) {
+                                this._log('warn', `Node ${this._getDisplayName(config)} (${providerType}) access token near expiration. Enqueuing refresh...`);
+                                this._enqueueRefresh(providerType, providerStatus);
+                                continue;
+                            }
+                        } catch (err) {
+                            this._log('debug', `Failed to check JWT expiry for ${this._getDisplayName(config)}: ${err.message}`);
+                        }
+                    }
                 }
                 
                 // logger.info(`Checking node ${this._getDisplayName(config)} (${providerType}) expiry date... configPath: ${configPath}`);
@@ -2309,6 +2324,36 @@ export class ProviderPoolManager {
         };
         delete tempConfig.providerPools;
         const serviceAdapter = getServiceAdapter(tempConfig);
+
+        // ChatGPT Web 优先使用轻量级 usage/modelList 探测，避免消耗用户实际生图配额
+        if (providerType === 'chatgpt-web' || providerType.startsWith('chatgpt-web-')) {
+            try {
+                if (typeof serviceAdapter.getUsageLimits === 'function') {
+                    const usage = await serviceAdapter.getUsageLimits();
+                    if (usage) {
+                        if (usage.quota !== null && usage.quota !== undefined) {
+                            providerConfig.quota = usage.quota;
+                        }
+                        if (usage.restore_at) {
+                            providerConfig.restore_at = usage.restore_at;
+                        }
+                        if (usage.email) {
+                            providerConfig.email = usage.email;
+                        }
+                        if (usage.accountType) {
+                            providerConfig.accountType = usage.accountType;
+                        }
+                        return { success: true, modelName, errorMessage: null };
+                    }
+                }
+                const models = await serviceAdapter.listModels();
+                if (models?.data?.length > 0) {
+                    return { success: true, modelName, errorMessage: null };
+                }
+            } catch (error) {
+                return { success: false, modelName, errorMessage: error.message };
+            }
+        }
 
         // 获取所有可能的请求格式
         const healthCheckRequests = this._buildHealthCheckRequests(providerType, modelName);

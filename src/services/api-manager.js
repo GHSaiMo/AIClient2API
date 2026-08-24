@@ -378,6 +378,12 @@ function extractRejectionMessage(responses, providerProtocol) {
                 }
             }
         }
+
+        // ChatGPT Web style
+        if (providerProtocol === MODEL_PROTOCOL_PREFIX.CHATGPT) {
+            if (response?.error?.message) return response.error.message;
+            if (response?.message) return response.message;
+        }
     }
     return null;
 }
@@ -742,6 +748,14 @@ function extractImagesFromServiceResponse(response, providerProtocol, responseFo
                         ? { url: `data:${part.inlineData.mimeType};base64,${part.inlineData.data}` }
                         : { b64_json: part.inlineData.data };
                     data.push(dataItem);
+                }
+            }
+        }
+    } else if (providerProtocol === MODEL_PROTOCOL_PREFIX.CHATGPT || Array.isArray(response?.data)) {
+        if (Array.isArray(response?.data)) {
+            for (const item of response.data) {
+                if (item?.b64_json || item?.url) {
+                    data.push(item);
                 }
             }
         }

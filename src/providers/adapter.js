@@ -10,6 +10,7 @@ import { CodexApiService } from './openai/codex-core.js';
 import { ForwardApiService } from './forward/forward-core.js';
 import { GrokApiService } from './grok/grok-core.js';
 import { GrokCliApiService } from './grok/grok-cli-core.js';
+import { ChatGPTWebService } from './chatgpt/chatgpt-web-core.js';
 import { MODEL_PROVIDER } from '../utils/constants.js';
 import logger from '../utils/logger.js';
 
@@ -749,6 +750,54 @@ export class GrokCliApiServiceAdapter extends ApiServiceAdapter {
     }
 }
 
+// ChatGPT Web 逆向服务适配器
+export class ChatGPTWebApiServiceAdapter extends ApiServiceAdapter {
+    constructor(config) {
+        super();
+        this.chatgptWebService = new ChatGPTWebService(config);
+    }
+
+    async generateContent(model, requestBody) {
+        if (!this.chatgptWebService.isInitialized) {
+            await this.chatgptWebService.initialize();
+        }
+        return this.chatgptWebService.generateContent(model, requestBody);
+    }
+
+    async *generateContentStream(model, requestBody) {
+        if (!this.chatgptWebService.isInitialized) {
+            await this.chatgptWebService.initialize();
+        }
+        yield* this.chatgptWebService.generateContentStream(model, requestBody);
+    }
+
+    async listModels() {
+        if (!this.chatgptWebService.isInitialized) {
+            await this.chatgptWebService.initialize();
+        }
+        return this.chatgptWebService.listModels();
+    }
+
+    async refreshToken() {
+        return this.chatgptWebService.refreshToken();
+    }
+
+    async forceRefreshToken() {
+        return this.chatgptWebService.forceRefreshToken();
+    }
+
+    isExpiryDateNear() {
+        return this.chatgptWebService.isExpiryDateNear();
+    }
+
+    async getUsageLimits() {
+        if (!this.chatgptWebService.isInitialized) {
+            await this.chatgptWebService.initialize();
+        }
+        return this.chatgptWebService.getUsageLimits();
+    }
+}
+
 // 注册所有内置适配器
 registerAdapter(MODEL_PROVIDER.QINIU, OpenAIApiServiceAdapter);
 registerAdapter(MODEL_PROVIDER.FENNO, OpenAIApiServiceAdapter);
@@ -761,6 +810,7 @@ registerAdapter(MODEL_PROVIDER.KIRO_API, KiroApiServiceAdapter);
 registerAdapter(MODEL_PROVIDER.CODEX_API, CodexApiServiceAdapter);
 registerAdapter(MODEL_PROVIDER.GROK_CLI, GrokCliApiServiceAdapter);
 registerAdapter(MODEL_PROVIDER.GROK_WEB, GrokApiServiceAdapter);
+registerAdapter(MODEL_PROVIDER.CHATGPT_WEB, ChatGPTWebApiServiceAdapter);
 // registerAdapter(MODEL_PROVIDER.FORWARD_API, ForwardApiServiceAdapter);
 // registerAdapter(MODEL_PROVIDER.QWEN_API, QwenApiServiceAdapter);
 // registerAdapter(MODEL_PROVIDER.IFLOW_API, IFlowApiServiceAdapter);

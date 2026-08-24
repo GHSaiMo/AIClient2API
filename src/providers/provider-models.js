@@ -184,6 +184,15 @@ export const PROVIDER_MODELS = {
         'grok-imagine-1.0-edit',
         'grok-imagine-1.0-fast',
         'grok-imagine-1.0-fast-edit',
+    ],
+    'chatgpt-web': [
+        'gpt-image-2',
+        'gpt-5',
+        'gpt-5-1',
+        'gpt-5-2',
+        'gpt-5-3',
+        'gpt-5-mini',
+        'auto'
     ]
 };
 

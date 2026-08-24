@@ -70,6 +70,13 @@ function getBaseProviderConfigs() {
             name: t('dashboard.routing.nodeName.grok'), 
             usageName: 'Grok Web',
             icon: 'fa-user-secret'
+        },
+        { 
+            id: 'chatgpt-web', 
+            name: t('dashboard.routing.nodeName.chatgptWeb') || 'ChatGPT Web', 
+            usageName: 'ChatGPT Web',
+            icon: 'fa-paintbrush',
+            defaultPath: 'configs/chatgpt-web/'
         }
     ];
 }
@@ -424,6 +431,38 @@ function getProviderTypeFields(providerType) {
                 label: `${t('modal.provider.field.statsigId')} <span class="optional-tag">${t('config.optional')}</span>`,
                 type: 'text',
                 placeholder: 'x-statsig-id header value'
+            }
+        ],
+        'chatgpt-web': [
+            {
+                id: 'access_token',
+                label: 'Access Token',
+                type: 'password',
+                placeholder: 'Bearer eyJhbGciOi...'
+            },
+            {
+                id: 'refresh_token',
+                label: `Refresh Token <span class="optional-tag">${t('config.optional')}</span>`,
+                type: 'password',
+                placeholder: 'OAuth Refresh Token (用于自动续期)'
+            },
+            {
+                id: 'email',
+                label: `${t('modal.provider.field.email')} <span class="optional-tag">${t('config.optional')}</span>`,
+                type: 'email',
+                placeholder: t('modal.provider.field.email.placeholder')
+            },
+            {
+                id: 'accountType',
+                label: `${t('modal.provider.field.accountType') || '订阅类型'} <span class="optional-tag">${t('config.optional')}</span>`,
+                type: 'text',
+                placeholder: 'Plus / Team / Pro / Free'
+            },
+            {
+                id: 'PROXY_URL',
+                label: `${t('modal.provider.field.proxyUrl') || '代理地址'} <span class="optional-tag">${t('config.optional')}</span>`,
+                type: 'text',
+                placeholder: 'http://127.0.0.1:7890'
             }
         ],
         'forward-api': [

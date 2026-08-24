@@ -761,7 +761,7 @@ async function openProviderManager(providerType, searchTerm = '') {
  */
 function generateAuthButton(providerType) {
     // 只为支持OAuth或批量导入的提供商显示授权按钮
-    const oauthProviders = ['gemini-cli-oauth', 'gemini-antigravity', 'openai-qwen-oauth', 'claude-kiro-oauth', 'openai-iflow', 'openai-codex-oauth', 'grok-cli-oauth', 'grok-web'];
+    const oauthProviders = ['gemini-cli-oauth', 'gemini-antigravity', 'openai-qwen-oauth', 'claude-kiro-oauth', 'openai-iflow', 'openai-codex-oauth', 'grok-cli-oauth', 'grok-web', 'chatgpt-web'];
 
     if (!oauthProviders.includes(providerType)) {
         return '';
@@ -922,6 +922,12 @@ async function handleGenerateAuthUrl(providerType) {
     // 如果是 Grok，显示认证方式选择对话框（目前仅支持批量导入，因为没有标准 OAuth）
     if (providerType === 'grok-web') {
         showGrokAuthMethodSelector(providerType);
+        return;
+    }
+
+    // 如果是 ChatGPT Web，显示认证方式选择对话框（支持 Token 添加与批量导入）
+    if (providerType === 'chatgpt-web') {
+        showChatGPTWebAuthMethodSelector(providerType);
         return;
     }
 
@@ -2333,6 +2339,303 @@ sso_token_2_def...</pre>
             submitBtn.disabled = false;
             cancelBtn.disabled = false;
         }
+    };
+}
+
+/**
+ * 显示 ChatGPT Web 认证方式选择对话框
+ * @param {string} providerType - 提供商类型
+ */
+function showChatGPTWebAuthMethodSelector(providerType) {
+    const modal = document.createElement('div');
+    modal.className = 'modal-overlay';
+    modal.style.display = 'flex';
+    
+    modal.innerHTML = `
+        <div class="modal-content" style="max-width: 500px;">
+            <div class="modal-header">
+                <h3><i class="fas fa-paintbrush"></i> <span>ChatGPT Web 凭据导入</span></h3>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="auth-method-options" style="display: flex; flex-direction: column; gap: 12px;">
+                    <button class="auth-method-btn" data-method="batch-import" style="display: flex; align-items: center; gap: 12px; padding: 16px; border: 2px solid #e0e0e0; border-radius: 8px; background: white; cursor: pointer; transition: all 0.2s;">
+                        <i class="fas fa-file-import" style="font-size: 24px; color: #10b981;"></i>
+                        <div style="text-align: left;">
+                            <div style="font-weight: 600; color: #333;">${t('oauth.chatgptWeb.batchImport')}</div>
+                            <div style="font-size: 12px; color: #666;">${t('oauth.chatgptWeb.batchImportDesc')}</div>
+                        </div>
+                    </button>
+                    <div style="padding: 12px; background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; font-size: 13px; color: #92400e;">
+                        <i class="fas fa-info-circle"></i> 支持粘贴 Access Token（每行一个）或包含 refresh_token 的完整账号 JSON 数组。
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="modal-cancel">${t('modal.provider.cancel')}</button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    
+    const closeBtn = modal.querySelector('.modal-close');
+    const cancelBtn = modal.querySelector('.modal-cancel');
+    [closeBtn, cancelBtn].forEach(btn => {
+        btn.addEventListener('click', () => {
+            modal.remove();
+        });
+    });
+    
+    const methodBtns = modal.querySelectorAll('.auth-method-btn');
+    methodBtns.forEach(btn => {
+        btn.addEventListener('mouseenter', () => {
+            btn.style.borderColor = '#10b981';
+            btn.style.background = '#f0fdf4';
+        });
+        btn.addEventListener('mouseleave', () => {
+            btn.style.borderColor = '#e0e0e0';
+            btn.style.background = 'white';
+        });
+        btn.addEventListener('click', async () => {
+            const method = btn.dataset.method;
+            modal.remove();
+            
+            if (method === 'batch-import') {
+                showChatGPTWebBatchImportModal(providerType);
+            }
+        });
+    });
+}
+
+/**
+ * 显示 ChatGPT Web 批量导入模态框
+ * @param {string} providerType - 提供商类型
+ */
+function showChatGPTWebBatchImportModal(providerType) {
+    const modal = document.createElement('div');
+    modal.className = 'modal-overlay';
+    modal.style.display = 'flex';
+    
+    modal.innerHTML = `
+        <div class="modal-content" style="max-width: 600px;">
+            <div class="modal-header">
+                <h3><i class="fas fa-file-import"></i> <span>${t('oauth.chatgptWeb.batchImport')}</span></h3>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="batch-import-instructions" style="margin-bottom: 16px; padding: 12px; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px;">
+                    <p style="margin: 0; font-size: 14px; color: #1e40af;">
+                        <i class="fas fa-info-circle"></i>
+                        <span>${t('oauth.chatgptWeb.importInstructions')}</span>
+                    </p>
+                </div>
+                <div class="form-group">
+                    <label for="batchChatGPTTokens" style="display: block; margin-bottom: 8px; font-weight: 600; color: #374151;">
+                        <span>${t('oauth.chatgptWeb.tokensLabel')}</span>
+                    </label>
+                    <textarea 
+                        id="batchChatGPTTokens" 
+                        rows="10" 
+                        style="width: 100%; padding: 12px; border: 1px solid #d1d5db; border-radius: 8px; font-family: monospace; font-size: 13px; resize: vertical;"
+                        placeholder='${t('oauth.chatgptWeb.tokensPlaceholder')}'
+                    ></textarea>
+                </div>
+                <div class="form-group" style="margin-top: 12px; margin-bottom: 16px;">
+                    <details style="background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px;">
+                        <summary style="padding: 12px; cursor: pointer; font-weight: 600; color: #374151; user-select: none;">
+                            <i class="fas fa-code" style="color: #10b981; margin-right: 8px;"></i>
+                            <span>${t('oauth.chatgptWeb.jsonExample')}</span>
+                        </summary>
+                        <div style="padding: 12px; background: #1f2937; border-radius: 0 0 8px 8px;">
+                            <div style="color: #10b981; font-family: monospace; font-size: 12px;">
+                                <div style="color: #9ca3af; margin-bottom: 8px;">// 格式 1：纯文本（每行一个 Access Token）</div>
+                                <pre style="margin: 0; white-space: pre; overflow-x: auto; color: #34d399;">eyJhbGciOiJSUzI1NiIs...
+eyJhbGciOiJSUzI1NiIs...</pre>
+                            </div>
+                            <div style="color: #10b981; font-family: monospace; font-size: 12px; margin-top: 16px;">
+                                <div style="color: #9ca3af; margin-bottom: 8px;">// 格式 2：JSON 数组（支持 refresh_token 自动续期）</div>
+                                <pre style="margin: 0; white-space: pre; overflow-x: auto; color: #34d399;">[
+  {
+    "access_token": "eyJhbGciOi...",
+    "refresh_token": "rt_...",
+    "email": "user@example.com",
+    "accountType": "Plus"
+  }
+]</pre>
+                            </div>
+                        </div>
+                    </details>
+                </div>
+                <div class="batch-import-stats" id="chatgptBatchStats" style="display: none; margin-top: 12px; padding: 12px; background: #f3f4f6; border-radius: 8px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span>${t('oauth.chatgptWeb.tokenCount')}</span>
+                        <span id="chatgptTokenCountValue" style="font-weight: 600;">0</span>
+                    </div>
+                </div>
+                <div class="batch-import-progress" id="chatgptBatchProgress" style="display: none; margin-top: 16px;">
+                    <div style="display: flex; align-items: center; gap: 12px;">
+                        <i class="fas fa-spinner fa-spin" style="color: #10b981;"></i>
+                        <span>${t('oauth.chatgptWeb.importing')}</span>
+                    </div>
+                    <div class="progress-bar" style="margin-top: 8px; height: 8px; background: #e5e7eb; border-radius: 4px; overflow: hidden;">
+                        <div id="chatgptImportProgressBar" style="height: 100%; width: 0%; background: #10b981; transition: width 0.3s;"></div>
+                    </div>
+                </div>
+                <div class="batch-import-result" id="chatgptBatchResult" style="display: none; margin-top: 16px; padding: 12px; border-radius: 8px;"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="modal-cancel">${t('modal.provider.cancel')}</button>
+                <button class="btn btn-primary batch-import-submit" id="chatgptBatchSubmit">
+                    <i class="fas fa-upload"></i>
+                    <span>${t('oauth.chatgptWeb.startImport')}</span>
+                </button>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    
+    const textarea = modal.querySelector('#batchChatGPTTokens');
+    const statsDiv = modal.querySelector('#chatgptBatchStats');
+    const tokenCountValue = modal.querySelector('#chatgptTokenCountValue');
+    const progressDiv = modal.querySelector('#chatgptBatchProgress');
+    const progressBar = modal.querySelector('#chatgptImportProgressBar');
+    const resultDiv = modal.querySelector('#chatgptBatchResult');
+    const submitBtn = modal.querySelector('#chatgptBatchSubmit');
+    const closeBtn = modal.querySelector('.modal-close');
+    const cancelBtn = modal.querySelector('.modal-cancel');
+    
+    textarea.addEventListener('input', () => {
+        const content = textarea.value.trim();
+        if (!content) {
+            statsDiv.style.display = 'none';
+            return;
+        }
+        
+        let tokens = [];
+        try {
+            const parsed = JSON.parse(content);
+            tokens = Array.isArray(parsed) ? parsed : [parsed];
+        } catch (e) {
+            tokens = content.split('\n').map(t => t.trim()).filter(t => t.length > 0);
+        }
+        
+        tokenCountValue.textContent = tokens.length;
+        statsDiv.style.display = 'block';
+    });
+    
+    [closeBtn, cancelBtn].forEach(btn => {
+        btn.addEventListener('click', () => modal.remove());
+    });
+    
+    submitBtn.onclick = async () => {
+        const content = textarea.value.trim();
+        if (!content) {
+            showToast(t('common.error'), t('oauth.chatgptWeb.noTokens'), 'error');
+            return;
+        }
+        
+        let rawItems = [];
+        try {
+            const parsed = JSON.parse(content);
+            rawItems = Array.isArray(parsed) ? parsed : [parsed];
+        } catch (e) {
+            rawItems = content.split('\n').map(t => t.trim()).filter(t => t.length > 0);
+        }
+        
+        if (rawItems.length === 0) {
+            showToast(t('common.warning'), t('oauth.chatgptWeb.noTokens'), 'warning');
+            return;
+        }
+        
+        textarea.disabled = true;
+        submitBtn.disabled = true;
+        cancelBtn.disabled = true;
+        progressDiv.style.display = 'block';
+        resultDiv.style.display = 'none';
+        progressBar.style.width = '0%';
+        
+        resultDiv.style.cssText = 'display: block; margin-top: 16px; padding: 12px; border-radius: 8px; background: #f3f4f6; border: 1px solid #d1d5db;';
+        resultDiv.innerHTML = `
+            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                <i class="fas fa-spinner fa-spin" style="color: #10b981;"></i>
+                <strong id="chatgptBatchProgressText">${t('oauth.chatgptWeb.importingProgress', { current: 0, total: rawItems.length })}</strong>
+            </div>
+            <div id="chatgptBatchResultsList" style="max-height: 200px; overflow-y: auto; font-size: 12px; margin-top: 8px;"></div>
+        `;
+        
+        const progressText = resultDiv.querySelector('#chatgptBatchProgressText');
+        const resultsList = resultDiv.querySelector('#chatgptBatchResultsList');
+        
+        let successCount = 0;
+        let failCount = 0;
+        
+        for (let i = 0; i < rawItems.length; i++) {
+            const item = rawItems[i];
+            let providerConfig = {};
+            
+            if (typeof item === 'string') {
+                providerConfig = {
+                    access_token: item,
+                    customName: `ChatGPT-Web-${i + 1}`
+                };
+            } else if (typeof item === 'object' && item !== null) {
+                providerConfig = {
+                    access_token: item.access_token || item.accessToken || item.token || '',
+                    refresh_token: item.refresh_token || item.refreshToken || '',
+                    email: item.email || '',
+                    accountType: item.accountType || item.plan_type || item.type || '',
+                    PROXY_URL: item.proxy || item.PROXY_URL || '',
+                    customName: item.customName || item.email || `ChatGPT-Web-${i + 1}`
+                };
+            }
+            
+            const percentage = Math.round(((i + 1) / rawItems.length) * 100);
+            progressBar.style.width = `${percentage}%`;
+            progressText.textContent = t('oauth.chatgptWeb.importingProgress', { current: i + 1, total: rawItems.length });
+            
+            const resultItem = document.createElement('div');
+            resultItem.style.cssText = 'padding: 4px 0; border-bottom: 1px solid rgba(0,0,0,0.1);';
+            
+            try {
+                if (!providerConfig.access_token && !providerConfig.refresh_token) {
+                    throw new Error('Missing access_token or refresh_token');
+                }
+                
+                await window.apiClient.post('/providers', {
+                    providerType: 'chatgpt-web',
+                    providerConfig
+                });
+                
+                successCount++;
+                resultItem.innerHTML = `Token ${i + 1}: <span style="color: #166534;">✓ ${providerConfig.customName || providerConfig.email || 'Added successfully'}</span>`;
+            } catch (err) {
+                failCount++;
+                resultItem.innerHTML = `Token ${i + 1}: <span style="color: #991b1b;">✗ ${err.message}</span>`;
+            }
+            
+            resultsList.appendChild(resultItem);
+        }
+        
+        try {
+            await window.apiClient.post('/reload-config');
+        } catch {}
+        
+        const headerWrapper = resultDiv.querySelector('div:first-child');
+        headerWrapper.innerHTML = `<i class="fas fa-check-circle" style="color: #166534;"></i> <strong>${t('oauth.chatgptWeb.importSuccess', { count: successCount })} (${failCount} 失败)</strong>`;
+        
+        if (successCount > 0) {
+            setTimeout(() => {
+                if (window.loadProviders) window.loadProviders();
+                if (window.refreshProviderConfig) window.refreshProviderConfig(providerType);
+            }, 1000);
+        }
+        
+        submitBtn.innerHTML = `<i class="fas fa-check"></i> <span>${t('common.confirm')}</span>`;
+        submitBtn.disabled = false;
+        submitBtn.onclick = () => modal.remove();
+        cancelBtn.style.display = 'none';
     };
 }
 
