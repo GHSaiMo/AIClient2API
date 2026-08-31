@@ -397,6 +397,12 @@ function getProviderTypeFields(providerType) {
         ],
         'grok-web': [
             {
+                id: 'email',
+                label: '账号邮箱 <span class="optional-tag">自动映射</span>',
+                type: 'text',
+                placeholder: 'user@example.com'
+            },
+            {
                 id: 'GROK_COOKIE_TOKEN',
                 label: t('modal.provider.field.ssoToken'),
                 type: 'password',

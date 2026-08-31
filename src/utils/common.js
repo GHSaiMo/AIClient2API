@@ -1275,8 +1275,8 @@ export async function handleStreamRequest(res, service, model, requestBody, from
         if (!credentialMarkedUnhealthy && !skipErrorCount && providerPoolManager && pooluuid) {
             const isGrokAuthFailure = toProvider === 'grok-web' && (status === 401 || error.isDefinitiveAuthFailure === true);
             if (isGrokAuthFailure) {
-                logger.warn(`[Provider Pool] Automatically disabling ${toProvider} (${pooluuid}) due to invalid session/credentials: ${error.message}`);
-                providerPoolManager.disableProvider(toProvider, { uuid: pooluuid }, error.message);
+                logger.warn(`[Provider Pool] Grok auth failure for ${toProvider} (${pooluuid}). Marking as needsRefresh: ${error.message}`);
+                providerPoolManager.markProviderNeedRefresh(toProvider, { uuid: pooluuid });
                 credentialMarkedUnhealthy = true;
             } else if (error.response?.status === 400) {
                 // 400 报错码通常是请求参数问题，不记录为提供商错误
@@ -1554,8 +1554,8 @@ export async function handleUnaryRequest(res, service, model, requestBody, fromP
         if (!credentialMarkedUnhealthy && !skipErrorCount && providerPoolManager && pooluuid) {
             const isGrokAuthFailure = toProvider === 'grok-web' && (status === 401 || error.isDefinitiveAuthFailure === true);
             if (isGrokAuthFailure) {
-                logger.warn(`[Provider Pool] Automatically disabling ${toProvider} (${pooluuid}) due to invalid session/credentials: ${error.message}`);
-                providerPoolManager.disableProvider(toProvider, { uuid: pooluuid }, error.message);
+                logger.warn(`[Provider Pool] Grok auth failure for ${toProvider} (${pooluuid}). Marking as needsRefresh: ${error.message}`);
+                providerPoolManager.markProviderNeedRefresh(toProvider, { uuid: pooluuid });
                 credentialMarkedUnhealthy = true;
             } else if (error.response?.status === 400) {
                 // 400 报错码通常是请求参数问题，不记录为提供商错误

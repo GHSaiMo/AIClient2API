@@ -365,6 +365,7 @@ function renderProviders(providers, supportedProviders = []) {
             const displayName = (configMap[providerType]?.name || providerType).toLowerCase();
             const matchesType = displayName.includes(searchTerm) || providerType.toLowerCase().includes(searchTerm);
             const matchesNodes = accounts.some(acc => 
+                (acc.email || '').toLowerCase().includes(searchTerm) ||
                 (acc.customName || '').toLowerCase().includes(searchTerm) || 
                 (acc.uuid || '').toLowerCase().includes(searchTerm) ||
                 (acc.model || '').toLowerCase().includes(searchTerm)
@@ -641,7 +642,10 @@ function renderProviderStatusOverview(providers, configMap, sortedProviderTypes)
             <div class="node-dots">
                 ${accounts.map(acc => {
                     let statusClass = 'healthy';
-                    let statusTitle = acc.customName || acc.uuid;
+                    let statusTitle = acc.email || acc.customName || acc.uuid;
+                    if (acc.email && acc.customName && acc.customName !== acc.email) {
+                        statusTitle += ` (${acc.customName})`;
+                    }
                     if (acc.isDisabled) {
                         statusClass = 'disabled';
                         statusTitle += ` (${t('modal.provider.status.disabled')})`;
