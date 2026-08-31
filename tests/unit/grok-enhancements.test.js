@@ -265,5 +265,48 @@ describe('Phase 2: Grok Reasoning Replay & Tool Governance Suite', () => {
             streamSpy.mockRestore();
         });
     });
+
+    describe('4. Circular Structure Error & Auth Failure Classification Suite', () => {
+        it('isQuotaExhaustedError should handle circular stream objects without throwing TypeError', async () => {
+            const { isQuotaExhaustedError } = await import('../../src/utils/common.js');
+
+            // 构造类似 IncomingMessage 的循环引用对象
+            const circularStream = {
+                on: () => {},
+                read: () => {},
+                statusCode: 401
+            };
+            circularStream.req = { stream: circularStream };
+
+            const error = new Error('401 Unauthorized (stream): Failed to look up session ID.');
+            error.response = {
+                status: 401,
+                data: circularStream
+            };
+
+            expect(() => {
+                const isQuota = isQuotaExhaustedError(error);
+                expect(isQuota).toBe(false);
+            }).not.toThrow();
+        });
+
+        it('GrokApiService classifyApiError should identify 401 and invalid credentials as definitive auth failures', async () => {
+            const service = new GrokApiService({ GROK_COOKIE_TOKEN: 'test_token' });
+            const circularStream = { on: () => {}, read: () => {} };
+            circularStream.self = circularStream;
+
+            const error = new Error('401 Unauthorized (stream): Failed to look up session ID. [WKE=unauthenticated:invalid-credentials]');
+            error.response = {
+                status: 401,
+                data: circularStream
+            };
+
+            const result = await service.classifyApiError(error);
+            expect(result.status).toBe(401);
+            expect(result.isDefinitiveAuthFailure).toBe(true);
+            expect(error.isDefinitiveAuthFailure).toBe(true);
+            expect(error.shouldSwitchCredential).toBe(true);
+        });
+    });
 });
 

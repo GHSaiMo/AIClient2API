@@ -113,7 +113,17 @@ export class GrokApiService {
             await normalizeProviderErrorMessage(error, { status, context });
         }
 
-        if (status === 401 || status === 403 || status === 429 || status === 502) {
+        const normalizedMsg = (error.message || originalErrorMessage).toLowerCase();
+        const isAuthInvalid = status === 401 ||
+            normalizedMsg.includes('unauthenticated:invalid-credentials') ||
+            normalizedMsg.includes('failed to look up session id') ||
+            normalizedMsg.includes('session expired') ||
+            normalizedMsg.includes('invalid credentials');
+
+        if (isAuthInvalid) {
+            error.isDefinitiveAuthFailure = true;
+            error.shouldSwitchCredential = true;
+        } else if (status === 401 || status === 403 || status === 429 || status === 502) {
             error.shouldSwitchCredential = true;
         } else if (isNetworkError) {
             // Network jitter or request timeout should not immediately degrade account health.
@@ -122,7 +132,7 @@ export class GrokApiService {
             error.skipErrorCount = true;
         }
 
-        return { status, errorCode, errorMessage: error.message || originalErrorMessage, isNetworkError };
+        return { status, errorCode, errorMessage: error.message || originalErrorMessage, isNetworkError, isDefinitiveAuthFailure: !!error.isDefinitiveAuthFailure };
     }
 
     async setupNsfw() {

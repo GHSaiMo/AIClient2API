@@ -339,9 +339,19 @@ export function isQuotaExhaustedError(error) {
     const status = Number(getErrorStatusCode(error));
     if (status === 402) return true;
     const msg = String(error.message || '').toLowerCase();
-    const dataStr = typeof error.response?.data === 'string'
-        ? error.response.data.toLowerCase()
-        : JSON.stringify(error.response?.data || '').toLowerCase();
+    
+    let dataStr = '';
+    const rawData = error.response?.data;
+    if (typeof rawData === 'string') {
+        dataStr = rawData.toLowerCase();
+    } else if (rawData && typeof rawData.on !== 'function' && typeof rawData.read !== 'function' && !Buffer.isBuffer(rawData)) {
+        try {
+            dataStr = JSON.stringify(rawData).toLowerCase();
+        } catch {
+            dataStr = '';
+        }
+    }
+
     return msg.includes('spending-limit') ||
            msg.includes('monthly_request_count') ||
            msg.includes('payment required') ||
@@ -1263,8 +1273,13 @@ export async function handleStreamRequest(res, service, model, requestBody, from
         
         // 如果底层未标记，且不跳过错误计数，则在此处标记
         if (!credentialMarkedUnhealthy && !skipErrorCount && providerPoolManager && pooluuid) {
-            // 400 报错码通常是请求参数问题，不记录为提供商错误
-            if (error.response?.status === 400) {
+            const isGrokAuthFailure = toProvider === 'grok-web' && (status === 401 || error.isDefinitiveAuthFailure === true);
+            if (isGrokAuthFailure) {
+                logger.warn(`[Provider Pool] Automatically disabling ${toProvider} (${pooluuid}) due to invalid session/credentials: ${error.message}`);
+                providerPoolManager.disableProvider(toProvider, { uuid: pooluuid }, error.message);
+                credentialMarkedUnhealthy = true;
+            } else if (error.response?.status === 400) {
+                // 400 报错码通常是请求参数问题，不记录为提供商错误
                 logger.info(`[Provider Pool] Skipping unhealthy marking for ${toProvider} (${pooluuid}) due to status 400 (client error)`);
             } else {
                 logger.info(`[Provider Pool] Marking ${toProvider} as unhealthy due to stream error (status: ${status || 'unknown'})`);
@@ -1537,8 +1552,13 @@ export async function handleUnaryRequest(res, service, model, requestBody, fromP
         
         // 如果底层未标记，且不跳过错误计数，则在此处标记
         if (!credentialMarkedUnhealthy && !skipErrorCount && providerPoolManager && pooluuid) {
-            // 400 报错码通常是请求参数问题，不记录为提供商错误
-            if (error.response?.status === 400) {
+            const isGrokAuthFailure = toProvider === 'grok-web' && (status === 401 || error.isDefinitiveAuthFailure === true);
+            if (isGrokAuthFailure) {
+                logger.warn(`[Provider Pool] Automatically disabling ${toProvider} (${pooluuid}) due to invalid session/credentials: ${error.message}`);
+                providerPoolManager.disableProvider(toProvider, { uuid: pooluuid }, error.message);
+                credentialMarkedUnhealthy = true;
+            } else if (error.response?.status === 400) {
+                // 400 报错码通常是请求参数问题，不记录为提供商错误
                 logger.info(`[Provider Pool] Skipping unhealthy marking for ${toProvider} (${pooluuid}) due to status 400 (client error)`);
             } else {
                 logger.info(`[Provider Pool] Marking ${toProvider} as unhealthy due to unary error (status: ${status || 'unknown'})`);
@@ -2125,12 +2145,17 @@ export function handleError(res, error, provider = null, fromProvider = null, re
         res.writeHead(statusCode, { 'Content-Type': 'application/json' });
     }
 
+    let safeDetails = error.response?.data;
+    if (safeDetails && (typeof safeDetails.on === 'function' || typeof safeDetails.read === 'function' || Buffer.isBuffer(safeDetails))) {
+        safeDetails = '[Stream response]';
+    }
+
     const errorPayload = {
         error: {
             message: errorMessage,
             code: statusCode,
             suggestions: suggestions,
-            details: error.response?.data
+            details: safeDetails
         }
     };
     
