@@ -11,6 +11,7 @@ import * as readline from 'readline';
 import { getProviderPoolManager } from '../../services/service-manager.js';
 import { ImagineWebSocketService } from './ws-imagine.js';
 import { sanitizeGrokTools } from './grok-tool-sanitizer.js';
+import { refreshGrokToken } from './grok-token-refresher.js';
 
 const CORE_MODEL_MAPPING = {
     'grok-4.1-mini': { name: 'grok-4-1-thinking-1129', mode: 'MODEL_MODE_GROK_4_1_MINI_THINKING', modeId: 'grok-4-1-mini' },
@@ -242,7 +243,28 @@ export class GrokApiService {
         
         this._applySidecar(axiosConfig);
 
-        return await axios(axiosConfig);
+        try {
+            return await axios(axiosConfig);
+        } catch (err) {
+            const status = err.response?.status;
+            if (status === 401 && !options._isRetry) {
+                logger.info(`[Grok] HTTP request to ${url} received 401. Attempting auto-refresh from browser for ${this.config.email || this.uuid}...`);
+                try {
+                    await this.refreshToken();
+                    logger.info(`[Grok] Token refreshed after 401 in _request. Retrying request...`);
+                    // 使用更新后的 headers 重试
+                    return await this._request({
+                        ...options,
+                        headers: this.buildHeaders(),
+                        _isRetry: true
+                    });
+                } catch (refreshErr) {
+                    logger.warn(`[Grok] Refresh failed in _request: ${refreshErr.message}`);
+                    throw err;
+                }
+            }
+            throw err;
+        }
     }
 
     /**
@@ -335,16 +357,74 @@ export class GrokApiService {
 
     async refreshToken() {
         try {
-            // await this.getUsageLimits(); return Promise.resolve();
+            logger.info(`[Grok] Triggering refreshToken for ${this.config.email || this.uuid}...`);
+            const refreshed = await refreshGrokToken(this.config);
+            if (!refreshed || !refreshed.sso) {
+                throw new Error(`Failed to extract valid SSO cookie from browser for ${this.config.email || this.uuid}`);
+            }
+
+            // 更新实例内存凭据
+            this.token = refreshed.sso;
+            this.config.GROK_COOKIE_TOKEN = refreshed.sso;
+            if (refreshed.cf_clearance) {
+                this.cfClearance = refreshed.cf_clearance;
+                this.config.GROK_CF_CLEARANCE = refreshed.cf_clearance;
+            }
+
+            // 同步回号池管理器与持久化配置
             const poolManager = getProviderPoolManager();
             if (poolManager && this.uuid) {
-                poolManager.resetProviderRefreshStatus(this.config.MODEL_PROVIDER || MODEL_PROVIDER.GROK_WEB, this.uuid);
+                const poolType = this.config.MODEL_PROVIDER || MODEL_PROVIDER.GROK_WEB;
+                const poolItem = poolManager._findProvider(poolType, this.uuid);
+                if (poolItem && poolItem.config) {
+                    poolItem.config.GROK_COOKIE_TOKEN = refreshed.sso;
+                    if (refreshed.cf_clearance) {
+                        poolItem.config.GROK_CF_CLEARANCE = refreshed.cf_clearance;
+                    }
+                    poolItem.config.isHealthy = true;
+                    poolItem.config.needsRefresh = false;
+                    poolItem.config.lastRefreshTime = Date.now();
+                    poolManager._debouncedSave(poolType);
+                }
+                poolManager.resetProviderRefreshStatus(poolType, this.uuid);
             }
+
+            logger.info(`[Grok] Successfully refreshed token for ${this.config.email || this.uuid}`);
             return true;
         } catch (error) {
-            logger.error('[Grok] Failed to initialize authentication:', error);
-            throw new Error(`Failed to refreshToken.`);
+            logger.error('[Grok] Failed to refresh Grok credentials:', error.message);
+            throw error;
         }
+    }
+
+    /**
+     * 从 Grok Web 首页或用户信息接口抓取当前账户邮箱
+     */
+    async fetchUserProfile() {
+        try {
+            const response = await this._request({
+                url: `${this.baseUrl}/`,
+                method: 'GET',
+                headers: {
+                    ...this.buildHeaders(),
+                    'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8'
+                },
+                timeout: 15000
+            });
+            const text = typeof response.data === 'string' ? response.data : JSON.stringify(response.data || '');
+            const match = text.match(/"email":"([^"]+@[^"]+)"/);
+            if (match && match[1]) {
+                const email = match[1];
+                this.config.email = email;
+                if (!this.config.customName || this.config.customName.startsWith('Imported Token')) {
+                    this.config.customName = email;
+                }
+                return { email };
+            }
+        } catch (err) {
+            logger.debug(`[Grok] Could not extract user profile email: ${err.message}`);
+        }
+        return null;
     }
 
     /**
@@ -352,6 +432,9 @@ export class GrokApiService {
      */
     async getUsageLimits() {
         try {
+            if (!this.config.email) {
+                await this.fetchUserProfile().catch(() => {});
+            }
             const response = await this._request({
                 url: `${this.baseUrl}/rest/rate-limits`,
                 data: { "requestKind": "DEFAULT", "modelName": "fast" },
@@ -1499,6 +1582,26 @@ export class GrokApiService {
                     return;
                 } catch (wsError) {
                     logger.error(`[Grok] ws_imagine fallback also failed: ${wsError.message}`);
+                }
+            }
+
+            // 处理 401 / SSO 失效：尝试从浏览器原地刷新并重试一次
+            if (status === 401 && !hasYieldedData && retryCount === 0) {
+                logger.info(`[Grok] Received 401 Unauthorized during stream. Attempting auto-refresh from browser for ${this.config.email || this.uuid}...`);
+                try {
+                    await this.refreshToken();
+                    logger.info(`[Grok] Token refreshed after 401. Retrying stream immediately...`);
+                    yield* this.generateContentStream(model, requestBody, retryCount + 1);
+                    return;
+                } catch (refreshErr) {
+                    logger.warn(`[Grok] In-flight token refresh failed: ${refreshErr.message}. Triggering pool fallback.`);
+                    const poolManager = getProviderPoolManager();
+                    if (poolManager && this.uuid) {
+                        poolManager.markProviderNeedRefresh(this.config.MODEL_PROVIDER || MODEL_PROVIDER.GROK_WEB, { uuid: this.uuid });
+                    }
+                    error.shouldSwitchCredential = true;
+                    error.credentialMarkedUnhealthy = true;
+                    throw error;
                 }
             }
 

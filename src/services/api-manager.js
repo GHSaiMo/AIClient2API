@@ -305,8 +305,8 @@ async function handleImageGenerationRequest(req, res, currentConfig, providerPoo
             } else if (!credentialMarkedUnhealthy && !error.skipErrorCount) {
                 const isGrokAuthFailure = slotProviderType === 'grok-web' && (error.response?.status === 401 || error.isDefinitiveAuthFailure === true);
                 if (isGrokAuthFailure) {
-                    logger.warn(`[Provider Pool] Automatically disabling ${slotProviderType} (${slotUuid}) due to invalid session/credentials: ${error.message}`);
-                    providerPoolManager.disableProvider(slotProviderType, {uuid: slotUuid}, error.message);
+                    logger.warn(`[Provider Pool] Grok auth failure for ${slotProviderType} (${slotUuid}). Marking as needsRefresh: ${error.message}`);
+                    providerPoolManager.markProviderNeedRefresh(slotProviderType, {uuid: slotUuid});
                     credentialMarkedUnhealthy = true;
                 } else if (error.response?.status !== 400) {
                     logger.info(`[Provider Pool] Marking ${slotProviderType} as unhealthy due to image generation error (status: ${error.response?.status || 'unknown'})`);

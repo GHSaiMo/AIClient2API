@@ -558,9 +558,10 @@ function getFilteredProviders() {
     if (!nodeSearchTerm) return currentProviders;
     const term = nodeSearchTerm.toLowerCase().trim();
     return currentProviders.filter(p => {
-        // 搜索字段：自定义名称、UUID、API Key、Base URL、OAuth 路径等
+        // 搜索字段：自定义名称、邮箱、UUID、API Key、Base URL、OAuth 路径等
         const searchFields = [
             p.customName,
+            p.email,
             p.uuid,
             p.OPENAI_API_KEY,
             p.OPENAI_BASE_URL,
@@ -878,7 +879,8 @@ function renderProviderDetailList(providers) {
                 <div class="provider-item-header" onclick="window.toggleProviderDetails('${provider.uuid}')">
                     <div class="provider-info">
                         <div class="provider-name">
-                            ${provider.customName || provider.uuid}
+                            ${provider.email || provider.customName || provider.uuid}
+                            ${provider.email && provider.customName && provider.customName !== provider.email ? `<span class="badge badge-info" style="font-size: 11px; margin-left: 8px; vertical-align: middle; background: #e0f2fe; color: #0369a1; padding: 2px 8px; border-radius: 4px;">${provider.customName}</span>` : ''}
                             ${needsRefresh ? `<span class="badge badge-warning" style="font-size: 10px; margin-left: 8px; vertical-align: middle;"><i class="fas fa-sync-alt fa-spin"></i> <span data-i18n="providers.status.needsRefresh">${t('providers.status.needsRefresh')}</span></span>` : ''}
                         </div>
                         <div class="provider-meta">
@@ -946,7 +948,7 @@ function renderProviderCardList(providers) {
         const isDisabled = provider.isDisabled || false;
         const healthClass = isHealthy ? 'healthy' : 'unhealthy';
         const disabledClass = isDisabled ? 'disabled' : '';
-        const displayName = provider.customName || provider.uuid;
+        const displayName = provider.email || provider.customName || provider.uuid;
         const needsRefresh = !!provider.needsRefresh;
         const toggleButtonText = isDisabled ? t('modal.provider.enabled') : t('modal.provider.disabled');
         const toggleButtonIcon = isDisabled ? 'fas fa-play' : 'fas fa-ban';
@@ -959,6 +961,7 @@ function renderProviderCardList(providers) {
                     <div class="card-name" title="${displayName}">${displayName}</div>
                     ${needsRefresh ? '<i class="fas fa-sync-alt fa-spin card-refresh-icon"></i>' : ''}
                 </div>
+                ${provider.email && provider.customName && provider.customName !== provider.email ? `<div class="card-email" style="font-size: 11px; color: #0284c7; padding: 2px 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"><i class="fas fa-tag" style="font-size: 10px; margin-right: 4px;"></i>${provider.customName}</div>` : ''}
                 <div class="card-body">
                     <div class="card-stat" title="${t('modal.provider.usageCount')}: ${provider.usageCount || 0}">
                         <i class="fas fa-paper-plane"></i>
