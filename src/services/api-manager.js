@@ -303,7 +303,12 @@ async function handleImageGenerationRequest(req, res, currentConfig, providerPoo
                 providerPoolManager.markProviderUnhealthyWithRecoveryTime(slotProviderType, {uuid: slotUuid}, error.message || '402 Payment Required - quota cooldown', quotaRecoveryTime);
                 credentialMarkedUnhealthy = true;
             } else if (!credentialMarkedUnhealthy && !error.skipErrorCount) {
-                if (error.response?.status !== 400) {
+                const isGrokAuthFailure = slotProviderType === 'grok-web' && (error.response?.status === 401 || error.isDefinitiveAuthFailure === true);
+                if (isGrokAuthFailure) {
+                    logger.warn(`[Provider Pool] Automatically disabling ${slotProviderType} (${slotUuid}) due to invalid session/credentials: ${error.message}`);
+                    providerPoolManager.disableProvider(slotProviderType, {uuid: slotUuid}, error.message);
+                    credentialMarkedUnhealthy = true;
+                } else if (error.response?.status !== 400) {
                     logger.info(`[Provider Pool] Marking ${slotProviderType} as unhealthy due to image generation error (status: ${error.response?.status || 'unknown'})`);
                     providerPoolManager.markProviderUnhealthy(slotProviderType, {uuid: slotUuid}, error.message);
                     credentialMarkedUnhealthy = true;

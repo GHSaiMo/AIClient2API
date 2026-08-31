@@ -1905,8 +1905,9 @@ export class ProviderPoolManager {
      * 禁用指定提供商
      * @param {string} providerType - 提供商类型
      * @param {object} providerConfig - 提供商配置
+     * @param {string} [errorMessage] - 可选的禁用原因/错误信息
      */
-    disableProvider(providerType, providerConfig) {
+    disableProvider(providerType, providerConfig, errorMessage = null) {
         if (!providerConfig?.uuid) {
             this._log('error', 'Invalid providerConfig in disableProvider');
             return;
@@ -1915,8 +1916,42 @@ export class ProviderPoolManager {
         const provider = this._findProvider(providerType, providerConfig.uuid);
         if (provider) {
             provider.config.isDisabled = true;
-            this._log('info', `Disabled provider: ${this._getDisplayName(providerConfig)} for type ${providerType}`);
+            provider.config.isHealthy = false;
+            provider.config.needsRefresh = false;
+            provider.config.refreshCount = 0;
+            provider.config.lastErrorTime = new Date().toISOString();
+            if (errorMessage) {
+                provider.config.lastErrorMessage = errorMessage;
+            }
+            this._log('info', `Disabled provider: ${this._getDisplayName(providerConfig)} for type ${providerType}${errorMessage ? ` (Reason: ${errorMessage})` : ''}`);
             this._debouncedSave(providerType);
+
+            // 广播事件通知前端 UI 实时更新为禁用状态
+            try {
+                const filePath = this.globalConfig?.PROVIDER_POOLS_FILE_PATH || 'configs/provider_pools.json';
+                const sanitizedConfig = { ...provider.config };
+                // 确保日期对象被安全序列化
+                if (sanitizedConfig.lastUsed instanceof Date) sanitizedConfig.lastUsed = sanitizedConfig.lastUsed.toISOString();
+                if (sanitizedConfig.lastErrorTime instanceof Date) sanitizedConfig.lastErrorTime = sanitizedConfig.lastErrorTime.toISOString();
+                if (sanitizedConfig.lastHealthCheckTime instanceof Date) sanitizedConfig.lastHealthCheckTime = sanitizedConfig.lastHealthCheckTime.toISOString();
+
+                broadcastEvent('config_update', {
+                    action: 'disable',
+                    filePath,
+                    providerType,
+                    providerConfig: sanitizedConfig,
+                    timestamp: new Date().toISOString()
+                });
+
+                broadcastEvent('provider_update', {
+                    action: 'disable',
+                    providerType,
+                    providerConfig: sanitizedConfig,
+                    timestamp: new Date().toISOString()
+                });
+            } catch (broadcastErr) {
+                this._log('warn', `Failed to broadcast provider disable event: ${broadcastErr.message}`);
+            }
         }
     }
 
