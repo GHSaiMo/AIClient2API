@@ -849,10 +849,23 @@ async loadCredentials() {
         applyCredential('clientId');
         applyCredential('clientSecret');
         applyCredential('authMethod');
+        applyCredential('socialProvider');
+        applyCredential('provider');
+        applyCredential('email');
         applyCredential('expiresAt');
         applyCredential('profileArn');
         applyCredential('region');
         applyCredential('idcRegion');
+
+        if (!this.socialProvider && this.provider) {
+            this.socialProvider = this.provider;
+        }
+        if (this.config.email && !this.email) {
+            this.email = this.config.email;
+        }
+        if (this.config.socialProvider && !this.socialProvider) {
+            this.socialProvider = this.config.socialProvider;
+        }
 
         if (!this.region) {
             this.region = this.idcRegion || 'us-east-1';
@@ -1029,6 +1042,15 @@ async saveCredentialsToFile(filePath, newData) {
                 };
                 if (this.profileArn) {
                     updatedTokenData.profileArn = this.profileArn;
+                }
+                if (this.email) {
+                    updatedTokenData.email = this.email;
+                }
+                if (this.socialProvider) {
+                    updatedTokenData.socialProvider = this.socialProvider;
+                }
+                if (this.authMethod) {
+                    updatedTokenData.authMethod = this.authMethod;
                 }
                 await saveCredentialsToFile(tokenFilePath, updatedTokenData);
 

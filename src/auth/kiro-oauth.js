@@ -434,11 +434,15 @@ async function pollKiroBuilderIDToken(clientId, clientSecret, deviceCode, interv
                     refreshToken: data.refreshToken,
                     expiresAt: new Date(Date.now() + data.expiresIn * 1000).toISOString(),
                     authMethod: 'builder-id',
+                    socialProvider: 'AWS Builder ID',
                     clientId,
                     clientSecret,
                     region: options.region || 'us-east-1',
                     idcRegion: options.region || 'us-east-1'
                 };
+                if (options.email) {
+                    tokenData.email = options.email;
+                }
                 
                 await fs.promises.mkdir(path.dirname(credPath), { recursive: true });
                 await fs.promises.writeFile(credPath, JSON.stringify(tokenData, null, 2));
@@ -450,6 +454,9 @@ async function pollKiroBuilderIDToken(clientId, clientSecret, deviceCode, interv
                     provider: 'claude-kiro-oauth',
                     credPath,
                     relativePath: path.relative(process.cwd(), credPath),
+                    email: tokenData.email,
+                    socialProvider: tokenData.socialProvider,
+                    authMethod: tokenData.authMethod,
                     timestamp: new Date().toISOString()
                 });
                 
@@ -654,11 +661,15 @@ function createKiroHttpCallbackServer(port, codeVerifier, expectedState, options
                         accessToken: tokenData.accessToken,
                         refreshToken: tokenData.refreshToken,
                         profileArn: tokenData.profileArn,
-                        socialProvider: options.socialProvider,
+                        socialProvider: options.socialProvider || 'Google',
+                        provider: options.socialProvider || 'Google',
                         expiresAt: new Date(Date.now() + (tokenData.expiresIn || 3600) * 1000).toISOString(),
                         authMethod: 'social',
                         region: 'us-east-1'
                     };
+                    if (options.email || tokenData.email) {
+                        saveData.email = options.email || tokenData.email;
+                    }
                     
                     await fs.promises.mkdir(path.dirname(credPath), { recursive: true });
                     await fs.promises.writeFile(credPath, JSON.stringify(saveData, null, 2));
@@ -670,6 +681,9 @@ function createKiroHttpCallbackServer(port, codeVerifier, expectedState, options
                         provider: 'claude-kiro-oauth',
                         credPath,
                         relativePath: path.relative(process.cwd(), credPath),
+                        email: saveData.email,
+                        socialProvider: saveData.socialProvider,
+                        authMethod: saveData.authMethod,
                         timestamp: new Date().toISOString()
                     });
                     
@@ -849,8 +863,92 @@ export async function checkKiroCredentialsDuplicate(refreshToken, provider = 'cl
 }
 
 /**
+ * 解析 Kiro 批量导入输入的单行或对象
+ * 支持:
+ * 1. 纯 refreshToken 字符串
+ * 2. 带有分隔符的字符串: refreshToken, email, provider (支持逗号、竖线、制表符、---- 分隔)
+ * 3. JSON 对象: { refreshToken, email, provider/socialProvider }
+ * @param {string|Object} rawInput
+ * @returns {{ refreshToken: string, email?: string, socialProvider?: string }}
+ */
+export function parseKiroTokenInput(rawInput) {
+    if (!rawInput) return null;
+    if (typeof rawInput === 'object') {
+        const refreshToken = rawInput.refreshToken || rawInput.refresh_token || rawInput.token || '';
+        const provider = rawInput.socialProvider || rawInput.provider;
+        let normalizedProvider = undefined;
+        if (provider) {
+            if (/^(google|gmail)$/i.test(provider)) normalizedProvider = 'Google';
+            else if (/^(github)$/i.test(provider)) normalizedProvider = 'Github';
+            else if (/^(builder-id|aws|builder_id)$/i.test(provider)) normalizedProvider = 'AWS Builder ID';
+            else normalizedProvider = provider;
+        }
+        return {
+            refreshToken: String(refreshToken).trim(),
+            email: rawInput.email ? String(rawInput.email).trim() : undefined,
+            socialProvider: normalizedProvider,
+            customName: rawInput.customName ? String(rawInput.customName).trim() : undefined
+        };
+    }
+
+    const str = String(rawInput).trim();
+    if (!str) return null;
+
+    // 尝试 JSON 解析
+    if (str.startsWith('{') && str.endsWith('}')) {
+        try {
+            const obj = JSON.parse(str);
+            return parseKiroTokenInput(obj);
+        } catch {
+            // 继续向下解析
+        }
+    }
+
+    // 检查常见分隔符: '----', ',', '|', '\t'
+    let parts = [];
+    if (str.includes('----')) {
+        parts = str.split('----').map(s => s.trim());
+    } else if (str.includes(',')) {
+        parts = str.split(',').map(s => s.trim());
+    } else if (str.includes('|')) {
+        parts = str.split('|').map(s => s.trim());
+    } else if (str.includes('\t')) {
+        parts = str.split('\t').map(s => s.trim());
+    } else {
+        parts = [str];
+    }
+
+    const refreshToken = parts[0] || '';
+    let email = undefined;
+    let socialProvider = undefined;
+
+    // 识别后续字段中的 email 和 provider
+    for (let i = 1; i < parts.length; i++) {
+        const part = parts[i];
+        if (!part) continue;
+        if (part.includes('@') && !email) {
+            email = part;
+        } else if (/^(google|gmail)$/i.test(part)) {
+            socialProvider = 'Google';
+        } else if (/^(github)$/i.test(part)) {
+            socialProvider = 'Github';
+        } else if (/^(builder-id|aws|builder_id)$/i.test(part)) {
+            socialProvider = 'AWS Builder ID';
+        } else if (!email) {
+            email = part;
+        }
+    }
+
+    return {
+        refreshToken,
+        email,
+        socialProvider
+    };
+}
+
+/**
  * 批量导入 Kiro refreshToken 并生成凭据文件
- * @param {string[]} refreshTokens - refreshToken 数组
+ * @param {Array<string|Object>} refreshTokens - refreshToken 数组
  * @param {string} region - AWS 区域 (默认: us-east-1)
  * @param {boolean} skipDuplicateCheck - 是否跳过重复检查 (默认: false)
  * @returns {Promise<Object>} 批量处理结果
@@ -864,7 +962,8 @@ export async function batchImportKiroRefreshTokens(refreshTokens, region = KIRO_
     };
     
     for (let i = 0; i < refreshTokens.length; i++) {
-        const refreshToken = refreshTokens[i].trim();
+        const parsed = parseKiroTokenInput(refreshTokens[i]);
+        const refreshToken = parsed?.refreshToken || '';
         
         if (!refreshToken) {
             results.details.push({
@@ -895,6 +994,13 @@ export async function batchImportKiroRefreshTokens(refreshTokens, region = KIRO_
             logger.info(`${KIRO_OAUTH_CONFIG.logPrefix} 正在刷新第 ${i + 1}/${refreshTokens.length} 个 token...`);
             
             const tokenData = await refreshKiroToken(refreshToken, region);
+            if (parsed.email) {
+                tokenData.email = parsed.email;
+            }
+            if (parsed.socialProvider) {
+                tokenData.socialProvider = parsed.socialProvider;
+                tokenData.provider = parsed.socialProvider;
+            }
             
             // 生成文件路径: configs/kiro/{timestamp}_kiro-auth-token/{timestamp}_kiro-auth-token.json
             const timestamp = Date.now();
@@ -913,6 +1019,8 @@ export async function batchImportKiroRefreshTokens(refreshTokens, region = KIRO_
                 index: i + 1,
                 success: true,
                 path: relativePath,
+                email: tokenData.email,
+                socialProvider: tokenData.socialProvider || tokenData.provider,
                 expiresAt: tokenData.expiresAt
             });
             results.success++;
@@ -953,7 +1061,7 @@ export async function batchImportKiroRefreshTokens(refreshTokens, region = KIRO_
 
 /**
  * 批量导入 Kiro refreshToken 并生成凭据文件（流式版本，支持实时进度回调）
- * @param {string[]} refreshTokens - refreshToken 数组
+ * @param {Array<string|Object>} refreshTokens - refreshToken 数组
  * @param {string} region - AWS 区域 (默认: us-east-1)
  * @param {Function} onProgress - 进度回调函数，每处理完一个 token 调用
  * @param {boolean} skipDuplicateCheck - 是否跳过重复检查 (默认: false)
@@ -968,7 +1076,8 @@ export async function batchImportKiroRefreshTokensStream(refreshTokens, region =
     };
     
     for (let i = 0; i < refreshTokens.length; i++) {
-        const refreshToken = refreshTokens[i].trim();
+        const parsed = parseKiroTokenInput(refreshTokens[i]);
+        const refreshToken = parsed?.refreshToken || '';
         const progressData = {
             index: i + 1,
             total: refreshTokens.length,
@@ -1024,6 +1133,13 @@ export async function batchImportKiroRefreshTokensStream(refreshTokens, region =
             logger.info(`${KIRO_OAUTH_CONFIG.logPrefix} 正在刷新第 ${i + 1}/${refreshTokens.length} 个 token...`);
             
             const tokenData = await refreshKiroToken(refreshToken, region);
+            if (parsed.email) {
+                tokenData.email = parsed.email;
+            }
+            if (parsed.socialProvider) {
+                tokenData.socialProvider = parsed.socialProvider;
+                tokenData.provider = parsed.socialProvider;
+            }
             
             // 生成文件路径: configs/kiro/{timestamp}_kiro-auth-token/{timestamp}_kiro-auth-token.json
             const timestamp = Date.now();
@@ -1042,6 +1158,8 @@ export async function batchImportKiroRefreshTokensStream(refreshTokens, region =
                 index: i + 1,
                 success: true,
                 path: relativePath,
+                email: tokenData.email,
+                socialProvider: tokenData.socialProvider || tokenData.provider,
                 expiresAt: tokenData.expiresAt
             };
             results.details.push(progressData.current);
@@ -1135,9 +1253,13 @@ export async function importAwsCredentials(credentials, skipDuplicateCheck = fal
             accessToken: credentials.accessToken,
             refreshToken: credentials.refreshToken,
             authMethod: credentials.authMethod || 'builder-id',
+            socialProvider: 'AWS Builder ID',
             // region: credentials.region || KIRO_REFRESH_CONSTANTS.DEFAULT_REGION,
             idcRegion: credentials.idcRegion || KIRO_REFRESH_CONSTANTS.IDC_REGION
         };
+        if (credentials.email) {
+            credentialsData.email = credentials.email;
+        }
         
         // 可选字段
         if (credentials.expiresAt) {

@@ -558,10 +558,13 @@ function getFilteredProviders() {
     if (!nodeSearchTerm) return currentProviders;
     const term = nodeSearchTerm.toLowerCase().trim();
     return currentProviders.filter(p => {
-        // 搜索字段：自定义名称、邮箱、UUID、API Key、Base URL、OAuth 路径等
+        // 搜索字段：自定义名称、邮箱、登录方式/渠道、UUID、API Key、Base URL、OAuth 路径等
         const searchFields = [
             p.customName,
             p.email,
+            p.socialProvider,
+            p.provider,
+            p.authMethod,
             p.uuid,
             p.OPENAI_API_KEY,
             p.OPENAI_BASE_URL,
@@ -839,6 +842,73 @@ function closeProviderModal(button) {
 }
 
 /**
+ * 渲染提供商认证方式徽章（如 Google, GitHub, AWS Builder ID 等）
+ * @param {Object} provider - 提供商对象
+ * @returns {string} 徽章 HTML
+ */
+function renderProviderAuthBadge(provider) {
+    if (!provider) return '';
+    const social = String(provider.socialProvider || provider.provider || '').toLowerCase().trim();
+    const method = String(provider.authMethod || '').toLowerCase().trim();
+    
+    // GitHub 徽章：经典深色设计
+    if (social.includes('github')) {
+        return `<span class="badge badge-provider-method badge-method-github" style="font-size: 11px; margin-left: 6px; vertical-align: middle; background: #24292e; color: #ffffff; padding: 2px 8px; border-radius: 4px; display: inline-flex; align-items: center; gap: 4px; font-weight: 500; border: 1px solid #1b1f23;"><i class="fab fa-github" style="color: #ffffff;"></i> GitHub</span>`;
+    }
+    // Google 徽章：灰黑色背景 + 彩虹 Logo + 白色文字
+    if (social.includes('google')) {
+        return `<span class="badge badge-provider-method badge-method-google" style="font-size: 11px; margin-left: 6px; vertical-align: middle; background: #24292e; color: #ffffff; border: 1px solid #1b1f23; padding: 2px 8px; border-radius: 4px; display: inline-flex; align-items: center; gap: 4px; font-weight: 500;"><svg width="12" height="12" viewBox="0 0 24 24" style="vertical-align: middle; flex-shrink: 0;"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/><path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/></svg><span style="color: #ffffff;">Google</span></span>`;
+    }
+    // AWS Builder ID 徽章
+    if (social.includes('aws') || social.includes('builder') || method.includes('builder')) {
+        return `<span class="badge badge-provider-method badge-method-aws" style="font-size: 11px; margin-left: 6px; vertical-align: middle; background: #fef3c7; color: #92400e; border: 1px solid #fde68a; padding: 2px 8px; border-radius: 4px; display: inline-flex; align-items: center; gap: 4px; font-weight: 500;"><i class="fab fa-aws" style="color: #d97706;"></i> Builder ID</span>`;
+    }
+    if (provider.socialProvider) {
+        return `<span class="badge badge-provider-method" style="font-size: 11px; margin-left: 6px; vertical-align: middle; background: var(--primary-10, rgba(5, 150, 105, 0.1)); color: var(--primary-color, #059669); border: 1px solid var(--primary-20, rgba(5, 150, 105, 0.25)); padding: 2px 8px; border-radius: 4px; font-weight: 500;">${escapeHtml(provider.socialProvider)}</span>`;
+    }
+    return '';
+}
+
+/**
+ * 格式化提供商主标题（优先邮箱 -> 自定义名称 -> 渠道账号名 + 简短ID）
+ * @param {Object} provider - 提供商对象
+ * @returns {{ titleText: string, html: string }}
+ */
+function formatProviderTitleHtml(provider) {
+    if (provider.email) {
+        return {
+            titleText: provider.email,
+            html: `<span class="provider-title-email" style="font-weight: 600;"><i class="fas fa-envelope" style="font-size: 12px; margin-right: 5px; opacity: 0.85; color: var(--primary-color, #059669);"></i>${escapeHtml(provider.email)}</span>`
+        };
+    }
+    if (provider.customName) {
+        return {
+            titleText: provider.customName,
+            html: `<span class="provider-title-custom" style="font-weight: 600;"><i class="fas fa-tag" style="font-size: 12px; margin-right: 5px; opacity: 0.85; color: var(--primary-color, #059669);"></i>${escapeHtml(provider.customName)}</span>`
+        };
+    }
+    
+    // 如果没有邮箱也没有自定义名称，生成友好的渠道账号名称
+    const social = String(provider.socialProvider || provider.provider || '').toLowerCase().trim();
+    const shortUuid = provider.uuid ? provider.uuid.substring(0, 8) : '';
+    let nameText = '';
+    if (social.includes('github')) {
+        nameText = `GitHub 账号 (${shortUuid})`;
+    } else if (social.includes('google')) {
+        nameText = `Google 账号 (${shortUuid})`;
+    } else if (social.includes('aws') || social.includes('builder') || String(provider.authMethod || '').includes('builder')) {
+        nameText = `Builder ID 账号 (${shortUuid})`;
+    } else {
+        nameText = `节点 (${shortUuid})`;
+    }
+    
+    return {
+        titleText: nameText,
+        html: `<span class="provider-title-auto" style="font-weight: 500;"><i class="fas fa-user-circle" style="font-size: 12px; margin-right: 5px; opacity: 0.7; color: #64748b;"></i>${escapeHtml(nameText)}</span>`
+    };
+}
+
+/**
  * 渲染提供商列表（详细模式）
  * @param {Array} providers - 提供商数组
  * @returns {string} HTML字符串
@@ -860,6 +930,12 @@ function renderProviderDetailList(providers) {
         const toggleButtonIcon = isDisabled ? 'fas fa-play' : 'fas fa-ban';
         const toggleButtonClass = isDisabled ? 'btn-success' : 'btn-warning';
         const needsRefresh = !!provider.needsRefresh;
+        const authBadgeHtml = renderProviderAuthBadge(provider);
+        const titleInfo = formatProviderTitleHtml(provider);
+
+        const customNameBadge = (provider.email && provider.customName && provider.customName !== provider.email)
+            ? `<span class="badge badge-info" style="font-size: 11px; margin-left: 6px; vertical-align: middle; background: #e0f2fe; color: #0369a1; padding: 2px 8px; border-radius: 4px;"><i class="fas fa-tag" style="font-size: 10px; margin-right: 3px;"></i>${escapeHtml(provider.customName)}</span>`
+            : '';
         
         // 构建错误信息显示
         let errorInfoHtml = '';
@@ -878,10 +954,11 @@ function renderProviderDetailList(providers) {
             <div class="provider-item-detail ${healthClass} ${disabledClass}" data-uuid="${provider.uuid}">
                 <div class="provider-item-header" onclick="window.toggleProviderDetails('${provider.uuid}')">
                     <div class="provider-info">
-                        <div class="provider-name">
-                            ${provider.email || provider.customName || provider.uuid}
-                            ${provider.email && provider.customName && provider.customName !== provider.email ? `<span class="badge badge-info" style="font-size: 11px; margin-left: 8px; vertical-align: middle; background: #e0f2fe; color: #0369a1; padding: 2px 8px; border-radius: 4px;">${provider.customName}</span>` : ''}
-                            ${needsRefresh ? `<span class="badge badge-warning" style="font-size: 10px; margin-left: 8px; vertical-align: middle;"><i class="fas fa-sync-alt fa-spin"></i> <span data-i18n="providers.status.needsRefresh">${t('providers.status.needsRefresh')}</span></span>` : ''}
+                        <div class="provider-name" style="display: flex; align-items: center; flex-wrap: wrap; gap: 4px;">
+                            ${titleInfo.html}
+                            ${authBadgeHtml}
+                            ${customNameBadge}
+                            ${needsRefresh ? `<span class="badge badge-warning" style="font-size: 10px; margin-left: 6px; vertical-align: middle;"><i class="fas fa-sync-alt fa-spin"></i> <span data-i18n="providers.status.needsRefresh">${t('providers.status.needsRefresh')}</span></span>` : ''}
                         </div>
                         <div class="provider-meta">
                             <span class="health-status">
@@ -948,20 +1025,26 @@ function renderProviderCardList(providers) {
         const isDisabled = provider.isDisabled || false;
         const healthClass = isHealthy ? 'healthy' : 'unhealthy';
         const disabledClass = isDisabled ? 'disabled' : '';
-        const displayName = provider.email || provider.customName || provider.uuid;
         const needsRefresh = !!provider.needsRefresh;
         const toggleButtonText = isDisabled ? t('modal.provider.enabled') : t('modal.provider.disabled');
         const toggleButtonIcon = isDisabled ? 'fas fa-play' : 'fas fa-ban';
         const toggleButtonClass = isDisabled ? 'btn-success' : 'btn-warning';
+        const authBadgeHtml = renderProviderAuthBadge(provider);
+        const titleInfo = formatProviderTitleHtml(provider);
 
         return `
             <div class="provider-item-card ${healthClass} ${disabledClass}" data-uuid="${provider.uuid}">
                 <div class="card-header">
                     <div class="card-status-dot"></div>
-                    <div class="card-name" title="${displayName}">${displayName}</div>
+                    <div class="card-name" title="${escapeHtml(titleInfo.titleText)}">${titleInfo.html}</div>
                     ${needsRefresh ? '<i class="fas fa-sync-alt fa-spin card-refresh-icon"></i>' : ''}
                 </div>
-                ${provider.email && provider.customName && provider.customName !== provider.email ? `<div class="card-email" style="font-size: 11px; color: #0284c7; padding: 2px 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"><i class="fas fa-tag" style="font-size: 10px; margin-right: 4px;"></i>${provider.customName}</div>` : ''}
+                ${(authBadgeHtml || (provider.email && provider.customName && provider.customName !== provider.email)) ? `
+                    <div class="card-badges" style="display: flex; gap: 4px; align-items: center; padding: 2px 10px; flex-wrap: wrap;">
+                        ${authBadgeHtml}
+                        ${provider.email && provider.customName && provider.customName !== provider.email ? `<span class="card-email" style="font-size: 11px; color: #0284c7; background: #e0f2fe; padding: 1px 6px; border-radius: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"><i class="fas fa-tag" style="font-size: 10px; margin-right: 3px;"></i>${escapeHtml(provider.customName)}</span>` : ''}
+                    </div>
+                ` : ''}
                 <div class="card-body">
                     <div class="card-stat" title="${t('modal.provider.usageCount')}: ${provider.usageCount || 0}">
                         <i class="fas fa-paper-plane"></i>
@@ -1015,9 +1098,9 @@ function renderProviderConfig(provider) {
     // 获取字段显示顺序
     const fieldOrder = getFieldOrder(provider);
     
-    // 先渲染基础配置字段（customName、checkModelName 和 checkHealth）
+    // 先渲染基础配置字段（customName、email、checkModelName 和 checkHealth）
     let html = '<div class="form-grid">';
-    const baseFields = ['customName', 'checkModelName', 'checkHealth', 'concurrencyLimit', 'queueLimit'];
+    const baseFields = ['customName', 'email', 'checkModelName', 'checkHealth', 'concurrencyLimit', 'queueLimit'];
     
     baseFields.forEach(fieldKey => {
         const displayLabel = getFieldLabel(fieldKey);
@@ -1026,10 +1109,10 @@ function renderProviderConfig(provider) {
         
         // 查找字段定义以获取 placeholder
         const fieldDef = fieldConfigs.find(f => f.id === fieldKey) || fieldConfigs.find(f => f.id.toUpperCase() === fieldKey.toUpperCase()) || {};
-        const placeholder = fieldDef.placeholder || (fieldKey === 'customName' ? '节点自定义名称' : (fieldKey === 'checkModelName' ? '例如: gpt-3.5-turbo' : (fieldKey === 'concurrencyLimit' ? '最大并发, 默认0不限制' : (fieldKey === 'queueLimit' ? '最大队列, 默认0不限制' : ''))));
+        const placeholder = fieldDef.placeholder || (fieldKey === 'customName' ? '节点自定义名称' : (fieldKey === 'email' ? '例如: user@gmail.com' : (fieldKey === 'checkModelName' ? '例如: gpt-3.5-turbo' : (fieldKey === 'concurrencyLimit' ? '最大并发, 默认0不限制' : (fieldKey === 'queueLimit' ? '最大队列, 默认0不限制' : '')))));
         
-        // 如果是 customName 字段，使用普通文本输入框
-        if (fieldKey === 'customName') {
+        // 如果是 customName 或 email 字段，使用普通文本输入框
+        if (fieldKey === 'customName' || fieldKey === 'email') {
             html += `
                 <div class="config-item">
                     <label>${displayLabel}</label>

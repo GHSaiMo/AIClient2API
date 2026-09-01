@@ -192,6 +192,24 @@ async function linkSingleCredential(config, credPath) {
             needsProjectId
         });
         
+        // 读取凭证元数据（如 email, socialProvider, authMethod 等）
+        try {
+            const credContent = await pfs.readFile(absolutePath, 'utf8');
+            const credData = JSON.parse(credContent);
+            if (credData.email) {
+                newProvider.email = credData.email;
+            } else if (credData.id_token && typeof credData.id_token === 'string') {
+                try {
+                    const payload = JSON.parse(Buffer.from(credData.id_token.split('.')[1], 'base64').toString('utf8'));
+                    if (payload.email) newProvider.email = payload.email;
+                } catch {}
+            }
+            if (credData.socialProvider) newProvider.socialProvider = credData.socialProvider;
+            else if (credData.provider) newProvider.socialProvider = credData.provider;
+            if (credData.authMethod) newProvider.authMethod = credData.authMethod;
+            if (credData.customName && !newProvider.customName) newProvider.customName = credData.customName;
+        } catch {}
+        
         // 添加到配置
         config.providerPools[providerType].push(newProvider);
         
@@ -245,6 +263,24 @@ async function scanProviderDirectory(dirPath, linkedPaths, newProviders, options
                             defaultCheckModel,
                             needsProjectId
                         });
+                        
+                        // 读取凭证元数据（如 email, socialProvider, authMethod 等）
+                        try {
+                            const credContent = await pfs.readFile(fullPath, 'utf8');
+                            const credData = JSON.parse(credContent);
+                            if (credData.email) {
+                                newProvider.email = credData.email;
+                            } else if (credData.id_token && typeof credData.id_token === 'string') {
+                                try {
+                                    const payload = JSON.parse(Buffer.from(credData.id_token.split('.')[1], 'base64').toString('utf8'));
+                                    if (payload.email) newProvider.email = payload.email;
+                                } catch {}
+                            }
+                            if (credData.socialProvider) newProvider.socialProvider = credData.socialProvider;
+                            else if (credData.provider) newProvider.socialProvider = credData.provider;
+                            if (credData.authMethod) newProvider.authMethod = credData.authMethod;
+                            if (credData.customName && !newProvider.customName) newProvider.customName = credData.customName;
+                        } catch {}
                         
                         newProviders.push(newProvider);
                     }

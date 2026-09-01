@@ -18,6 +18,7 @@ export {
     // Kiro OAuth
     handleKiroOAuth,
     checkKiroCredentialsDuplicate,
+    parseKiroTokenInput,
     batchImportKiroRefreshTokens,
     batchImportKiroRefreshTokensStream,
     importAwsCredentials,

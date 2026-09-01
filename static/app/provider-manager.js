@@ -642,9 +642,16 @@ function renderProviderStatusOverview(providers, configMap, sortedProviderTypes)
             <div class="node-dots">
                 ${accounts.map(acc => {
                     let statusClass = 'healthy';
-                    let statusTitle = acc.email || acc.customName || acc.uuid;
-                    if (acc.email && acc.customName && acc.customName !== acc.email) {
+                    let statusTitle = acc.email || acc.customName;
+                    const social = String(acc.socialProvider || acc.provider || '').trim();
+                    if (!statusTitle) {
+                        const shortUuid = acc.uuid ? acc.uuid.substring(0, 8) : '';
+                        statusTitle = social ? `${social} 账号 (${shortUuid})` : `节点 (${shortUuid})`;
+                    } else if (acc.email && acc.customName && acc.customName !== acc.email) {
                         statusTitle += ` (${acc.customName})`;
+                    }
+                    if (social) {
+                        statusTitle += ` [渠道: ${social}]`;
                     }
                     if (acc.isDisabled) {
                         statusClass = 'disabled';
@@ -2659,6 +2666,12 @@ function showKiroAuthMethodSelector(providerType) {
                 <button class="modal-close">&times;</button>
             </div>
             <div class="modal-body">
+                <div style="margin-bottom: 14px;">
+                    <label style="display: block; margin-bottom: 6px; font-weight: 500; font-size: 13px; color: var(--text-secondary);">
+                        <i class="fas fa-envelope"></i> <span data-i18n="modal.provider.field.email">${t('modal.provider.field.email')}</span> (<span data-i18n="config.optional">${t('config.optional')}</span>)
+                    </label>
+                    <input type="email" id="kiro-auth-email-input" placeholder="user@gmail.com" style="width: 100%; padding: 8px 12px; border: 1px solid var(--border-color); border-radius: 6px; font-size: 13px; background: var(--bg-primary); color: var(--text-primary);">
+                </div>
                 <div class="auth-method-options" style="display: flex; flex-direction: column; gap: 12px;">
                     <button class="auth-method-btn" data-method="google" style="display: flex; align-items: center; gap: 12px; padding: 16px; border: 2px solid #e0e0e0; border-radius: 8px; background: white; cursor: pointer; transition: all 0.2s;">
                         <i class="fab fa-google" style="font-size: 24px; color: #4285f4;"></i>
@@ -2727,6 +2740,7 @@ function showKiroAuthMethodSelector(providerType) {
         });
         btn.addEventListener('click', async () => {
             const method = btn.dataset.method;
+            const email = modal.querySelector('#kiro-auth-email-input')?.value?.trim() || undefined;
             modal.remove();
             
             if (method === 'batch-import') {
@@ -2734,7 +2748,7 @@ function showKiroAuthMethodSelector(providerType) {
             } else if (method === 'aws-import') {
                 showKiroAwsImportModal();
             } else {
-                await executeGenerateAuthUrl(providerType, { method });
+                await executeGenerateAuthUrl(providerType, { method, email });
             }
         });
     });
@@ -3297,13 +3311,14 @@ function showKiroBatchImportModal() {
                                     const resultItem = document.createElement('div');
                                     resultItem.style.cssText = 'padding: 4px 0; border-bottom: 1px solid rgba(0,0,0,0.1);';
                                     
+                                    const label = current.email ? `${current.email}${current.socialProvider ? ` (${current.socialProvider})` : ''}` : `Token ${current.index}`;
                                     if (current.success) {
-                                        resultItem.innerHTML = `Token ${current.index}: <span style="color: #166534;">✓ ${current.path}</span>`;
+                                        resultItem.innerHTML = `${escapeHtml(label)}: <span style="color: #166534;">✓ ${escapeHtml(current.path || '')}</span>`;
                                     } else if (current.error === 'duplicate') {
-                                        resultItem.innerHTML = `Token ${current.index}: <span style="color: #d97706;">⚠ ${t('oauth.kiro.duplicateToken')}</span>
-                                            ${current.existingPath ? `<span style="color: #666; font-size: 11px;">(${current.existingPath})</span>` : ''}`;
+                                        resultItem.innerHTML = `${escapeHtml(label)}: <span style="color: #d97706;">⚠ ${escapeHtml(t('oauth.kiro.duplicateToken'))}</span>
+                                            ${current.existingPath ? `<span style="color: #666; font-size: 11px;">(${escapeHtml(current.existingPath)})</span>` : ''}`;
                                     } else {
-                                        resultItem.innerHTML = `Token ${current.index}: <span style="color: #991b1b;">✗ ${current.error}</span>`;
+                                        resultItem.innerHTML = `${escapeHtml(label)}: <span style="color: #991b1b;">✗ ${escapeHtml(current.error || '')}</span>`;
                                     }
                                     
                                     resultsList.appendChild(resultItem);

@@ -23,6 +23,7 @@ export {
 export {
     handleKiroOAuth,
     checkKiroCredentialsDuplicate,
+    parseKiroTokenInput,
     batchImportKiroRefreshTokens,
     batchImportKiroRefreshTokensStream,
     importAwsCredentials
