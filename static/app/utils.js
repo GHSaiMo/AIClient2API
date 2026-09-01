@@ -199,6 +199,10 @@ function showToast(title, message, type = 'info') {
 function getFieldLabel(key) {
     const labelMap = {
         'customName': t('modal.provider.customName') + ' ' + t('config.optional'),
+        'email': t('modal.provider.field.email') + ' ' + t('config.optional'),
+        'socialProvider': '登录渠道',
+        'provider': '登录渠道',
+        'authMethod': '认证方式',
         'checkModelName': t('modal.provider.checkModelName') + ' ' + t('config.optional'),
         'checkHealth': t('modal.provider.healthCheckLabel'),
         'concurrencyLimit': t('modal.provider.concurrencyLimit') + ' ' + t('config.optional'),
@@ -270,6 +274,12 @@ function getProviderTypeFields(providerType) {
             }
         ],
         'claude-kiro-oauth': [
+            {
+                id: 'email',
+                label: `${t('modal.provider.field.email')} <span class="optional-tag">${t('config.optional')}</span>`,
+                type: 'text',
+                placeholder: 'user@gmail.com'
+            },
             {
                 id: 'KIRO_OAUTH_CREDS_FILE_PATH',
                 label: t('modal.provider.field.oauthPath'),

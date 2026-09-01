@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from 'fs';
+import path from 'path';
 import logger from '../utils/logger.js';
 import { getRequestBody } from '../utils/common.js';
 import {
@@ -14,7 +15,48 @@ import { getRegisteredProviders, getServiceAdapter, invalidateServiceAdapter, se
 import { withFileLock, atomicWriteFile } from '../utils/file-lock.js';
 import { normalizeProviderConfigFields } from '../utils/provider-config-normalizer.js';
 
-
+/**
+ * 尝试从凭据文件补充读取 email, socialProvider, authMethod 等元数据
+ */
+function enrichProviderConfigWithCreds(providerConfig) {
+    if (!providerConfig || typeof providerConfig !== 'object') return providerConfig;
+    const credPathKey = Object.keys(providerConfig).find(k => k.endsWith('_CREDS_FILE_PATH') || k.endsWith('_TOKEN_FILE_PATH'));
+    if (!credPathKey || !providerConfig[credPathKey]) return providerConfig;
+    
+    // 如果已经有 email 且有 socialProvider，无需重复读取
+    if (providerConfig.email && (providerConfig.socialProvider || providerConfig.authMethod)) {
+        return providerConfig;
+    }
+    
+    try {
+        const rawPath = providerConfig[credPathKey];
+        const absolutePath = path.isAbsolute(rawPath) ? rawPath : path.join(process.cwd(), rawPath.replace(/^\.\//, ''));
+        if (existsSync(absolutePath)) {
+            const content = readFileSync(absolutePath, 'utf-8');
+            const data = JSON.parse(content);
+            if (data.email) {
+                providerConfig.email = data.email;
+            } else if (!providerConfig.email && data.id_token && typeof data.id_token === 'string') {
+                try {
+                    const payload = JSON.parse(Buffer.from(data.id_token.split('.')[1], 'base64').toString('utf8'));
+                    if (payload.email) {
+                        providerConfig.email = payload.email;
+                    }
+                } catch {}
+            }
+            if (data.socialProvider || data.provider) {
+                providerConfig.socialProvider = data.socialProvider || data.provider;
+                providerConfig.provider = data.provider || data.socialProvider;
+            }
+            if (data.authMethod) {
+                providerConfig.authMethod = data.authMethod;
+            }
+        }
+    } catch {
+        // 忽略文件读取错误
+    }
+    return providerConfig;
+}
 
 // 文件级互斥锁：防止并发读写导致数据丢失
 // 安全净化：移除用户输入字段中的危险内容（script、事件处理器、javascript:协议等），
@@ -22,13 +64,14 @@ import { normalizeProviderConfigFields } from '../utils/provider-config-normaliz
 // 安全净化：移除用户输入字段中的危险内容，并可选地过滤敏感 API 密钥
 function sanitizeProviderData(provider, maskSensitive = false) {
     if (!provider || typeof provider !== 'object') return provider;
-    const sanitized = { ...provider };
+    const enriched = enrichProviderConfigWithCreds({ ...provider });
+    const sanitized = { ...enriched };
     
     // 1. 过滤敏感字段（API Keys, Tokens 等）
     if (maskSensitive) {
         for (const key in sanitized) {
             // 排除已知非敏感字段
-            if (key === 'uuid' || key === 'customName' || key === 'isHealthy' || key === 'isDisabled' || key === 'needsRefresh' || key === 'quota' || key === 'restore_at' || key === 'accountType' || key === 'email') continue;
+            if (key === 'uuid' || key === 'customName' || key === 'isHealthy' || key === 'isDisabled' || key === 'needsRefresh' || key === 'quota' || key === 'restore_at' || key === 'accountType' || key === 'email' || key === 'socialProvider' || key === 'authMethod' || key === 'provider') continue;
             
             const val = sanitized[key];
             if (typeof val !== 'string' || !val) continue;
@@ -225,43 +268,45 @@ export async function handleGetProviders(req, res, currentConfig, providerPoolMa
     const registeredProviders = getRegisteredProviders();
     let poolTypes = [];
 
-    // 2. 从管理器获取当前所有池的状态
+    // 2. 读取最新的号池配置文件
+    const filePath = currentConfig.PROVIDER_POOLS_FILE_PATH || 'configs/provider_pools.json';
+    let poolsData = {};
+    try {
+        if (existsSync(filePath)) {
+            poolsData = JSON.parse(readFileSync(filePath, 'utf-8'));
+            poolTypes = Object.keys(poolsData);
+        }
+    } catch (error) {
+        logger.warn('[UI API] Failed to read provider pools file:', error.message);
+    }
+
     const providerStatus = {};
-    if (providerPoolManager) {
+    // 从管理器获取当前所有池的状态并与最新配置合并
+    if (providerPoolManager && providerPoolManager.providerStatus) {
         for (const [type, providers] of Object.entries(providerPoolManager.providerStatus)) {
-            providerStatus[type] = providers.map(p => ({
-                ...p.config,
-                activeRequests: p.state?.activeCount || 0,
-                waitingRequests: p.state?.waitingCount || 0
-            }));
+            providerStatus[type] = providers.map(p => {
+                const diskItem = (poolsData[type] || []).find(d => d.uuid === p.config?.uuid);
+                return {
+                    ...p.config,
+                    ...(diskItem || {}),
+                    activeRequests: p.state?.activeCount || 0,
+                    waitingRequests: p.state?.waitingCount || 0
+                };
+            });
         }
     }
     
     // 3. 补全号池配置文件中的所有组
-    const filePath = currentConfig.PROVIDER_POOLS_FILE_PATH || 'configs/provider_pools.json';
-    try {
-        if (existsSync(filePath)) {
-            const poolsData = JSON.parse(readFileSync(filePath, 'utf-8'));
-            poolTypes = Object.keys(poolsData);
-            poolTypes.forEach(type => {
-                // 如果管理器中没有该组，或者该组是空的，则从文件中补全
-                if (!providerStatus[type] || providerStatus[type].length === 0) {
-                    const fileProviders = poolsData[type] || [];
-                    if (fileProviders.length > 0) {
-                        providerStatus[type] = fileProviders.map(p => ({
-                            ...p,
-                            activeRequests: 0,
-                            waitingRequests: 0
-                        }));
-                    } else if (!providerStatus[type]) {
-                        providerStatus[type] = [];
-                    }
-                }
-            });
+    poolTypes.forEach(type => {
+        if (!providerStatus[type] || providerStatus[type].length === 0) {
+            const fileProviders = poolsData[type] || [];
+            providerStatus[type] = fileProviders.map(p => ({
+                ...p,
+                activeRequests: 0,
+                waitingRequests: 0
+            }));
         }
-    } catch (error) {
-        logger.warn('[UI API] Failed to supplement provider status:', error.message);
-    }
+    });
 
     // 合并生成支持的类型列表
     const supportedProviders = [...new Set([...registeredProviders, ...poolTypes])];
@@ -281,11 +326,11 @@ export async function handleGetProviderType(req, res, currentConfig, providerPoo
     let providerPools = {};
     const filePath = currentConfig.PROVIDER_POOLS_FILE_PATH || 'configs/provider_pools.json';
     try {
-        if (providerPoolManager && providerPoolManager.providerPools) {
-            providerPools = providerPoolManager.providerPools;
-        } else if (filePath && existsSync(filePath)) {
+        if (filePath && existsSync(filePath)) {
             const poolsData = JSON.parse(readFileSync(filePath, 'utf-8'));
             providerPools = poolsData;
+        } else if (providerPoolManager && providerPoolManager.providerPools) {
+            providerPools = providerPoolManager.providerPools;
         }
     } catch (error) {
         logger.warn('[UI API] Failed to load provider pools:', error.message);
