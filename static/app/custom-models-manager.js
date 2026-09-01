@@ -1,7 +1,7 @@
 /**
  * 自定义模型管理类 - 修复版
  */
-import { getProviderConfigs } from './utils.js';
+import { getProviderConfigs, isProviderHidden } from './utils.js';
 
 export class CustomModelsManager {
     constructor() {
@@ -84,7 +84,7 @@ export class CustomModelsManager {
                 const providerConfigs = getProviderConfigs(supportedProviders);
                 const providerDisplayOrder = providerConfigs.filter(c => c.visible !== false).map(c => c.id);
                 const actualProviderTypes = Object.keys(response.providers || {});
-                const extraProviderTypes = actualProviderTypes.filter(type => !providerDisplayOrder.includes(type));
+                const extraProviderTypes = actualProviderTypes.filter(type => !providerDisplayOrder.includes(type) && !isProviderHidden(type));
                 const extraProviderConfigs = extraProviderTypes.map(type => ({
                     id: type,
                     name: type,
@@ -94,7 +94,7 @@ export class CustomModelsManager {
 
                 // 与提供商管理池保持一致：按预设顺序展示已支持类型，并补齐配置文件中实际存在的动态分组
                 this.providers = providerConfigs
-                    .filter(config => config.visible !== false)
+                    .filter(config => config.visible !== false && !isProviderHidden(config.id))
                     .concat(extraProviderConfigs);
                 this.updateProviderOptions();
             }

@@ -1,7 +1,7 @@
 // 提供商管理功能模块
 
 import { providerStats, updateProviderStats } from './constants.js';
-import { showToast, formatUptime, getProviderConfigs, getBaseProviderConfigs, bindOnce, escapeHtml } from './utils.js';
+import { showToast, formatUptime, getProviderConfigs, getBaseProviderConfigs, isProviderHidden, bindOnce, escapeHtml } from './utils.js';
 import { fileUploadHandler } from './file-upload.js';
 import { t, getCurrentLanguage } from './i18n.js';
 import { renderRoutingExamples } from './routing-examples.js';
@@ -339,9 +339,9 @@ function renderProviders(providers, supportedProviders = []) {
         allProviderTypes = providerDisplayOrder;
     }
 
-    // 过滤掉明确设置为不显示的提供商
+    // 过滤掉明确设置为不显示或默认隐藏的提供商
     const sortedProviderTypes = providerDisplayOrder.filter(type => allProviderTypes.includes(type))
-        .concat(allProviderTypes.filter(type => !providerDisplayOrder.some(t => t === type) && !configMap[type]?.visible === false));
+        .concat(allProviderTypes.filter(type => !providerDisplayOrder.some(t => t === type) && configMap[type]?.visible !== false && !isProviderHidden(type)));
     
     // 计算总统计
     let totalAccounts = 0;
@@ -353,8 +353,8 @@ function renderProviders(providers, supportedProviders = []) {
 
     // 按照排序后的提供商类型渲染
     sortedProviderTypes.forEach((providerType) => {
-        // 如果配置中明确设置为不显示，则跳过
-        if (configMap[providerType] && configMap[providerType].visible === false) {
+        // 如果配置中明确设置为不显示，或者属于隐藏提供商，则跳过
+        if ((configMap[providerType] && configMap[providerType].visible === false) || isProviderHidden(providerType)) {
             return;
         }
 
