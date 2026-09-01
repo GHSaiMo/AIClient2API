@@ -82,6 +82,30 @@ function getBaseProviderConfigs() {
 }
 
 /**
+ * 默认在前端隐藏的提供商类型列表（不显示在提供商池管理中）
+ */
+const HIDDEN_PROVIDER_TYPES = [
+    'qiniu',
+    'fenno',
+    'atlascloud',
+    'openai-custom',
+    'openairesponses-custom',
+    'openaicustom-responses',
+    'claude-custom'
+];
+
+/**
+ * 判断提供商类型是否默认在前端隐藏
+ * @param {string} providerId - 提供商ID
+ * @returns {boolean}
+ */
+function isProviderHidden(providerId) {
+    if (!providerId) return false;
+    const lower = String(providerId).toLowerCase().trim();
+    return HIDDEN_PROVIDER_TYPES.some(hidden => lower === hidden || lower.startsWith(hidden + '-'));
+}
+
+/**
  * 获取所有支持的提供商配置列表
  * @param {string[]} supportedProviders - 已注册的提供商类型列表
  * @returns {Object[]} 提供商配置对象数组
@@ -94,7 +118,8 @@ function getProviderConfigs(supportedProviders = []) {
 
     // 1. 遍历基础配置，使其按照定义顺序排列，并且让带后缀的自定义提供商紧跟在它的基础母版后面
     baseConfigs.forEach(baseConfig => {
-        const isSupported = supportedProviders.includes(baseConfig.id);
+        const isHidden = isProviderHidden(baseConfig.id);
+        const isSupported = supportedProviders.includes(baseConfig.id) && !isHidden;
         result.push({ ...baseConfig, visible: isSupported });
         usedIds.add(baseConfig.id);
 
@@ -103,12 +128,13 @@ function getProviderConfigs(supportedProviders = []) {
             if (usedIds.has(providerId)) return;
 
             if (providerId.startsWith(baseConfig.id + '-')) {
+                const isItemHidden = isProviderHidden(providerId);
                 const suffix = providerId.substring(baseConfig.id.length + 1);
                 result.push({
                     ...baseConfig,
                     id: providerId,
                     name: `${baseConfig.name} (${suffix})`,
-                    visible: true
+                    visible: !isItemHidden
                 });
                 usedIds.add(providerId);
             }
@@ -118,11 +144,12 @@ function getProviderConfigs(supportedProviders = []) {
     // 2. 安全兜底：如果还有一些 supportedProviders 既不匹配任何基础 ID 也不匹配任何前缀，就追加到最后
     supportedProviders.forEach(providerId => {
         if (!usedIds.has(providerId)) {
+            const isItemHidden = isProviderHidden(providerId);
             result.push({
                 id: providerId,
                 name: providerId,
                 icon: 'fa-server',
-                visible: true
+                visible: !isItemHidden
             });
             usedIds.add(providerId);
         }
@@ -638,6 +665,7 @@ export {
     getProviderTypeFields,
     getProviderConfigs,
     getBaseProviderConfigs,
+    isProviderHidden,
     getProviderStats,
     apiRequest,
     copyToClipboard,
