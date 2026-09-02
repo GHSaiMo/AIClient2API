@@ -80,21 +80,49 @@ export async function handleGrokAssetsProxy(req, res, config, providerPoolManage
             headers['Cookie'] = `sso=${ssoToken}; sso-rw=${ssoToken}`;
         }
 
-        const axiosConfig = {
-            method: 'get',
-            url: finalTargetUrl,
-            headers: headers,
-            responseType: 'stream',
-            timeout: 30000,
-            validateStatus: false
-        };
+        const maxProxyAttempts = 3;
+        let response = null;
+        let lastProxyError = null;
 
-        // 配置代理
-        configureAxiosProxy(axiosConfig, config, MODEL_PROVIDER.GROK_WEB);
+        for (let attempt = 1; attempt <= maxProxyAttempts; attempt++) {
+            try {
+                const axiosConfig = {
+                    method: 'get',
+                    url: finalTargetUrl,
+                    headers: headers,
+                    responseType: 'stream',
+                    timeout: 30000,
+                    validateStatus: false
+                };
 
-        logger.debug(`[Grok Proxy] Proxying request to: ${finalTargetUrl}`);
+                // 配置代理（每次重试重新创建/绑定 agent，确保重新进行 TLS 握手）
+                configureAxiosProxy(axiosConfig, config, MODEL_PROVIDER.GROK_WEB);
 
-        const response = await axios(axiosConfig);
+                logger.debug(`[Grok Proxy] Proxying request to: ${finalTargetUrl} (attempt ${attempt}/${maxProxyAttempts})`);
+                response = await axios(axiosConfig);
+                break;
+            } catch (err) {
+                lastProxyError = err;
+                const errMsg = err.message || '';
+                const isRetryable = errMsg.includes('disconnected before secure TLS') ||
+                                    errMsg.includes('utls handshake failed') ||
+                                    errMsg.includes('ECONNRESET') ||
+                                    errMsg.includes('ETIMEDOUT') ||
+                                    errMsg.includes('socket hang up') ||
+                                    errMsg.includes('EOF');
+
+                if (isRetryable && attempt < maxProxyAttempts) {
+                    logger.warn(`[Grok Proxy] Transient network/TLS error on attempt ${attempt}/${maxProxyAttempts} (${errMsg}). Re-attempting handshake in 400ms...`);
+                    await new Promise(r => setTimeout(r, 400));
+                    continue;
+                }
+                throw err;
+            }
+        }
+
+        if (!response) {
+            throw lastProxyError || new Error('Failed to fetch asset from upstream');
+        }
 
         // 转发响应头
         const responseHeaders = {

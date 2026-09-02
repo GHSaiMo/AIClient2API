@@ -189,7 +189,11 @@ async function handleImageGenerationRequest(req, res, currentConfig, providerPoo
 
         // 从号池获取服务实例
         const shouldUsePool = !!(providerPoolManager && CONFIG.providerPools);
-        const result = await getApiServiceWithFallback(CONFIG, model, {acquireSlot: shouldUsePool});
+        const prevExcludeUuids = Array.isArray(retryContext?.excludeUuids) ? retryContext.excludeUuids : [];
+        const result = await getApiServiceWithFallback(CONFIG, model, {
+            acquireSlot: shouldUsePool,
+            excludeUuids: prevExcludeUuids
+        });
         const service = result.service;
 
         if (!service) {
@@ -295,18 +299,23 @@ async function handleImageGenerationRequest(req, res, currentConfig, providerPoo
             const rateLimitRecoveryTime = getRateLimitCooldownRecoveryTime(error, CONFIG);
             const quotaRecoveryTime = getQuotaCooldownRecoveryTime(error, CONFIG);
             if (rateLimitRecoveryTime) {
-                logger.info(`[Provider Pool] Applying 429 cooldown for ${slotProviderType} (${slotUuid})`);
-                providerPoolManager.markProviderUnhealthyWithRecoveryTime(slotProviderType, {uuid: slotUuid}, '429 Too Many Requests - short cooldown', rateLimitRecoveryTime);
+                logger.info(`[Provider Pool] Applying 429 cooldown for ${slotProviderType} (${slotUuid}) until ${rateLimitRecoveryTime.toISOString()}`);
+                providerPoolManager.markProviderUnhealthyWithRecoveryTime(slotProviderType, {uuid: slotUuid}, '429 Rate limit exceeded - cooling down', rateLimitRecoveryTime);
                 credentialMarkedUnhealthy = true;
             } else if (quotaRecoveryTime) {
-                logger.info(`[Provider Pool] Applying 402 quota cooldown for ${slotProviderType} (${slotUuid})`);
+                logger.info(`[Provider Pool] Applying 402 quota cooldown for ${slotProviderType} (${slotUuid}) until ${quotaRecoveryTime.toISOString()}`);
                 providerPoolManager.markProviderUnhealthyWithRecoveryTime(slotProviderType, {uuid: slotUuid}, error.message || '402 Payment Required - quota cooldown', quotaRecoveryTime);
                 credentialMarkedUnhealthy = true;
             } else if (!credentialMarkedUnhealthy && !error.skipErrorCount) {
                 const isGrokAuthFailure = slotProviderType === 'grok-web' && (error.response?.status === 401 || error.isDefinitiveAuthFailure === true);
+                const isGrokSessionFailure = slotProviderType === 'grok-web' && error.response?.status === 403;
                 if (isGrokAuthFailure) {
                     logger.warn(`[Provider Pool] Grok auth failure for ${slotProviderType} (${slotUuid}). Marking as needsRefresh: ${error.message}`);
                     providerPoolManager.markProviderNeedRefresh(slotProviderType, {uuid: slotUuid});
+                    credentialMarkedUnhealthy = true;
+                } else if (isGrokSessionFailure) {
+                    logger.warn(`[Provider Pool] Grok session failure (403) for ${slotProviderType} (${slotUuid}). Marking as unhealthy: ${error.message}`);
+                    providerPoolManager.markProviderUnhealthyImmediately(slotProviderType, {uuid: slotUuid}, error.message);
                     credentialMarkedUnhealthy = true;
                 } else if (error.response?.status !== 400) {
                     logger.info(`[Provider Pool] Marking ${slotProviderType} as unhealthy due to image generation error (status: ${error.response?.status || 'unknown'})`);
@@ -322,15 +331,17 @@ async function handleImageGenerationRequest(req, res, currentConfig, providerPoo
 
         if (credentialMarkedUnhealthy && currentRetry < maxRetries && providerPoolManager && CONFIG) {
             const retryDelay = calculateRetryDelay(currentRetry, 1000, 8000);
-            logger.info(`[Image Generation Retry] Credential marked unhealthy. Waiting ${retryDelay}ms before retry ${currentRetry + 1}/${maxRetries}...`);
+            logger.info(`[Image Generation Retry] Credential marked unhealthy. Waiting ${retryDelay}ms before retry ${currentRetry + 1}/${maxRetries} with different credential...`);
             await new Promise(resolve => setTimeout(resolve, retryDelay));
 
+            const currentExcludeUuids = slotUuid ? [...new Set([...prevExcludeUuids, slotUuid])] : prevExcludeUuids;
             try {
                 return await handleImageGenerationRequest(req, res, CONFIG, providerPoolManager, {
                     ...retryContext,
                     CONFIG,
                     currentRetry: currentRetry + 1,
                     maxRetries,
+                    excludeUuids: currentExcludeUuids,
                     parsedBody: {model, n, response_format, size, virtualOpenAIRequest}
                 });
             } catch (retryError) {

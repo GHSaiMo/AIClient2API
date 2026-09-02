@@ -647,9 +647,14 @@ export class ProviderPoolManager {
             }
         }
         
-        // 2. 预热/新鲜度判断
+        // 2. 预热/新鲜度判断与错误抑制
+        const errorCount = config.errorCount || 0;
+        const lastErrorTime = config.lastErrorTime ? new Date(config.lastErrorTime).getTime() : 0;
+        const hasRecentError = errorCount > 0 || (lastErrorTime && (now - lastErrorTime < 60000));
+
         const lastHealthCheckTime = config.lastHealthCheckTime ? new Date(config.lastHealthCheckTime).getTime() : 0;
-        const isFresh = lastHealthCheckTime && (now - lastHealthCheckTime < 60000);
+        // 如果节点最近发生过错误，禁止享受 isFresh 负偏置优先权
+        const isFresh = !hasRecentError && lastHealthCheckTime && (now - lastHealthCheckTime < 60000);
 
         // 3. 计算统一评分
         // 基础分：新鲜节点使用固定负偏移 (-1e14)，普通节点使用上次使用时间 (约 1.7e12)
@@ -673,6 +678,9 @@ export class ProviderPoolManager {
         // 惩罚项 C: 负载 (每个活跃请求增加 5 秒权重)
         const loadScore = (state.activeCount || 0) * 5000;
 
+        // 惩罚项 D: 错误惩罚 (每个未恢复错误赋予重度偏置，确保失败节点排在所有健康零错误节点后)
+        const errorScore = hasRecentError ? (1e13 * Math.max(1, errorCount)) : 0;
+
         // 新鲜节点的微调：配合 usageScore 和 sequenceScore 在多个新鲜节点间轮询
         const freshBonus = isFresh ? (now - lastHealthCheckTime) : 0;
 
@@ -688,7 +696,7 @@ export class ProviderPoolManager {
             }
         }
 
-        return baseScore + usageScore + sequenceScore + loadScore + freshBonus + quotaScore;
+        return baseScore + usageScore + sequenceScore + loadScore + freshBonus + quotaScore + errorScore;
     }
 
     /**
@@ -1092,6 +1100,22 @@ export class ProviderPoolManager {
         let availableAndHealthyProviders = availableProviders.filter(p =>
             p.config.isHealthy && !p.config.isDisabled && !p.config.needsRefresh
         );
+
+        // 如果传入了需要排除的 UUID 列表（如重试切换时避开已失败节点），优先排除
+        if (options?.excludeUuids) {
+            const excludeSet = options.excludeUuids instanceof Set
+                ? options.excludeUuids
+                : new Set(Array.isArray(options.excludeUuids) ? options.excludeUuids : [options.excludeUuids]);
+            if (excludeSet.size > 0) {
+                const filteredByExclude = availableAndHealthyProviders.filter(p =>
+                    !excludeSet.has(p.config?.uuid) && !excludeSet.has(p.uuid)
+                );
+                if (filteredByExclude.length > 0) {
+                    availableAndHealthyProviders = filteredByExclude;
+                    this._log('debug', `Excluded ${excludeSet.size} uuid(s) from selection. Remaining: ${filteredByExclude.length}`);
+                }
+            }
+        }
 
         // 如果指定了模型，则排除不支持该模型的提供商
         if (requestedModel) {
