@@ -106,8 +106,12 @@ export class GrokApiService {
             if (match) status = parseInt(match[1], 10);
         }
 
-        if (!status && originalErrorMessage.includes('Image rate limit exceeded')) {
+        if (!status && (originalErrorMessage.includes('Image rate limit exceeded') || originalErrorMessage.includes('rate_limit_exceeded') || originalErrorMessage.toLowerCase().includes('rate limit'))) {
             status = 429;
+            error.status = 429;
+            error.statusCode = 429;
+            error.code = 429;
+            error.isRateLimit = true;
         }
 
         if (status) {
@@ -526,29 +530,37 @@ export class GrokApiService {
     }
 
     async createPost(mediaType, mediaUrl = null, prompt = null) {
-        const headers = this.buildHeaders();
-        headers['referer'] = `${this.baseUrl}/imagine`;
-        
-        // 严格遵循成功示例的载荷结构
         const payload = { mediaType };
         if (prompt && prompt.trim()) payload.prompt = prompt;
         if (mediaUrl && mediaUrl.trim()) payload.mediaUrl = mediaUrl;
 
-        try {
-            const response = await this._request({
-                url: `${this.baseUrl}/rest/media/post/create`,
-                headers,
-                data: payload,
-                timeout: 30000
-            });
-            const postId = response.data?.post?.id;
-            if (postId) logger.info(`[Grok Post] Media post created: ${postId} (type=${mediaType})`);
-            return postId;
-        } catch (error) {
-            const detail = await getNormalizedErrorResponseText(error);
-            logger.error(`[Grok Post] Failed to create media post: ${detail}`);
-            return null;
+        const maxAttempts = 3;
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+            const headers = this.buildHeaders();
+            headers['referer'] = `${this.baseUrl}/imagine`;
+            try {
+                const response = await this._request({
+                    url: `${this.baseUrl}/rest/media/post/create`,
+                    headers,
+                    data: payload,
+                    timeout: 30000
+                });
+                const postId = response.data?.post?.id;
+                if (postId) logger.info(`[Grok Post] Media post created: ${postId} (type=${mediaType})`);
+                return postId;
+            } catch (error) {
+                const detail = await getNormalizedErrorResponseText(error);
+                const isRetryable = isRetryableNetworkError(error) || detail.includes('utls handshake failed') || detail.includes('socket disconnected') || detail.includes('EOF');
+                if (isRetryable && attempt < maxAttempts) {
+                    logger.warn(`[Grok Post] Attempt ${attempt}/${maxAttempts} failed with transient network/TLS error (${detail}), retrying in 500ms...`);
+                    await new Promise(r => setTimeout(r, 500));
+                    continue;
+                }
+                logger.error(`[Grok Post] Failed to create media post: ${detail}`);
+                return null;
+            }
         }
+        return null;
     }
 
     async upscaleVideo(videoUrl) {
@@ -570,38 +582,48 @@ export class GrokApiService {
     async createVideoShareLink(postId) {
         logger.info(`[Grok Video Link] Entering createVideoShareLink with postId: ${postId}`);
         if (!postId) return null;
-        const headers = this.buildHeaders();
-        headers['referer'] = `${this.baseUrl}/imagine/post/${postId}`;
         const payload = {
             "postId": postId,
             "source": "post-page",
             "platform": "web"
         };
         
-        try {
-            const response = await this._request({
-                url: `${this.baseUrl}/rest/media/post/create-link`,
-                headers,
-                data: payload
-            });
-            const shareLink = response.data?.shareLink;
-            if (shareLink) {
-                // 从 shareLink 中提取 ID (通常与输入的 postId 一致)
-                const idMatch = shareLink.match(/\/post\/([0-9a-fA-F-]{36}|[0-9a-fA-F]{32})/);
-                const resourceId = idMatch ? idMatch[1] : postId;
-                
-                // 构造公开的视频资源地址
-                const resourceUrl = `https://imagine-public.x.ai/imagine-public/share-videos/${resourceId}.mp4?cache=1`;
-                
-                logger.info(`[Grok Video Link] Public resource created for post ${postId}: ${resourceUrl}`);
-                return resourceUrl;
+        const maxAttempts = 3;
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+            const headers = this.buildHeaders();
+            headers['referer'] = `${this.baseUrl}/imagine/post/${postId}`;
+            try {
+                const response = await this._request({
+                    url: `${this.baseUrl}/rest/media/post/create-link`,
+                    headers,
+                    data: payload
+                });
+                const shareLink = response.data?.shareLink;
+                if (shareLink) {
+                    // 从 shareLink 中提取 ID (通常与输入的 postId 一致)
+                    const idMatch = shareLink.match(/\/post\/([0-9a-fA-F-]{36}|[0-9a-fA-F]{32})/);
+                    const resourceId = idMatch ? idMatch[1] : postId;
+                    
+                    // 构造公开的视频资源地址
+                    const resourceUrl = `https://imagine-public.x.ai/imagine-public/share-videos/${resourceId}.mp4?cache=1`;
+                    
+                    logger.info(`[Grok Video Link] Public resource created for post ${postId}: ${resourceUrl}`);
+                    return resourceUrl;
+                }
+                return null;
+            } catch (error) {
+                const detail = await getNormalizedErrorResponseText(error);
+                const isRetryable = isRetryableNetworkError(error) || detail.includes('utls handshake failed') || detail.includes('socket disconnected') || detail.includes('EOF');
+                if (isRetryable && attempt < maxAttempts) {
+                    logger.warn(`[Grok Video Link] Attempt ${attempt}/${maxAttempts} failed with transient network/TLS error (${detail}), retrying in 500ms...`);
+                    await new Promise(r => setTimeout(r, 500));
+                    continue;
+                }
+                logger.warn(`[Grok Video Link] Failed to create share link for ${postId}: ${detail}`);
+                return null;
             }
-            return null;
-        } catch (error) {
-            const detail = await getNormalizedErrorResponseText(error);
-            logger.warn(`[Grok Video Link] Failed to create share link for ${postId}: ${detail}`);
-            return null;
         }
+        return null;
     }
 
     async buildPayload(modelId, requestBody) {
@@ -1203,6 +1225,7 @@ export class GrokApiService {
 
             if (item.type === 'error') {
                 const errorMsg = item.err_msg || item.error || 'WebSocket generation failed';
+                const isRateLimit = item.err_code === 'rate_limit_exceeded' || String(errorMsg).toLowerCase().includes('rate limit');
                 
                 // 救回逻辑：如果发生错误且没有 100% 的图，但有中间图，则使用中间图
                 if (imagesCollected === 0 && latestImages.size > 0) {
@@ -1217,7 +1240,15 @@ export class GrokApiService {
                     collected.message += (collected.message ? "\n" : "") + `[Grok Error] ${errorMsg}`;
                     break;
                 }
-                throw new Error(errorMsg);
+                const err = new Error(errorMsg);
+                if (isRateLimit) {
+                    err.status = 429;
+                    err.statusCode = 429;
+                    err.code = 429;
+                    err.isRateLimit = true;
+                    err.shouldSwitchCredential = true;
+                }
+                throw err;
             }
 
             if (item.type === 'image') {
@@ -1287,6 +1318,7 @@ export class GrokApiService {
 
             if (item.type === 'error') {
                 const errorMsg = item.err_msg || item.error || 'WebSocket generation failed';
+                const isRateLimit = item.err_code === 'rate_limit_exceeded' || String(errorMsg).toLowerCase().includes('rate limit');
                 if (imagesYielded > 0) {
                     logger.warn(`[Grok WS] Error after yielding ${imagesYielded} images: ${errorMsg}. Ending stream gracefully.`);
                     yield {
@@ -1299,7 +1331,15 @@ export class GrokApiService {
                     };
                     break;
                 }
-                throw new Error(errorMsg);
+                const err = new Error(errorMsg);
+                if (isRateLimit) {
+                    err.status = 429;
+                    err.statusCode = 429;
+                    err.code = 429;
+                    err.isRateLimit = true;
+                    err.shouldSwitchCredential = true;
+                }
+                throw err;
             }
             if (item.type === 'image') {
                 // 如果是包含 part-0 的分块图片资源，则直接过滤不处理

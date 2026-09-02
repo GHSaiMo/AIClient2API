@@ -307,6 +307,29 @@ describe('Phase 2: Grok Reasoning Replay & Tool Governance Suite', () => {
             expect(error.isDefinitiveAuthFailure).toBe(true);
             expect(error.shouldSwitchCredential).toBe(true);
         });
+
+        it('GrokApiService classifyApiError should identify Image rate limit exceeded as 429 with isRateLimit', async () => {
+            const service = new GrokApiService({ GROK_COOKIE_TOKEN: 'test_token' });
+            const error = new Error('Image rate limit exceeded');
+            const result = await service.classifyApiError(error);
+            expect(result.status).toBe(429);
+            expect(error.status).toBe(429);
+            expect(error.isRateLimit).toBe(true);
+            expect(error.shouldSwitchCredential).toBe(true);
+        });
+
+        it('isRateLimitError and getRateLimitCooldownRecoveryTime should recognize WS and HTTP rate limit errors', async () => {
+            const { isRateLimitError, getRateLimitCooldownRecoveryTime } = await import('../../src/utils/common.js');
+
+            const wsRateLimitError = new Error('Image rate limit exceeded');
+            wsRateLimitError.status = 429;
+            wsRateLimitError.isRateLimit = true;
+
+            expect(isRateLimitError(wsRateLimitError)).toBe(true);
+            const recoveryTime = getRateLimitCooldownRecoveryTime(wsRateLimitError, { RATE_LIMIT_COOLDOWN_MS: 30000 });
+            expect(recoveryTime).toBeInstanceOf(Date);
+            expect(recoveryTime.getTime()).toBeGreaterThan(Date.now());
+        });
     });
 });
 

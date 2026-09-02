@@ -310,15 +310,42 @@ function getPositiveInteger(value, fallback) {
 }
 
 /**
- * Calculates a scheduled recovery time for optional 429 account cooldown.
- * Returns null when cooldown is disabled or the error is not an HTTP 429.
+ * Checks whether an error indicates rate limiting (429 Too Many Requests, rate_limit_exceeded, Image rate limit).
+ * @param {Error|object} error - The error to inspect
+ * @returns {boolean}
+ */
+export function isRateLimitError(error) {
+    if (!error) return false;
+    const status = Number(getErrorStatusCode(error));
+    if (status === 429 || error.status === 429 || error.statusCode === 429 || error.code === 429 || error.err_code === 'rate_limit_exceeded') {
+        return true;
+    }
+    if (error.isRateLimit === true) return true;
+    const msg = String(error.message || '').toLowerCase();
+    if (msg.includes('rate limit') || msg.includes('rate_limit') || msg.includes('too many requests') || msg.includes('image rate limit')) {
+        return true;
+    }
+    const rawData = error.response?.data;
+    if (typeof rawData === 'string') {
+        const lower = rawData.toLowerCase();
+        if (lower.includes('rate limit') || lower.includes('rate_limit') || lower.includes('too many requests') || lower.includes('rate_limit_exceeded')) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/**
+ * Calculates a scheduled recovery time for 429/rate limit account cooldown.
+ * Returns a recovery Date when rate limit is detected.
  */
 export function getRateLimitCooldownRecoveryTime(error, config = {}, now = Date.now()) {
-    if (!config?.RATE_LIMIT_COOLDOWN_ENABLED || Number(getErrorStatusCode(error)) !== 429) {
+    if (!isRateLimitError(error)) {
         return null;
     }
 
-    const defaultCooldownMs = getPositiveInteger(config.RATE_LIMIT_COOLDOWN_MS, 30000);
+    // 默认 60 秒冷却，支持配置覆盖与 Retry-After 头
+    const defaultCooldownMs = getPositiveInteger(config.RATE_LIMIT_COOLDOWN_MS, 60000);
     const maxCooldownMs = getPositiveInteger(config.RATE_LIMIT_COOLDOWN_MAX_MS, 300000);
     const jitterMs = getPositiveInteger(config.RATE_LIMIT_COOLDOWN_JITTER_MS, 0);
     const retryAfterMs = getRetryAfterMs(error, now);
@@ -1307,8 +1334,10 @@ export async function handleStreamRequest(res, service, model, requestBody, from
             try {
                 // 动态导入以避免循环依赖
                 const { getApiServiceWithFallback } = await import('../services/service-manager.js');
-                // 使用 acquireSlot: true 以占用新凭证的并发插槽
-                const result = await getApiServiceWithFallback(CONFIG, model, { acquireSlot: true });
+                const prevExcludeUuids = Array.isArray(retryContext?.excludeUuids) ? retryContext.excludeUuids : [];
+                const currentExcludeUuids = pooluuid ? [...new Set([...prevExcludeUuids, pooluuid])] : prevExcludeUuids;
+                // 使用 acquireSlot: true 以占用新凭证的并发插槽，并排除已失败节点
+                const result = await getApiServiceWithFallback(CONFIG, model, { acquireSlot: true, excludeUuids: currentExcludeUuids });
                 
                 if (result && result.service) {
                     logger.info(`[Stream Retry] Switched to new credential: ${result.uuid} (provider: ${result.actualProviderType})`);
@@ -1319,6 +1348,7 @@ export async function handleStreamRequest(res, service, model, requestBody, from
                         CONFIG,
                         currentRetry: currentRetry + 1,
                         maxRetries,
+                        excludeUuids: currentExcludeUuids,
                         clientDisconnected,  // 传递断开状态
                         anyDataSent          // 传递数据发送状态
                     };
@@ -1586,8 +1616,10 @@ export async function handleUnaryRequest(res, service, model, requestBody, fromP
             try {
                 // 动态导入以避免循环依赖
                 const { getApiServiceWithFallback } = await import('../services/service-manager.js');
-                // 使用 acquireSlot: true 以占用新凭证的并发插槽
-                const result = await getApiServiceWithFallback(CONFIG, model, { acquireSlot: true });
+                const prevExcludeUuids = Array.isArray(retryContext?.excludeUuids) ? retryContext.excludeUuids : [];
+                const currentExcludeUuids = pooluuid ? [...new Set([...prevExcludeUuids, pooluuid])] : prevExcludeUuids;
+                // 使用 acquireSlot: true 以占用新凭证的并发插槽，并排除已失败节点
+                const result = await getApiServiceWithFallback(CONFIG, model, { acquireSlot: true, excludeUuids: currentExcludeUuids });
                 
                 if (result && result.service) {
                     logger.info(`[Unary Retry] Switched to new credential: ${result.uuid} (provider: ${result.actualProviderType})`);
@@ -1597,7 +1629,8 @@ export async function handleUnaryRequest(res, service, model, requestBody, fromP
                         ...retryContext,
                         CONFIG,
                         currentRetry: currentRetry + 1,
-                        maxRetries
+                        maxRetries,
+                        excludeUuids: currentExcludeUuids
                     };
                     
                     // 递归调用，使用新的服务

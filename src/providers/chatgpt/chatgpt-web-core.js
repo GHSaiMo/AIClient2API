@@ -58,6 +58,18 @@ export class ChatGPTWebService {
         this.isInitialized = true;
     }
 
+    async listModels() {
+        return {
+            object: 'list',
+            data: CHATGPT_WEB_MODELS.map(id => ({
+                id,
+                object: 'model',
+                created: Math.floor(Date.now() / 1000),
+                owned_by: 'openai-web'
+            }))
+        };
+    }
+
     isExpiryDateNear() {
         if (!this.accessToken) return true;
         return isJwtExpiredOrNear(this.accessToken);
