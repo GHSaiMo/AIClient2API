@@ -71,6 +71,10 @@ const ANTIGRAVITY_CLIENT_TO_UPSTREAM_MODEL = {
     'gemini-3.7-flash-high': 'gemini-3.7-flash-tiered',
     'gemini-3.7-flash-low': 'gemini-3.7-flash-tiered',
     'gemini-3.7-flash-thinking': 'gemini-3.7-flash-tiered',
+    'gemini-3.8-flash': 'gemini-3.8-flash-tiered',
+    'gemini-3.8-flash-high': 'gemini-3.8-flash-tiered',
+    'gemini-3.8-flash-low': 'gemini-3.8-flash-tiered',
+    'gemini-3.8-flash-thinking': 'gemini-3.8-flash-tiered',
 };
 
 const ANTIGRAVITY_UPSTREAM_TO_CLIENT_MODELS = {
@@ -80,6 +84,8 @@ const ANTIGRAVITY_UPSTREAM_TO_CLIENT_MODELS = {
     'gemini-3.6-flash-tiered': ['gemini-3.6-flash', 'gemini-3.6-flash-low', 'gemini-3.6-flash-high'],
     'gemini-3.7-flash-low': ['gemini-3.7-flash', 'gemini-3.7-flash-low', 'gemini-3.7-flash-high', 'gemini-3.7-flash-thinking'],
     'gemini-3.7-flash-tiered': ['gemini-3.7-flash', 'gemini-3.7-flash-low', 'gemini-3.7-flash-high', 'gemini-3.7-flash-thinking'],
+    'gemini-3.8-flash-low': ['gemini-3.8-flash', 'gemini-3.8-flash-low', 'gemini-3.8-flash-high', 'gemini-3.8-flash-thinking'],
+    'gemini-3.8-flash-tiered': ['gemini-3.8-flash', 'gemini-3.8-flash-low', 'gemini-3.8-flash-high', 'gemini-3.8-flash-thinking'],
 };
 
 const ANTIGRAVITY_CLIENT_MODEL_THINKING_LEVEL = {
@@ -92,11 +98,14 @@ const ANTIGRAVITY_CLIENT_MODEL_THINKING_LEVEL = {
     'gemini-3.6-flash-high': 'high',
     'gemini-3.7-flash-high': 'high',
     'gemini-3.7-flash-thinking': 'high',
+    'gemini-3.8-flash-high': 'high',
+    'gemini-3.8-flash-thinking': 'high',
     'gemini-3.1-pro-low': 'low',
     'gemini-3-pro-low': 'low',
     'gemini-3.5-flash-low': 'low',
     'gemini-3.6-flash-low': 'low',
-    'gemini-3.7-flash-low': 'low'
+    'gemini-3.7-flash-low': 'low',
+    'gemini-3.8-flash-low': 'low'
 };
 
 const ANTIGRAVITY_MODEL_METADATA = {
@@ -195,6 +204,26 @@ const ANTIGRAVITY_MODEL_METADATA = {
         thinking: { min: 1, max: 65535, dynamicAllowed: true, levels: ['low', 'medium', 'high'] }
     },
     'gemini-3.7-flash-tiered': {
+        maxOutputTokens: 65535,
+        thinking: { min: 1, max: 65535, dynamicAllowed: true, levels: ['low', 'medium', 'high'] }
+    },
+    'gemini-3.8-flash': {
+        maxOutputTokens: 65535,
+        thinking: { min: 1, max: 65535, dynamicAllowed: true, levels: ['low', 'medium', 'high'] }
+    },
+    'gemini-3.8-flash-low': {
+        maxOutputTokens: 65535,
+        thinking: { min: 1, max: 65535, dynamicAllowed: true, levels: ['low', 'medium', 'high'] }
+    },
+    'gemini-3.8-flash-high': {
+        maxOutputTokens: 65535,
+        thinking: { min: 1, max: 65535, dynamicAllowed: true, levels: ['low', 'medium', 'high'] }
+    },
+    'gemini-3.8-flash-thinking': {
+        maxOutputTokens: 65535,
+        thinking: { min: 1, max: 65535, dynamicAllowed: true, levels: ['low', 'medium', 'high'] }
+    },
+    'gemini-3.8-flash-tiered': {
         maxOutputTokens: 65535,
         thinking: { min: 1, max: 65535, dynamicAllowed: true, levels: ['low', 'medium', 'high'] }
     }

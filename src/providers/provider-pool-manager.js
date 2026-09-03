@@ -80,8 +80,8 @@ export class ProviderPoolManager {
         'openai-iflow': 'qwen3-max',
         'openai-codex-oauth': 'gpt-5',
         'openaiResponses-custom': 'gpt-5.5',
-        'grok-web': 'grok-4.3',
-        'grok-cli-oauth': 'grok-4.3',
+        'grok-web': 'grok-imagine-image-2.0',
+        'grok-cli-oauth': 'grok-4.6',
         'chatgpt-web': 'gpt-image-2',
         'forward-api': 'gpt-5.5'
     };
