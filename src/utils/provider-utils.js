@@ -69,17 +69,6 @@ export const PROVIDER_MAPPINGS = [
         urlKeys: ['IFLOW_BASE_URL']
     },
     {
-        // Codex OAuth 配置
-        dirName: 'codex',
-        patterns: ['configs/codex/', '/codex/', '/.codex/'],
-        providerType: 'openai-codex-oauth',
-        credPathKey: 'CODEX_OAUTH_CREDS_FILE_PATH',
-        defaultCheckModel: 'gpt-5.4',
-        displayName: 'OpenAI Codex OAuth',
-        needsProjectId: false,
-        urlKeys: ['CODEX_BASE_URL']
-    },
-    {
         // Grok CLI OAuth 配置
         dirName: 'grok-cli',
         patterns: ['configs/grok-cli/', '/grok-cli/', '/.grok-cli/'],
@@ -100,6 +89,17 @@ export const PROVIDER_MAPPINGS = [
         displayName: 'Grok Web',
         needsProjectId: false,
         urlKeys: ['GROK_BASE_URL', 'GROK_CF_CLEARANCE', 'GROK_CF_BM', 'GROK_USER_AGENT', 'GROK_STATSIG_ID']
+    },
+    {
+        // Codex OAuth 配置
+        dirName: 'codex',
+        patterns: ['configs/codex/', '/codex/', '/.codex/'],
+        providerType: 'openai-codex-oauth',
+        credPathKey: 'CODEX_OAUTH_CREDS_FILE_PATH',
+        defaultCheckModel: 'gpt-5.4',
+        displayName: 'OpenAI Codex OAuth',
+        needsProjectId: false,
+        urlKeys: ['CODEX_BASE_URL']
     }
 ];
 

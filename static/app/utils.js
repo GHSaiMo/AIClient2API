@@ -39,13 +39,6 @@ function getBaseProviderConfigs() {
             icon: 'fa-key',
             defaultPath: 'configs/kiro/'
         },
-        { 
-            id: 'openai-codex-oauth', 
-            name: t('dashboard.routing.nodeName.codex'), 
-            usageName: 'Codex',
-            icon: 'fa-code',
-            defaultPath: 'configs/codex/'
-        },
         {
             id: 'grok-cli-oauth',
             name: t('dashboard.routing.nodeName.grokCli'),
@@ -77,6 +70,13 @@ function getBaseProviderConfigs() {
             usageName: 'ChatGPT Web',
             icon: 'fa-paintbrush',
             defaultPath: 'configs/chatgpt-web/'
+        },
+        { 
+            id: 'openai-codex-oauth', 
+            name: t('dashboard.routing.nodeName.codex'), 
+            usageName: 'Codex',
+            icon: 'fa-code',
+            defaultPath: 'configs/codex/'
         }
     ];
 }
