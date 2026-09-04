@@ -1769,12 +1769,15 @@ export class GrokCliApiService {
         const aspectRatio = normalizeImageAspectRatio(
             requestBody.aspect_ratio ||
             requestBody.aspectRatio ||
+            requestBody._aspectRatio ||
             xaiOptions.aspect_ratio ||
             xaiOptions.aspectRatio,
             mapImageSizeToAspectRatio(size) || (isEdit ? '' : XAI_IMAGES_DEFAULT_ASPECT_RATIO)
         );
         const resolution = normalizeImageResolution(
-            requestBody.resolution || xaiOptions.resolution,
+            requestBody.resolution ||
+            requestBody._resolution ||
+            xaiOptions.resolution,
             size,
             isEdit ? '' : XAI_IMAGES_DEFAULT_RESOLUTION
         );
@@ -1799,7 +1802,7 @@ export class GrokCliApiService {
             body.resolution = resolution;
         }
 
-        const quality = requestBody.quality || xaiOptions.quality;
+        const quality = requestBody.quality || requestBody._quality || xaiOptions.quality;
         if (quality && (model === 'grok-imagine-image-2.0' || model.includes('2.0'))) {
             const normalizedQuality = String(quality).trim().toLowerCase();
             if (normalizedQuality === 'low' || normalizedQuality === 'medium') {
