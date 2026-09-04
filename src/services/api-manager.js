@@ -130,6 +130,7 @@ async function handleImageGenerationRequest(req, res, currentConfig, providerPoo
     const CONFIG = retryContext?.CONFIG ?? currentConfig;
     let slotProviderType = null;
     let slotUuid = null;
+    let prevExcludeUuids = Array.isArray(retryContext?.excludeUuids) ? retryContext.excludeUuids : [];
     let model, prompt, n, response_format, size, codexRequestBody, virtualOpenAIRequest;
 
     try {
@@ -170,16 +171,24 @@ async function handleImageGenerationRequest(req, res, currentConfig, providerPoo
 
             const aspectRatio = body.aspect_ratio || body.aspectRatio || body.extra_body?.aspect_ratio;
 
+            const quality = body.quality;
+            const resolution = body.resolution;
+
             // 构造虚拟 OpenAI 对话请求，参考对话接口实现自动转换
             virtualOpenAIRequest = {
                 model,
                 messages: [{ role: 'user', content: prompt }],
                 n,
                 size,
+                quality,
+                resolution,
                 response_format,
                 aspect_ratio: aspectRatio,
                 aspectRatio: aspectRatio,
                 _imageSize: size, // 兼容 Codex 内部使用的字段
+                _quality: quality,
+                _aspectRatio: aspectRatio,
+                _resolution: resolution,
                 _monitorRequestId: currentConfig._monitorRequestId // 注入监控 ID
             };
 
@@ -189,7 +198,7 @@ async function handleImageGenerationRequest(req, res, currentConfig, providerPoo
 
         // 从号池获取服务实例
         const shouldUsePool = !!(providerPoolManager && CONFIG.providerPools);
-        const prevExcludeUuids = Array.isArray(retryContext?.excludeUuids) ? retryContext.excludeUuids : [];
+        prevExcludeUuids = Array.isArray(retryContext?.excludeUuids) ? retryContext.excludeUuids : [];
         const result = await getApiServiceWithFallback(CONFIG, model, {
             acquireSlot: shouldUsePool,
             excludeUuids: prevExcludeUuids
