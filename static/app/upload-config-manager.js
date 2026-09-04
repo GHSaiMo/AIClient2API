@@ -1106,12 +1106,6 @@ function detectProviderFromPath(filePath) {
             shortName: 'antigravity'
         },
         {
-            patterns: ['configs/codex/', '/codex/'],
-            providerType: 'openai-codex-oauth',
-            displayName: 'OpenAI Codex OAuth',
-            shortName: 'codex-oauth'
-        },
-        {
             patterns: ['configs/grok-cli/', '/grok-cli/'],
             providerType: 'grok-cli-oauth',
             displayName: 'Grok CLI OAuth',
@@ -1122,6 +1116,12 @@ function detectProviderFromPath(filePath) {
             providerType: 'openai-iflow',
             displayName: 'OpenAI iFlow OAuth',
             shortName: 'iflow-oauth'
+        },
+        {
+            patterns: ['configs/codex/', '/codex/'],
+            providerType: 'openai-codex-oauth',
+            displayName: 'OpenAI Codex OAuth',
+            shortName: 'codex-oauth'
         }
     ];
 

@@ -244,17 +244,6 @@ function getAvailableRoutes() {
             badgeClass: 'oauth'
         },
         {
-            provider: 'openai-codex-oauth',
-            name: t('dashboard.routing.nodeName.codex'),
-            paths: {
-                openai: '/openai-codex-oauth/v1/chat/completions',
-                claude: '/openai-codex-oauth/v1/messages'
-            },
-            description: t('dashboard.routing.oauth'),
-            badge: t('dashboard.routing.oauth'),
-            badgeClass: 'oauth'
-        },
-        {
             provider: 'grok-cli-oauth',
             name: t('dashboard.routing.nodeName.grokCli'),
             paths: {
@@ -296,6 +285,17 @@ function getAvailableRoutes() {
             },
             description: t('dashboard.routing.description.chatgptWeb') || 'ChatGPT Web 图像生成与编辑',
             badge: 'Image Gen',
+            badgeClass: 'oauth'
+        },
+        {
+            provider: 'openai-codex-oauth',
+            name: t('dashboard.routing.nodeName.codex'),
+            paths: {
+                openai: '/openai-codex-oauth/v1/chat/completions',
+                claude: '/openai-codex-oauth/v1/messages'
+            },
+            description: t('dashboard.routing.oauth'),
+            badge: t('dashboard.routing.oauth'),
             badgeClass: 'oauth'
         }
     ];
