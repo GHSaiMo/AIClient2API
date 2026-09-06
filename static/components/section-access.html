@@ -42,81 +42,47 @@
         </div>
     </div>
 
-    <div class="access-grid">
-        <section class="access-panel">
-            <div class="access-panel-header">
-                <h3><i class="fas fa-plug"></i> <span data-i18n="access.connection.title">接入信息</span></h3>
-            </div>
+    <section class="access-panel access-panel-full">
+        <div class="access-panel-header">
+            <h3><i class="fas fa-plug"></i> <span data-i18n="access.connection.title">接入信息</span></h3>
+        </div>
 
-            <div class="access-field-group">
-                <label for="accessApiKeyField" data-i18n="access.connection.apiKey">当前对外分发 Key</label>
-                <div class="access-copy-row">
-                    <div class="password-input-wrapper">
-                        <div class="input-with-toggle">
-                            <input type="password" id="accessApiKeyField" class="form-control" readonly>
-                            <button type="button" class="password-toggle" id="toggleAccessApiKey" data-i18n-aria-label="common.togglePassword">
-                                <i class="fas fa-eye" aria-hidden="true"></i>
-                            </button>
-                        </div>
+        <div class="access-field-group">
+            <label for="accessApiKeyField" data-i18n="access.connection.apiKey">当前对外分发 Key</label>
+            <div class="access-copy-row">
+                <div class="password-input-wrapper">
+                    <div class="input-with-toggle">
+                        <input type="password" id="accessApiKeyField" class="form-control" readonly>
+                        <button type="button" class="password-toggle" id="toggleAccessApiKey" data-i18n-aria-label="common.togglePassword">
+                            <i class="fas fa-eye" aria-hidden="true"></i>
+                        </button>
                     </div>
-                    <button type="button" class="btn btn-secondary btn-sm" id="copyAccessApiKey" 
-                            data-i18n-title="access.actions.copyKey" title="复制 Key">
-                        <i class="fas fa-copy"></i>
-                    </button>
                 </div>
-                <small class="form-text" data-i18n="access.connection.apiKeyHelp">这是客户端调用 `/v1/chat/completions` 或 `/v1/messages` 时要带的认证 Key。</small>
-            </div>
-
-            <div class="access-field-group">
-                <label for="accessBaseUrlField" data-i18n="access.connection.baseUrl">当前管理台访问地址</label>
-                <div class="access-copy-row">
-                    <input type="text" id="accessBaseUrlField" class="form-control" readonly>
-                    <button type="button" class="btn btn-secondary btn-sm" id="copyAccessBaseUrl" 
-                            data-i18n-title="access.actions.copyBaseUrl" title="复制地址">
-                        <i class="fas fa-copy"></i>
-                    </button>
-                </div>
-                <small class="form-text" data-i18n="access.connection.baseUrlHelp">通常把这个地址加上供应商路径后，直接发给客户端即可。</small>
-            </div>
-
-            <div class="access-field-group">
-                <label data-i18n="access.connection.defaultProviders">当前预加载供应商</label>
-                <div id="accessDefaultProviders" class="access-chip-list"></div>
-            </div>
-        </section>
-
-        <section class="access-panel">
-            <div class="access-panel-header">
-                <h3><i class="fas fa-route"></i> <span data-i18n="access.quickStart.title">快速说明</span></h3>
-            </div>
-            <p class="access-panel-subtitle" data-i18n="access.quickStart.subtitle">适合第一次给客户端发接入信息时按顺序操作，先拿 Key，再选路由，最后复制成片段。</p>
-            <div class="access-hint-list">
-                <div class="access-hint-card">
-                    <strong data-i18n="access.quickStart.step1Title">1. 先复制 Key</strong>
-                    <p data-i18n="access.quickStart.step1Desc">把上面的对外 Key 发给客户端，客户端请求头里带 `Authorization: Bearer KEY`。</p>
-                </div>
-                <div class="access-hint-card">
-                    <strong data-i18n="access.quickStart.step2Title">2. 再选供应商路由</strong>
-                    <p data-i18n="access.quickStart.step2Desc">不同供应商对应不同路径，例如 `openai-codex-oauth`、`gemini-cli-oauth`。</p>
-                </div>
-                <div class="access-hint-card">
-                    <strong data-i18n="access.quickStart.step3Title">3. 直接复制端点</strong>
-                    <p data-i18n="access.quickStart.step3Desc">下面每一行都给了 OpenAI / Claude 两种协议端点，点按钮即可复制。</p>
-                </div>
-            </div>
-            <div class="access-quick-actions">
-                <button type="button" class="btn btn-outline btn-sm access-jump-btn" data-section="config">
-                    <i class="fas fa-sliders-h"></i>
-                    <span data-i18n="access.quickStart.gotoConfig">去配置管理</span>
-                </button>
-                <button type="button" class="btn btn-outline btn-sm access-jump-btn" data-section="providers">
-                    <i class="fas fa-server"></i>
-                    <span data-i18n="access.quickStart.gotoProviders">去提供商池管理</span>
+                <button type="button" class="btn btn-secondary btn-sm" id="copyAccessApiKey" 
+                        data-i18n-title="access.actions.copyKey" title="复制 Key">
+                    <i class="fas fa-copy"></i>
                 </button>
             </div>
-            <p class="access-panel-note" data-i18n="access.quickStart.note">如果这里还没有已配置节点，可以先去配置管理和提供商池管理补配置，再回来复制片段。</p>
-        </section>
-    </div>
+            <small class="form-text" data-i18n="access.connection.apiKeyHelp">这是客户端调用 `/v1/chat/completions` 或 `/v1/messages` 时要带的认证 Key。</small>
+        </div>
+
+        <div class="access-field-group">
+            <label for="accessBaseUrlField" data-i18n="access.connection.baseUrl">当前管理台访问地址</label>
+            <div class="access-copy-row">
+                <input type="text" id="accessBaseUrlField" class="form-control" readonly>
+                <button type="button" class="btn btn-secondary btn-sm" id="copyAccessBaseUrl" 
+                        data-i18n-title="access.actions.copyBaseUrl" title="复制地址">
+                    <i class="fas fa-copy"></i>
+                </button>
+            </div>
+            <small class="form-text" data-i18n="access.connection.baseUrlHelp">通常把这个地址加上供应商路径后，直接发给客户端即可。</small>
+        </div>
+
+        <div class="access-field-group">
+            <label data-i18n="access.connection.defaultProviders">当前预加载供应商</label>
+            <div id="accessDefaultProviders" class="access-chip-list"></div>
+        </div>
+    </section>
 
     <section class="access-panel access-panel-full">
         <div class="access-panel-header">

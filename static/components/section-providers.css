@@ -1,3 +1,8 @@
+#providers .pool-description,
+.providers-handoff-panel {
+    display: none !important;
+}
+
 /* 统计卡片 */
 .providers-handoff-panel {
     background: linear-gradient(135deg, var(--primary-10) 0%, var(--bg-primary) 58%, var(--bg-secondary) 100%);
