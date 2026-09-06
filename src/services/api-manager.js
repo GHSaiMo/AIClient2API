@@ -300,6 +300,14 @@ async function handleImageGenerationRequest(req, res, currentConfig, providerPoo
                 logger.error('[Image Generation] Hook error:', e.message);
             }
         }
+        // 生图请求成功完成，统计使用次数，错误次数重置为0
+        if (providerPoolManager && slotUuid) {
+            const customNameDisplay = CONFIG.customName ? `, ${CONFIG.customName}` : '';
+            logger.info(`[Provider Pool] Increasing usage count for ${slotProviderType} (${slotUuid}${customNameDisplay}) after successful image generation`);
+            providerPoolManager.markProviderHealthy(slotProviderType, {
+                uuid: slotUuid
+            });
+        }
 
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(clientResponse));
@@ -673,6 +681,14 @@ async function handleImageEditsRequest(req, res, currentConfig, providerPoolMana
             } catch (e) {
                 logger.error('[Image Edits] Hook error:', e.message);
             }
+        }
+        // 图像编辑请求成功完成，统计使用次数，错误次数重置为0
+        if (providerPoolManager && slotUuid) {
+            const customNameDisplay = currentConfig.customName ? `, ${currentConfig.customName}` : '';
+            logger.info(`[Provider Pool] Increasing usage count for ${slotProviderType} (${slotUuid}${customNameDisplay}) after successful image editing`);
+            providerPoolManager.markProviderHealthy(slotProviderType, {
+                uuid: slotUuid
+            });
         }
 
         res.writeHead(200, { 'Content-Type': 'application/json' });

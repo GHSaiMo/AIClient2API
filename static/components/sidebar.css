@@ -65,3 +65,9 @@
         padding: 0 1rem;
     }
 }
+
+.nav-item[data-section="guide"],
+.nav-item[data-section="tutorial"],
+.nav-item[data-section="custom-models"] {
+    display: none !important;
+}

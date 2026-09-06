@@ -281,14 +281,14 @@ export async function handleGetProviders(req, res, currentConfig, providerPoolMa
     }
 
     const providerStatus = {};
-    // 从管理器获取当前所有池的状态并与最新配置合并
+    // 从管理器获取当前所有池的状态并与最新配置合并（内存运行时状态优先覆盖磁盘配置）
     if (providerPoolManager && providerPoolManager.providerStatus) {
         for (const [type, providers] of Object.entries(providerPoolManager.providerStatus)) {
             providerStatus[type] = providers.map(p => {
                 const diskItem = (poolsData[type] || []).find(d => d.uuid === p.config?.uuid);
                 return {
-                    ...p.config,
                     ...(diskItem || {}),
+                    ...p.config,
                     activeRequests: p.state?.activeCount || 0,
                     waitingRequests: p.state?.waitingCount || 0
                 };
@@ -323,20 +323,42 @@ export async function handleGetProviders(req, res, currentConfig, providerPoolMa
  * 获取特定提供商类型的详细信息
  */
 export async function handleGetProviderType(req, res, currentConfig, providerPoolManager, providerType) {
-    let providerPools = {};
+    let poolsData = {};
     const filePath = currentConfig.PROVIDER_POOLS_FILE_PATH || 'configs/provider_pools.json';
     try {
         if (filePath && existsSync(filePath)) {
-            const poolsData = JSON.parse(readFileSync(filePath, 'utf-8'));
-            providerPools = poolsData;
-        } else if (providerPoolManager && providerPoolManager.providerPools) {
-            providerPools = providerPoolManager.providerPools;
+            poolsData = JSON.parse(readFileSync(filePath, 'utf-8'));
         }
     } catch (error) {
         logger.warn('[UI API] Failed to load provider pools:', error.message);
     }
 
-    const providers = providerPools[providerType] || [];
+    let providers = [];
+    if (providerPoolManager && providerPoolManager.providerStatus?.[providerType]) {
+        const poolItems = providerPoolManager.providerStatus[providerType];
+        providers = poolItems.map(p => {
+            const diskItem = (poolsData[providerType] || []).find(d => d.uuid === p.config?.uuid);
+            return {
+                ...(diskItem || {}),
+                ...p.config,
+                activeRequests: p.state?.activeCount || 0,
+                waitingRequests: p.state?.waitingCount || 0
+            };
+        });
+    } else if (poolsData[providerType]) {
+        providers = (poolsData[providerType] || []).map(p => ({
+            ...p,
+            activeRequests: 0,
+            waitingRequests: 0
+        }));
+    } else if (providerPoolManager && providerPoolManager.providerPools?.[providerType]) {
+        providers = (providerPoolManager.providerPools[providerType] || []).map(p => ({
+            ...p,
+            activeRequests: 0,
+            waitingRequests: 0
+        }));
+    }
+
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({
         providerType,
