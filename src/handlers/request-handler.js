@@ -222,10 +222,13 @@ export function createRequestHandler(config, providerPoolManager) {
                     if (path === '/api/v1/models') {
                         path = '/v1/models';
                         requestUrl.pathname = path;
+                    } else if (path.startsWith('/api/v1/models/')) {
+                        path = path.replace(/^\/api\/v1\/models\//, '/v1/models/');
+                        requestUrl.pathname = path;
                     }
 
-                    // Handle client probe requests (Ollama /props /version /api/tags /api/show /api/ps)
-                    if (handleClientProbeRequest(method, path, req, res)) {
+                    // Handle client probe requests (Ollama /props /version /api/tags /api/show /api/ps, Hermes model probes)
+                    if (handleClientProbeRequest(method, path, req, res, currentConfig, providerPoolManager)) {
                         return true;
                     }
 
