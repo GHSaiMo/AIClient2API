@@ -1,5 +1,6 @@
 import {
     handleModelListRequest,
+    handleModelDetailRequest,
     handleContentGenerationRequest,
     API_ACTIONS,
     ENDPOINT_TYPE,
@@ -38,6 +39,10 @@ export async function handleAPIRequests(method, path, req, res, currentConfig, a
     if (method === 'GET') {
         if (path === '/v1/models' || path === '/api/v1/models') {
             await handleModelListRequest(req, res, apiService, ENDPOINT_TYPE.OPENAI_MODEL_LIST, currentConfig, providerPoolManager, currentConfig.uuid);
+            return true;
+        }
+        if (path.startsWith('/v1/models/') || path.startsWith('/api/v1/models/')) {
+            await handleModelDetailRequest(req, res, path, currentConfig, providerPoolManager);
             return true;
         }
         if (path === '/v1beta/models') {

@@ -8,6 +8,7 @@ import { convertData, getOpenAIStreamChunkStop } from '../convert/convert.js';
 import { ProviderStrategyFactory } from './provider-strategies.js';
 import { getPluginManager } from '../core/plugin-manager.js';
 import { MODEL_PROTOCOL_PREFIX, MODEL_PROVIDER } from './constants.js';
+import { getEstimatedModelContextLength } from '../handlers/probe-handler.js';
 
 // ==================== 时间与时区 ====================
 
@@ -1810,6 +1811,49 @@ export async function handleModelListRequest(req, res, service, endpointType, CO
         //     }, error.message);
         // }
         handleError(res, error, CONFIG.MODEL_PROVIDER, fromProvider);
+    }
+}
+
+/**
+ * Handles single model lookup requests (e.g., GET /v1/models/:model or /api/v1/models/:model).
+ * Returns OpenAI-compatible model detail object with context_length.
+ * @param {http.IncomingMessage} req The HTTP request object.
+ * @param {http.ServerResponse} res The HTTP response object.
+ * @param {string} path The request path.
+ * @param {Object} CONFIG The server configuration object.
+ * @param {Object} [providerPoolManager] The provider pool manager instance.
+ */
+export async function handleModelDetailRequest(req, res, path, CONFIG, providerPoolManager) {
+    try {
+        const modelId = path.replace(/^\/(?:api\/)?v1\/models\//, '');
+        const provider = CONFIG?.MODEL_PROVIDER || MODEL_PROVIDER.GEMINI_ANTIGRAVITY;
+        const ctx = getEstimatedModelContextLength(modelId, provider);
+        const customConfig = getCustomModelConfig(modelId, provider);
+
+        const modelResponse = {
+            id: modelId,
+            object: 'model',
+            created: Math.floor(Date.now() / 1000),
+            owned_by: provider || 'system',
+            context_length: ctx,
+            max_input_tokens: ctx,
+            max_tokens: 65536
+        };
+
+        if (customConfig) {
+            if (customConfig.contextLength) {
+                modelResponse.context_length = customConfig.contextLength;
+                modelResponse.max_input_tokens = customConfig.contextLength;
+            }
+            if (customConfig.maxTokens) modelResponse.max_tokens = customConfig.maxTokens;
+            if (customConfig.description) modelResponse.description = customConfig.description;
+        }
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(modelResponse));
+    } catch (error) {
+        logger.error('[Server] Error during model detail processing:', error.stack);
+        handleError(res, error, CONFIG?.MODEL_PROVIDER, MODEL_PROTOCOL_PREFIX.OPENAI);
     }
 }
 
