@@ -81,39 +81,63 @@ export async function handleGrokAssetsProxy(req, res, config, providerPoolManage
         }
 
         const maxProxyAttempts = 3;
+        const proxyTimeout = Math.max(10000, Number(config?.GROK_ASSETS_TIMEOUT) || 60000);
         let response = null;
         let lastProxyError = null;
+
+        const isHead = req.method === 'HEAD';
 
         for (let attempt = 1; attempt <= maxProxyAttempts; attempt++) {
             try {
                 const axiosConfig = {
-                    method: 'get',
+                    method: isHead ? 'head' : 'get',
                     url: finalTargetUrl,
                     headers: headers,
-                    responseType: 'stream',
-                    timeout: 30000,
+                    responseType: isHead ? undefined : 'stream',
+                    timeout: proxyTimeout,
                     validateStatus: false
                 };
 
                 // 配置代理（每次重试重新创建/绑定 agent，确保重新进行 TLS 握手）
                 configureAxiosProxy(axiosConfig, config, MODEL_PROVIDER.GROK_WEB);
 
-                logger.debug(`[Grok Proxy] Proxying request to: ${finalTargetUrl} (attempt ${attempt}/${maxProxyAttempts})`);
+                logger.debug(`[Grok Proxy] Proxying request to: ${finalTargetUrl} (method: ${req.method}, attempt ${attempt}/${maxProxyAttempts}, timeout: ${proxyTimeout}ms)`);
                 response = await axios(axiosConfig);
+
+                // 上游网关临时错误（502/503/504）触发重试
+                if (response.status >= 502 && response.status <= 504 && attempt < maxProxyAttempts) {
+                    logger.warn(`[Grok Proxy] Upstream returned transient status ${response.status} on attempt ${attempt}/${maxProxyAttempts}. Retrying in 1000ms...`);
+                    await new Promise(r => setTimeout(r, 1000));
+                    continue;
+                }
+
                 break;
             } catch (err) {
                 lastProxyError = err;
                 const errMsg = err.message || '';
-                const isRetryable = errMsg.includes('disconnected before secure TLS') ||
-                                    errMsg.includes('utls handshake failed') ||
-                                    errMsg.includes('ECONNRESET') ||
-                                    errMsg.includes('ETIMEDOUT') ||
-                                    errMsg.includes('socket hang up') ||
-                                    errMsg.includes('EOF');
+                const errCode = String(err.code || '').toUpperCase();
+                const isTimeout = errCode === 'ECONNABORTED' ||
+                                  errCode === 'ETIMEDOUT' ||
+                                  /timeout/i.test(errMsg);
+                const isNetworkOrTls = errCode === 'ECONNRESET' ||
+                                       errCode === 'EPIPE' ||
+                                       errCode === 'ENOTFOUND' ||
+                                       errCode === 'EAI_AGAIN' ||
+                                       errCode === 'ECONNREFUSED' ||
+                                       errMsg.includes('disconnected before secure TLS') ||
+                                       errMsg.includes('utls handshake failed') ||
+                                       errMsg.includes('ECONNRESET') ||
+                                       errMsg.includes('ETIMEDOUT') ||
+                                       errMsg.includes('socket hang up') ||
+                                       errMsg.includes('EOF') ||
+                                       errMsg.includes('Client network socket disconnected') ||
+                                       errMsg.includes('TLS connection was reset');
+                const isRetryable = isTimeout || isNetworkOrTls;
 
                 if (isRetryable && attempt < maxProxyAttempts) {
-                    logger.warn(`[Grok Proxy] Transient network/TLS error on attempt ${attempt}/${maxProxyAttempts} (${errMsg}). Re-attempting handshake in 400ms...`);
-                    await new Promise(r => setTimeout(r, 400));
+                    const delayMs = isTimeout ? 1000 : 400;
+                    logger.warn(`[Grok Proxy] Transient network/timeout error on attempt ${attempt}/${maxProxyAttempts} (code: ${errCode || 'N/A'}, message: ${errMsg}). Retrying in ${delayMs}ms...`);
+                    await new Promise(r => setTimeout(r, delayMs));
                     continue;
                 }
                 throw err;
@@ -135,6 +159,11 @@ export async function handleGrokAssetsProxy(req, res, config, providerPoolManage
         }
 
         res.writeHead(response.status, responseHeaders);
+
+        if (isHead) {
+            res.end();
+            return;
+        }
 
         // 管道传输数据
         response.data.pipe(res);
