@@ -1305,7 +1305,17 @@ export class GrokCliApiService {
             this.expiresAt = parseExpiry(creds.expired ?? creds.expires_at ?? creds.expiresAt);
 
             if (this.isExpiryDateNear()) {
-                this.triggerBackgroundRefresh();
+                if (this.refreshTokenValue && this.expiresAt && Date.now() >= this.expiresAt.getTime()) {
+                    try {
+                        logger.info(`[Grok CLI] Token is expired for ${this.email || this.uuid}, proactively refreshing...`);
+                        await this.refreshAccessToken();
+                    } catch (e) {
+                        logger.warn(`[Grok CLI] Proactive refresh failed: ${e.message}`);
+                        this.triggerBackgroundRefresh();
+                    }
+                } else {
+                    this.triggerBackgroundRefresh();
+                }
             }
 
             this.isInitialized = true;
