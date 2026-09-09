@@ -46,6 +46,18 @@ function cleanDecryptedCookie(buf, key, iv) {
   }
 }
 
+function extractSessionId(token) {
+  try {
+    if (!token) return '';
+    const parts = token.split('.');
+    if (parts.length < 2) return '';
+    const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString('utf8'));
+    return payload.session_id || '';
+  } catch {
+    return '';
+  }
+}
+
 // 1. 解密 Chrome (Profile 1) Cookies -> 账户: taojiuzhen@gmail.com
 async function getChromeProfile1Cookies() {
   const dbPath = path.resolve(process.env.HOME, 'Library/Application Support/Google/Chrome/Profile 1/Cookies');
@@ -170,7 +182,7 @@ async function main() {
     console.log(`  -> 成功提取 SSO! Session: ${sessionId}`);
 
     // 在已有池中查找匹配项（优先邮箱匹配，其次 Session ID 匹配）
-    let item = grokList.find(p => p.email === t.email || (sessionId && p.GROK_COOKIE_TOKEN?.includes(sessionId)));
+    let item = grokList.find(p => p.email === t.email || (sessionId && extractSessionId(p.GROK_COOKIE_TOKEN) === sessionId));
 
     if (item) {
       console.log(`  -> 更新已有节点 [${item.customName || item.uuid}]`);
