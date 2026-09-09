@@ -110,32 +110,31 @@ async function getChromeForTestingCookies() {
   }
 }
 
-// 3. 从 ego-browser (ego lite) 提取 Cookies -> 账户: taoxy0305@gmail.com
 function getEgoBrowserCookies() {
+  const dbPath = path.resolve(process.env.HOME, 'Library/Application Support/Citro Labs/ego lite/Default/Cookies');
+  if (!fs.existsSync(dbPath)) return null;
+
   try {
-    const script = `
-const task = await useOrCreateTaskSpace('extract grok cookies');
-await openOrReuseTab('https://grok.com/', { wait: false });
-const cookieData = await cdp('Network.getCookies', { urls: ['https://grok.com/'] });
-const result = {};
-for (const c of cookieData.cookies) {
-  if (['sso', 'sso-rw', 'cf_clearance'].includes(c.name)) {
-    result[c.name] = c.value;
-  }
-}
-cliLog('COOKIE_RESULT:' + JSON.stringify(result));
-await completeTaskSpace(task.id, { keep: false });
-`;
-    const proc = spawnSync('ego-browser', ['nodejs'], { input: script, encoding: 'utf8', timeout: 30000 });
-    const text = (proc.stdout || '') + '\n' + (proc.stderr || '');
-    const match = text.match(/COOKIE_RESULT:(\{.+?\})/);
-    if (match) {
-      return JSON.parse(match[1].trim());
+    const secOut = execSync('security find-generic-password -ga "ego" 2>&1').toString();
+    const password = secOut.match(/password: "(.*)"/)?.[1];
+    if (!password) return null;
+
+    const key = crypto.pbkdf2Sync(password, 'saltysalt', 1003, 16, 'sha1');
+    const iv = Buffer.alloc(16, ' ');
+
+    const rows = queryCookiesWithPython(dbPath);
+    if (!rows.length) return null;
+
+    const result = {};
+    for (const [name, hexVal] of rows) {
+      const dec = cleanDecryptedCookie(Buffer.from(hexVal, 'hex'), key, iv);
+      if (dec) result[name] = dec;
     }
+    return result;
   } catch (err) {
-    console.error('[ego-browser] Extraction failed:', err.message);
+    console.error('[ego lite] Extraction failed:', err.message);
+    return null;
   }
-  return null;
 }
 
 async function main() {
