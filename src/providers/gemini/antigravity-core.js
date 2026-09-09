@@ -1114,6 +1114,34 @@ export class AntigravityApiService {
         }
 
         this.authClient = new OAuth2Client(oauth2Options);
+        this._lastSavedAccessToken = null;
+
+        // 监听底层 OAuth2Client 自动刷新事件，确保无论何时刷新 token 都能自动持久化回磁盘文件
+        this.authClient.on('tokens', async (tokens) => {
+            try {
+                if (tokens.access_token && tokens.access_token === this._lastSavedAccessToken) {
+                    return;
+                }
+                const credPath = this.oauthCredsFilePath || path.join(os.homedir(), CREDENTIALS_DIR, CREDENTIALS_FILE);
+                const currentCreds = this.authClient.credentials || {};
+                const credsToSave = {
+                    ...currentCreds,
+                    ...tokens
+                };
+                // 确保 refresh_token 绝不被覆盖丢失
+                if (!credsToSave.refresh_token && currentCreds.refresh_token) {
+                    credsToSave.refresh_token = currentCreds.refresh_token;
+                }
+                await this._saveCredentialsToFile(credPath, credsToSave);
+                logger.info(`[Antigravity Auth] Captured 'tokens' event and updated credentials in ${credPath}`);
+                const poolManager = getProviderPoolManager();
+                if (poolManager && this.uuid) {
+                    poolManager.resetProviderRefreshStatus(this.config.MODEL_PROVIDER || MODEL_PROVIDER.ANTIGRAVITY, this.uuid);
+                }
+            } catch (err) {
+                logger.warn(`[Antigravity Auth] Failed to save updated tokens on 'tokens' event: ${err.message}`);
+            }
+        });
     }
 
     _applySidecar(requestOptions) {
@@ -1292,6 +1320,7 @@ export class AntigravityApiService {
     async _saveCredentialsToFile(filePath, credentials) {
         try {
             await atomicWriteFile(filePath, JSON.stringify(credentials, null, 2), { mode: 0o600 });
+            this._lastSavedAccessToken = credentials?.access_token || this._lastSavedAccessToken;
             logger.info(`[Antigravity Auth] Credentials saved to ${filePath}`);
         } catch (error) {
             logger.error(`[Antigravity Auth] Failed to save credentials to ${filePath}: ${error.message}`);

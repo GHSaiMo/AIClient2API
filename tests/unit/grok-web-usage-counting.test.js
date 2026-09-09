@@ -98,6 +98,7 @@ describe('Grok Web & Image Generation Usage Counting Suite', () => {
             };
 
             const poolManager = new ProviderPoolManager(initialPools, { logLevel: 'error' });
+            poolManager._debouncedSave = () => {}; // 避免测试覆盖生产 configs/provider_pools.json
             expect(poolManager.providerStatus['grok-web'][0].config.usageCount).toBe(0);
 
             // Simulate what handleImageGenerationRequest / handleImageEditsRequest calls on success
