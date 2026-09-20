@@ -158,13 +158,50 @@ async function main() {
     }
   ];
 
+  // 1. 如果在 Linux 环境（如飞牛 NAS）或配置了 MAC_COOKIE_BRIDGE_URL，优先从 Mac Cookie Bridge 批量拉取
+  const bridgeBaseUrl = String(
+    process.env.MAC_COOKIE_BRIDGE_URL ||
+    (process.platform === 'linux' ? 'http://192.168.50.9:7899' : '')
+  ).trim().replace(/\/+$/, '');
+
+  let bridgeCookies = null;
+  if (bridgeBaseUrl) {
+    try {
+      console.log(`正在从 Mac Cookie Bridge (${bridgeBaseUrl}) 实时拉取最新登录态...`);
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 8000);
+      const res = await fetch(`${bridgeBaseUrl}/api/grok-cookies`, { signal: controller.signal });
+      clearTimeout(timer);
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.ok && data.cookies) {
+          bridgeCookies = data.cookies;
+          console.log(`✓ 成功从 Mac 桥接获取到 ${Object.keys(bridgeCookies).length} 个账号的最新凭据\n`);
+        }
+      } else {
+        console.warn(`! Mac 桥接响应异常: HTTP ${res.status}`);
+      }
+    } catch (err) {
+      console.warn(`! 从 Mac 桥接拉取失败: ${err.message}`);
+    }
+  }
+
   // 读取现有 provider_pools.json
   const pools = JSON.parse(fs.readFileSync(POOLS_PATH, 'utf8'));
   let grokList = pools['grok-web'] || [];
 
   for (const t of targets) {
     console.log(`正在检查 [${t.source}] (${t.email})...`);
-    const cookies = await t.fetcher();
+    let cookies = null;
+
+    if (bridgeCookies && bridgeCookies[t.email]) {
+      cookies = bridgeCookies[t.email];
+      console.log(`  -> 成功从 Mac 桥接获取凭据 (source: ${cookies.source || 'bridge'})`);
+    } else if (process.platform === 'darwin' && t.fetcher) {
+      cookies = await t.fetcher();
+    }
+
     if (!cookies || !cookies.sso) {
       console.log(`  -> 未提取到有效 SSO，跳过`);
       continue;

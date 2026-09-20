@@ -126,7 +126,7 @@ export async function getEgoBrowserCookies() {
 }
 
 /**
- * 根据邮箱或者配置，自动从对应的浏览器刷新 Grok SSO
+ * 根据邮箱或者配置，自动从对应的浏览器（Mac本地或通过Mac Cookie Bridge远程）刷新 Grok SSO
  * @param {Object} config - 提供商配置对象
  * @returns {Promise<{ sso: string, cf_clearance?: string } | null>}
  */
@@ -135,15 +135,60 @@ export async function refreshGrokToken(config = {}) {
     logger.info(`[GrokRefresher] Attempting to refresh Grok credentials for email/id: ${email || config.uuid}`);
 
     let cookies = null;
-    if (email.includes('taojiuzhen@gmail.com')) {
-        cookies = await getChromeProfile1Cookies();
-    } else if (email.includes('taojiuzhenitunes@gmail.com')) {
-        cookies = await getChromeForTestingCookies();
-    } else if (email.includes('taoxy0305@gmail.com')) {
-        cookies = await getEgoBrowserCookies();
-    } else {
-        // 未匹配到特定邮箱，按顺序尝试提取
-        cookies = await getChromeProfile1Cookies() || await getChromeForTestingCookies() || await getEgoBrowserCookies();
+
+    // 1. 如果在 Linux 环境（如飞牛 NAS）或者显式配置了 MAC_COOKIE_BRIDGE_URL，优先向 Mac Cookie Bridge 实时拉取
+    const bridgeBaseUrl = String(
+        config.MAC_COOKIE_BRIDGE_URL ||
+        process.env.MAC_COOKIE_BRIDGE_URL ||
+        (process.platform === 'linux' ? 'http://192.168.50.9:7899' : '')
+    ).trim().replace(/\/+$/, '');
+
+    if (bridgeBaseUrl) {
+        try {
+            logger.info(`[GrokRefresher] Pulling Grok cookies from Mac bridge at ${bridgeBaseUrl} for ${email || 'default'}`);
+            const queryUrl = email
+                ? `${bridgeBaseUrl}/api/grok-cookies?email=${encodeURIComponent(email)}`
+                : `${bridgeBaseUrl}/api/grok-cookies`;
+
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), 8000);
+            const res = await fetch(queryUrl, { signal: controller.signal });
+            clearTimeout(timer);
+
+            if (res.ok) {
+                const data = await res.json();
+                if (data && data.ok) {
+                    if (data.sso) {
+                        cookies = { sso: data.sso, cf_clearance: data.cf_clearance || '' };
+                    } else if (data.cookies && email && data.cookies[email]) {
+                        cookies = { sso: data.cookies[email].sso, cf_clearance: data.cookies[email].cf_clearance || '' };
+                    } else if (data.cookies) {
+                        const first = Object.values(data.cookies)[0];
+                        if (first?.sso) {
+                            cookies = { sso: first.sso, cf_clearance: first.cf_clearance || '' };
+                        }
+                    }
+                }
+            } else {
+                logger.warn(`[GrokRefresher] Mac bridge returned HTTP ${res.status}`);
+            }
+        } catch (err) {
+            logger.warn(`[GrokRefresher] Failed to pull cookies from Mac bridge: ${err.message}`);
+        }
+    }
+
+    // 2. 如果桥接未成功获取，且当前处于 macOS 本地，则尝试本地 Keychain 解密兜底
+    if (!cookies && process.platform === 'darwin') {
+        if (email.includes('taojiuzhen@gmail.com')) {
+            cookies = await getChromeProfile1Cookies();
+        } else if (email.includes('taojiuzhenitunes@gmail.com')) {
+            cookies = await getChromeForTestingCookies();
+        } else if (email.includes('taoxy0305@gmail.com')) {
+            cookies = await getEgoBrowserCookies();
+        } else {
+            // 未匹配到特定邮箱，按顺序尝试提取
+            cookies = await getChromeProfile1Cookies() || await getChromeForTestingCookies() || await getEgoBrowserCookies();
+        }
     }
 
     if (cookies && cookies.sso) {

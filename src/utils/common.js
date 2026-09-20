@@ -1301,7 +1301,14 @@ export async function handleStreamRequest(res, service, model, requestBody, from
         
         // 如果底层未标记，且不跳过错误计数，则在此处标记
         if (!credentialMarkedUnhealthy && !skipErrorCount && providerPoolManager && pooluuid) {
-            const isGrokAuthFailure = toProvider === 'grok-web' && (status === 401 || error.isDefinitiveAuthFailure === true);
+            const isGrokAuthFailure = toProvider === 'grok-web' && (
+                status === 401 ||
+                error.isDefinitiveAuthFailure === true ||
+                (status === 403 && (
+                    String(error.message || '').toLowerCase().includes('out of date') ||
+                    String(error.message || '').toLowerCase().includes('reload to continue')
+                ))
+            );
             if (isGrokAuthFailure) {
                 logger.warn(`[Provider Pool] Grok auth failure for ${toProvider} (${pooluuid}). Marking as needsRefresh: ${error.message}`);
                 providerPoolManager.markProviderNeedRefresh(toProvider, { uuid: pooluuid });
@@ -1583,7 +1590,14 @@ export async function handleUnaryRequest(res, service, model, requestBody, fromP
         
         // 如果底层未标记，且不跳过错误计数，则在此处标记
         if (!credentialMarkedUnhealthy && !skipErrorCount && providerPoolManager && pooluuid) {
-            const isGrokAuthFailure = toProvider === 'grok-web' && (status === 401 || error.isDefinitiveAuthFailure === true);
+            const isGrokAuthFailure = toProvider === 'grok-web' && (
+                status === 401 ||
+                error.isDefinitiveAuthFailure === true ||
+                (status === 403 && (
+                    String(error.message || '').toLowerCase().includes('out of date') ||
+                    String(error.message || '').toLowerCase().includes('reload to continue')
+                ))
+            );
             if (isGrokAuthFailure) {
                 logger.warn(`[Provider Pool] Grok auth failure for ${toProvider} (${pooluuid}). Marking as needsRefresh: ${error.message}`);
                 providerPoolManager.markProviderNeedRefresh(toProvider, { uuid: pooluuid });
