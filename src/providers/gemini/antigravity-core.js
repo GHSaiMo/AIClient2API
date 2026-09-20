@@ -1096,11 +1096,11 @@ export class AntigravityApiService {
             clientSecret: OAUTH_CLIENT_SECRET,
         };
 
-        if (proxyConfig) {
+        if (isTLSSidecarEnabled) {
+            logger.info('[Antigravity] TLS Sidecar enabled, skipping agent configuration for OAuth2Client');
+        } else if (proxyConfig) {
             oauth2Options.transporterOptions = proxyConfig;
             logger.info('[Antigravity] Using proxy for OAuth2Client');
-        } else if (isTLSSidecarEnabled) {
-            logger.info('[Antigravity] TLS Sidecar enabled, skipping agent configuration for OAuth2Client');
         } else {
             // 根据 base URL 判断使用 http 还是 https agent
             const firstBaseURL = this.baseURLs && this.baseURLs.length > 0 ? this.baseURLs[0] : '';
