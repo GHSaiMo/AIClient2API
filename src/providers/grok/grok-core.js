@@ -251,11 +251,13 @@ export class GrokApiService {
             return await axios(axiosConfig);
         } catch (err) {
             const status = err.response?.status;
-            if (status === 401 && !options._isRetry) {
-                logger.info(`[Grok] HTTP request to ${url} received 401. Attempting auto-refresh from browser for ${this.config.email || this.uuid}...`);
+            const errMsg = String(err.response?.data?.error || err.response?.data?.message || err.message || '');
+            const isAuthOrExpired = status === 401 || (status === 403 && (errMsg.includes('out of date') || errMsg.includes('Reload to continue')));
+            if (isAuthOrExpired && !options._isRetry) {
+                logger.info(`[Grok] HTTP request to ${url} received ${status} (${errMsg}). Attempting auto-refresh from browser for ${this.config.email || this.uuid}...`);
                 try {
                     await this.refreshToken();
-                    logger.info(`[Grok] Token refreshed after 401 in _request. Retrying request...`);
+                    logger.info(`[Grok] Token refreshed after ${status} in _request. Retrying request...`);
                     // 使用更新后的 headers 重试
                     return await this._request({
                         ...options,
@@ -1625,12 +1627,14 @@ export class GrokApiService {
                 }
             }
 
-            // 处理 401 / SSO 失效：尝试从浏览器原地刷新并重试一次
-            if (status === 401 && !hasYieldedData && retryCount === 0) {
-                logger.info(`[Grok] Received 401 Unauthorized during stream. Attempting auto-refresh from browser for ${this.config.email || this.uuid}...`);
+            // 处理 401 / 403 SSO 失效：尝试从浏览器原地刷新并重试一次
+            const streamErrMsg = String(error.response?.data?.error || error.response?.data?.message || error.message || '');
+            const isStreamAuthOrExpired = status === 401 || (status === 403 && (streamErrMsg.includes('out of date') || streamErrMsg.includes('Reload to continue')));
+            if (isStreamAuthOrExpired && !hasYieldedData && retryCount === 0) {
+                logger.info(`[Grok] Received ${status} (${streamErrMsg}) during stream. Attempting auto-refresh from browser for ${this.config.email || this.uuid}...`);
                 try {
                     await this.refreshToken();
-                    logger.info(`[Grok] Token refreshed after 401. Retrying stream immediately...`);
+                    logger.info(`[Grok] Token refreshed after ${status}. Retrying stream immediately...`);
                     yield* this.generateContentStream(model, requestBody, retryCount + 1);
                     return;
                 } catch (refreshErr) {

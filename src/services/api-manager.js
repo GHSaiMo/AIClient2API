@@ -329,8 +329,15 @@ async function handleImageGenerationRequest(req, res, currentConfig, providerPoo
                 providerPoolManager.markProviderUnhealthyWithRecoveryTime(slotProviderType, {uuid: slotUuid}, error.message || '402 Payment Required - quota cooldown', quotaRecoveryTime);
                 credentialMarkedUnhealthy = true;
             } else if (!credentialMarkedUnhealthy && !error.skipErrorCount) {
-                const isGrokAuthFailure = slotProviderType === 'grok-web' && (error.response?.status === 401 || error.isDefinitiveAuthFailure === true);
-                const isGrokSessionFailure = slotProviderType === 'grok-web' && error.response?.status === 403;
+                const isGrokAuthFailure = slotProviderType === 'grok-web' && (
+                    error.response?.status === 401 ||
+                    error.isDefinitiveAuthFailure === true ||
+                    (error.response?.status === 403 && (
+                        String(error.message || '').toLowerCase().includes('out of date') ||
+                        String(error.message || '').toLowerCase().includes('reload to continue')
+                    ))
+                );
+                const isGrokSessionFailure = slotProviderType === 'grok-web' && error.response?.status === 403 && !isGrokAuthFailure;
                 if (isGrokAuthFailure) {
                     logger.warn(`[Provider Pool] Grok auth failure for ${slotProviderType} (${slotUuid}). Marking as needsRefresh: ${error.message}`);
                     providerPoolManager.markProviderNeedRefresh(slotProviderType, {uuid: slotUuid});
