@@ -18,7 +18,6 @@ usage-cache.json
 api-potluck-keys.json
 api-potluck-data.json
 model-usage-stats.json
-AGENTS.md
 src/plugins-user/
 
 /.codegraph/
