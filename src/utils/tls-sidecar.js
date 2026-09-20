@@ -210,8 +210,12 @@ class TLSSidecar {
         const projectRoot = path.resolve(currentDir, '..', '..');
         const isWin = process.platform === 'win32';
         const ext = isWin ? '.exe' : '';
+        const platform = process.platform;
+        const arch = process.arch === 'x64' ? 'amd64' : process.arch;
 
         const candidates = [
+            path.join(projectRoot, 'tls-sidecar', `tls-sidecar-${platform}-${arch}${ext}`),
+            path.join(projectRoot, `tls-sidecar-${platform}-${arch}${ext}`),
             path.join(projectRoot, 'tls-sidecar', `tls-sidecar${ext}`),
             path.join(projectRoot, `tls-sidecar${ext}`),
             path.join('/usr', 'local', 'bin', `tls-sidecar${ext}`),
