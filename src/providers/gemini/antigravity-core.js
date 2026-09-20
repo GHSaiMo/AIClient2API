@@ -1096,9 +1096,7 @@ export class AntigravityApiService {
             clientSecret: OAUTH_CLIENT_SECRET,
         };
 
-        if (isTLSSidecarEnabled) {
-            logger.info('[Antigravity] TLS Sidecar enabled, skipping agent configuration for OAuth2Client');
-        } else if (proxyConfig) {
+        if (proxyConfig) {
             oauth2Options.transporterOptions = proxyConfig;
             logger.info('[Antigravity] Using proxy for OAuth2Client');
         } else {
