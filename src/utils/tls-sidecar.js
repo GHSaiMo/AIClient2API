@@ -194,9 +194,10 @@ class TLSSidecar {
             axiosConfig.headers['X-Proxy-Url'] = proxyUrl;
         }
 
-        // 走 sidecar 不需要 Node.js 侧的 TLS agent
+        // 走 sidecar 不需要 Node.js 侧的 TLS agent，显式使用本地 HTTP agent 避免继承 gaxios 外部代理
         delete axiosConfig.httpAgent;
         delete axiosConfig.httpsAgent;
+        axiosConfig.agent = new http.Agent({ keepAlive: true });
         // 确保 axios 不使用自己的代理
         axiosConfig.proxy = false;
 
