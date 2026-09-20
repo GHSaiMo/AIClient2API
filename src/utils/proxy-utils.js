@@ -97,9 +97,10 @@ export function parseProxyUrl(proxyUrl) {
         };
 
         let result = null;
-        if (protocol === 'socks5:' || protocol === 'socks4:' || protocol === 'socks:') {
-            // SOCKS 代理
-            const socksAgent = new SocksProxyAgent(trimmedUrl, agentOptions);
+        if (protocol === 'socks5:' || protocol === 'socks5h:' || protocol === 'socks4:' || protocol === 'socks4a:' || protocol === 'socks:') {
+            // SOCKS 代理：对于 socks5，升级为 socks5h 确保远程 DNS 解析，防止隔离网段/无外网DNS环境解析失败
+            const effectiveSocksUrl = trimmedUrl.replace(/^socks5:\/\//i, 'socks5h://');
+            const socksAgent = new SocksProxyAgent(effectiveSocksUrl, agentOptions);
             result = {
                 httpAgent: socksAgent,
                 httpsAgent: socksAgent,

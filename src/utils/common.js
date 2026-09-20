@@ -1968,7 +1968,12 @@ export async function handleContentGenerationRequest(req, res, service, endpoint
         const preConvertBody = processedRequestBody;
         processedRequestBody = convertData(preConvertBody, 'request', fromProvider, toProvider);
 
-        // 保持以 _ 开头的内部属性（如 _monitorRequestId, _requestBaseUrl）
+        // 保持以 _ 开头的内部属性（如 _monitorRequestId, _requestBaseUrl）及生图专用参数
+        ['aspect_ratio', 'aspectRatio', 'resolution', 'quality', 'size'].forEach(key => {
+            if (preConvertBody[key] !== undefined && processedRequestBody[key] === undefined) {
+                processedRequestBody[key] = preConvertBody[key];
+            }
+        });
         Object.keys(preConvertBody).forEach(key => {
             if (key.startsWith('_') && processedRequestBody[key] === undefined) {
                 processedRequestBody[key] = preConvertBody[key];

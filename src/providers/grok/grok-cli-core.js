@@ -1465,7 +1465,7 @@ export class GrokCliApiService {
             };
             this._applySidecar(axiosRequestConfig);
 
-            logger.info(`[Grok CLI] Image request model=${model}, endpoint=${endpointPath}, response_format=${body.response_format}`);
+            logger.info(`[Grok CLI] Image request model=${model}, endpoint=${endpointPath}, aspect_ratio=${body.aspect_ratio}, resolution=${body.resolution}, response_format=${body.response_format}`);
             const response = await axios.request(axiosRequestConfig);
             return this.normalizeImageResponse(response.data, model);
         } catch (error) {
