@@ -23,3 +23,4 @@ src/plugins-user/
 /.codegraph/
 tls-sidecar/tls-sidecar-linux-*
 tls-sidecar/tls-sidecar-darwin-*
+.local_mode
