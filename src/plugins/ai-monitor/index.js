@@ -6,6 +6,27 @@ import logger from '../../utils/logger.js';
  * 1. 捕获 AI 接口的请求参数（转换前和转换后）
  * 2. 捕获 AI 接口的响应结果（转换前和转换后，流式响应聚合输出）
  */
+// 用于存储流式响应的中间状态
+const MAX_CACHED_CHUNKS = 100;
+const STREAM_CACHE_TTL_MS = 3 * 60 * 1000;
+let cacheCleanupTimer = null;
+
+function ensureCacheCleanup(cacheMap) {
+    if (!cacheCleanupTimer) {
+        cacheCleanupTimer = setInterval(() => {
+            const cutoff = Date.now() - STREAM_CACHE_TTL_MS;
+            for (const [id, cache] of cacheMap.entries()) {
+                if (cache.createdAt && cache.createdAt < cutoff) {
+                    cacheMap.delete(id);
+                }
+            }
+        }, 60 * 1000);
+        if (cacheCleanupTimer.unref) {
+            cacheCleanupTimer.unref();
+        }
+    }
+}
+
 const aiMonitorPlugin = {
     name: 'ai-monitor',
     version: '1.0.0',
@@ -53,7 +74,10 @@ const aiMonitorPlugin = {
             const traceRequestId = _monitorRequestId;
 
             setImmediate(() => {
-                const hasConversion = JSON.stringify(originalRequestBody) !== JSON.stringify(processedRequestBody);
+                const hasConversion = fromProvider !== toProvider || (
+                    originalRequestBody !== processedRequestBody &&
+                    JSON.stringify(originalRequestBody) !== JSON.stringify(processedRequestBody)
+                );
                 logger.info(`[AI Monitor][${traceRequestId}] >>> Req Protocol: ${fromProvider}${hasConversion ? ' -> ' + toProvider : ''} | Model: ${model}`);
                 
                 if (hasConversion) {
@@ -69,8 +93,12 @@ const aiMonitorPlugin = {
                 setTimeout(() => {
                     const cache = aiMonitorPlugin.streamCache.get(traceRequestId);
                     if (cache) {
-                        const hasConversion = JSON.stringify(cache.nativeChunks) !== JSON.stringify(cache.convertedChunks);
-                        logger.info(`[AI Monitor][${traceRequestId}] <<< Stream Response Aggregated: ${hasConversion ? cache.toProvider + ' -> ' : ''}${cache.fromProvider}`);
+                        const hasConversion = cache.toProvider !== cache.fromProvider || (
+                            JSON.stringify(cache.nativeChunks) !== JSON.stringify(cache.convertedChunks)
+                        );
+                        const isTruncated = (cache.nativeCount || 0) > cache.nativeChunks.length;
+                        const truncSuffix = isTruncated ? ` (Sampled ${cache.nativeChunks.length}/${cache.nativeCount} chunks)` : '';
+                        logger.info(`[AI Monitor][${traceRequestId}] <<< Stream Response Aggregated: ${hasConversion ? cache.toProvider + ' -> ' : ''}${cache.fromProvider}${truncSuffix}`);
                         
                         if (hasConversion) {
                             logger.info(`[AI Monitor][${traceRequestId}] [Res Native Full]: ${JSON.stringify(cache.nativeChunks)}`);
@@ -91,7 +119,10 @@ const aiMonitorPlugin = {
         async onUnaryResponse({ nativeResponse, clientResponse, fromProvider, toProvider, requestId }) {
             setImmediate(() => {
                 const reqId = requestId || 'N/A';
-                const hasConversion = JSON.stringify(nativeResponse) !== JSON.stringify(clientResponse);
+                const hasConversion = fromProvider !== toProvider || (
+                    nativeResponse !== clientResponse &&
+                    JSON.stringify(nativeResponse) !== JSON.stringify(clientResponse)
+                );
                 logger.info(`[AI Monitor][${reqId}] <<< Res Protocol: ${hasConversion ? toProvider + ' -> ' : ''}${fromProvider} (Unary)`);
                 
                 if (hasConversion) {
@@ -110,30 +141,34 @@ const aiMonitorPlugin = {
             if (!requestId) return;
 
             if (!aiMonitorPlugin.streamCache.has(requestId)) {
+                ensureCacheCleanup(aiMonitorPlugin.streamCache);
                 aiMonitorPlugin.streamCache.set(requestId, {
                     nativeChunks: [],
                     convertedChunks: [],
                     fromProvider,
-                    toProvider
+                    toProvider,
+                    createdAt: Date.now(),
+                    nativeCount: 0,
+                    convertedCount: 0
                 });
             }
 
             const cache = aiMonitorPlugin.streamCache.get(requestId);
             
-            // 过滤 null 值，并判断是否为数组类型
+            // 过滤 null 值，加入最大缓存数限制以防超长流式响应内存膨胀
             if (nativeChunk != null) {
-                if (Array.isArray(nativeChunk)) {
-                    cache.nativeChunks.push(...nativeChunk.filter(item => item != null));
-                } else {
-                    cache.nativeChunks.push(nativeChunk);
+                const items = Array.isArray(nativeChunk) ? nativeChunk.filter(item => item != null) : [nativeChunk];
+                cache.nativeCount = (cache.nativeCount || 0) + items.length;
+                if (cache.nativeChunks.length < MAX_CACHED_CHUNKS) {
+                    cache.nativeChunks.push(...items.slice(0, MAX_CACHED_CHUNKS - cache.nativeChunks.length));
                 }
             }
             
             if (chunkToSend != null) {
-                if (Array.isArray(chunkToSend)) {
-                    cache.convertedChunks.push(...chunkToSend.filter(item => item != null));
-                } else {
-                    cache.convertedChunks.push(chunkToSend);
+                const items = Array.isArray(chunkToSend) ? chunkToSend.filter(item => item != null) : [chunkToSend];
+                cache.convertedCount = (cache.convertedCount || 0) + items.length;
+                if (cache.convertedChunks.length < MAX_CACHED_CHUNKS) {
+                    cache.convertedChunks.push(...items.slice(0, MAX_CACHED_CHUNKS - cache.convertedChunks.length));
                 }
             }
         },

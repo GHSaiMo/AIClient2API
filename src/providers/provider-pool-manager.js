@@ -203,9 +203,9 @@ export class ProviderPoolManager {
                 // 排除禁用的节点（不健康节点也应允许尝试刷新以恢复健康）
                 if (config.isDisabled) continue;
 
-                if (configPath && fs.existsSync(configPath)) {
+                if (configPath) {
                     try {
-                        const fileContent = fs.readFileSync(configPath, 'utf-8');
+                        const fileContent = await fs.promises.readFile(configPath, 'utf-8');
                         const credData = JSON.parse(fileContent);
                         const rawExpiryTime = credData.expiry_date ?? credData.expiry ?? credData.expires_at ?? credData.expiresAt;
                         let expiryTime = null;
@@ -225,10 +225,14 @@ export class ProviderPoolManager {
                             this._enqueueRefresh(providerType, providerStatus);
                         }
                     } catch (err) {
-                        this._log('error', `Failed to check expiry for node ${this._getDisplayName(config)}: ${err.message}`);
+                        if (err.code === 'ENOENT') {
+                            this._log('debug', `Node ${this._getDisplayName(config)} (${providerType}) config file does not exist: ${configPath}`);
+                        } else {
+                            this._log('error', `Failed to check expiry for node ${this._getDisplayName(config)}: ${err.message}`);
+                        }
                     }
                 } else {
-                    this._log('debug', `Node ${this._getDisplayName(config)} (${providerType}) has no valid config file path or file does not exist.`);
+                    this._log('debug', `Node ${this._getDisplayName(config)} (${providerType}) has no valid config file path.`);
                 }
             }
         }
@@ -1066,19 +1070,23 @@ export class ProviderPoolManager {
             return null;
         }
  
-        // 使用标志位 + 异步等待实现更强力的互斥锁
-        // 这种方式能更好地处理同一微任务循环内的并发
-        while (this._isSelecting[providerType]) {
-            await new Promise(resolve => setImmediate(resolve));
-        }
-        
-        this._isSelecting[providerType] = true;
-        
+        // 使用基于 Promise 链的 FIFO 互斥锁，彻底杜绝 setImmediate 循环空转与高并发饥饿
+        const previousLock = this._selectionLocks[providerType] || Promise.resolve();
+        let releaseLock;
+        const currentLock = new Promise(resolve => {
+            releaseLock = resolve;
+        });
+        this._selectionLocks[providerType] = currentLock;
+
         try {
+            await previousLock;
             // 在锁内部执行同步选择
             return this._doSelectProvider(providerType, requestedModel, options);
         } finally {
-            this._isSelecting[providerType] = false;
+            releaseLock();
+            if (this._selectionLocks[providerType] === currentLock) {
+                delete this._selectionLocks[providerType];
+            }
         }
     }
 

@@ -994,8 +994,43 @@ async function resolveEmptyUpstreamResponseRetry(CONFIG, model, attemptsMade, lo
     }
 }
 
+/**
+ * 安全写入流式分块并处理背压 (Backpressure)
+ * 当内核缓冲区满 (res.write 返回 false) 时等待 drain 或客户端断开事件
+ * @param {http.ServerResponse} res
+ * @param {string|Buffer} payload
+ * @param {{ value: boolean }} clientDisconnected
+ * @returns {Promise<boolean>} 是否成功写入
+ */
+async function safeStreamWriteChunk(res, payload, clientDisconnected) {
+    if (clientDisconnected.value || res.writableEnded || res.finished || res.destroyed) {
+        return false;
+    }
+
+    try {
+        const ok = res.write(payload);
+        if (!ok && !res.writableEnded && !clientDisconnected.value) {
+            await new Promise(resolve => {
+                const onDrain = () => { cleanup(); resolve(); };
+                const onClose = () => { cleanup(); resolve(); };
+                const cleanup = () => {
+                    res.off('drain', onDrain);
+                    res.off('close', onClose);
+                };
+                res.once('drain', onDrain);
+                res.once('close', onClose);
+            });
+        }
+        return true;
+    } catch (writeErr) {
+        logger.error('[Stream] Failed to write stream chunk:', writeErr.message);
+        clientDisconnected.value = true;
+        return false;
+    }
+}
+
 export async function handleStreamRequest(res, service, model, requestBody, fromProvider, toProvider, PROMPT_LOG_MODE, PROMPT_LOG_FILENAME, providerPoolManager, pooluuid, customName, retryContext = null) {
-    let fullResponseText = '';
+    const fullResponseTextChunks = [];
     let fullResponseJson = '';
     let fullOldResponseJson = '';
     let responseClosed = false;
@@ -1070,7 +1105,7 @@ export async function handleStreamRequest(res, service, model, requestBody, from
             // Extract text for logging purposes
             const chunkText = extractResponseText(nativeChunk, toProvider);
             if (chunkText && !Array.isArray(chunkText)) {
-                fullResponseText += chunkText;
+                fullResponseTextChunks.push(chunkText);
             }
 
             // Convert the complete chunk object to the client's format (fromProvider), if necessary.
@@ -1151,32 +1186,21 @@ export async function handleStreamRequest(res, service, model, requestBody, from
                 }
 
                 if (addEvent) {
-                    // fullOldResponseJson += chunk.type+"\n";
-                    // fullResponseJson += chunk.type+"\n";
-                    if (!clientDisconnected.value && !res.writableEnded) {
-                        try {
-                            res.write(`event: ${chunk.type}\n`);
-                            anyDataSent = true;
-                        } catch (writeErr) {
-                            logger.error('[Stream] Failed to write event:', writeErr.message);
-                            clientDisconnected.value = true;
-                            break;
-                        }
-                    }
-                    // logger.info(`event: ${chunk.type}\n`);
-                }
-
-                // fullOldResponseJson += JSON.stringify(chunk)+"\n";
-                // fullResponseJson += JSON.stringify(chunk)+"\n\n";
-                if (!clientDisconnected.value && !res.writableEnded) {
-                    try {
-                        res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+                    const written = await safeStreamWriteChunk(res, `event: ${chunk.type}\n`, clientDisconnected);
+                    if (written) {
                         anyDataSent = true;
-                    } catch (writeErr) {
-                        logger.error('[Stream] Failed to write data:', writeErr.message);
-                        clientDisconnected.value = true;
+                    }
+                    if (clientDisconnected.value) {
                         break;
                     }
+                }
+
+                const written = await safeStreamWriteChunk(res, `data: ${JSON.stringify(chunk)}\n\n`, clientDisconnected);
+                if (written) {
+                    anyDataSent = true;
+                }
+                if (clientDisconnected.value) {
+                    break;
                 }
                 // logger.info(`data: ${JSON.stringify(chunk)}\n`);
             }
@@ -1456,6 +1480,7 @@ export async function handleStreamRequest(res, service, model, requestBody, from
         
         // 只在首次请求时记录日志（避免重试时重复记录）
         if (!isRetry) {
+            const fullResponseText = fullResponseTextChunks.join('');
             await logConversation('output', fullResponseText, PROMPT_LOG_MODE, PROMPT_LOG_FILENAME);
         }
         // fs.writeFile('oldResponseChunk'+Date.now()+'.json', fullOldResponseJson);
