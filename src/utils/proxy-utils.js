@@ -302,13 +302,8 @@ export function getGoogleAuthProxyConfig(config, providerType) {
 }
 
 /**
- * 获取指定提供商适用的 Undici Dispatcher
- * 完整支持 HTTP、HTTPS 和 SOCKS5/SOCKS5h 代理
- * @param {Object} config - 应用配置对象
- * @param {string} providerType - 提供商类型
- * @returns {UndiciProxyAgent|UndiciAgent|null}
-/**
  * 根据代理 URL 获取或创建 Undici Dispatcher
+ * 完整支持 HTTP、HTTPS 和 SOCKS5/SOCKS5h 代理
  * @param {string} proxyUrl - 代理 URL (http, https, socks5, socks5h)
  * @param {string} [sourceDisplay] - 来源描述（用于日志）
  * @returns {any|null} Undici Dispatcher
@@ -339,13 +334,23 @@ export function getUndiciDispatcherForUrl(proxyUrl, sourceDisplay = '') {
             const effectiveSocksUrl = cleanUrl.replace(/^socks5:\/\//i, 'socks5h://');
             const socksAgent = new SocksProxyAgent(effectiveSocksUrl);
             dispatcher = new UndiciAgent({
-                connect: (opts, cb) => {
-                    const target = {
-                        host: opts.hostname || opts.host,
-                        port: Number(opts.port),
-                        servername: opts.servername || opts.hostname || opts.host,
-                    };
-                    socksAgent.createConnection(target, cb);
+                connect: async (opts, cb) => {
+                    try {
+                        const isHttps = opts.protocol === 'https:';
+                        const port = Number(opts.port) || (isHttps ? 443 : 80);
+                        const host = opts.hostname || opts.host;
+                        const target = {
+                            host,
+                            port,
+                            servername: opts.servername || host,
+                            secureEndpoint: isHttps,
+                        };
+                        const dummyReq = { destroy() {} };
+                        const socket = await socksAgent.connect(dummyReq, target);
+                        cb(null, socket);
+                    } catch (err) {
+                        cb(err);
+                    }
                 },
                 keepAliveTimeout: 30000,
                 keepAliveMaxTimeout: 60000,

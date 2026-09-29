@@ -6,6 +6,7 @@
 import { describe, it, expect, beforeAll, afterAll } from '@jest/globals';
 import http from 'http';
 import { UndiciHttpClient, HttpError } from '../../src/utils/undici-client.js';
+import { getUndiciDispatcherForUrl } from '../../src/utils/proxy-utils.js';
 
 describe('UndiciHttpClient and HttpError Tests', () => {
     let server;
@@ -207,8 +208,29 @@ describe('UndiciHttpClient and HttpError Tests', () => {
             expect(lines).toContain('data: [DONE]');
         });
 
+        it('should handle early break in stream() and cancel reader cleanly', async () => {
+            const client = new UndiciHttpClient({ baseURL: serverUrl });
+            const lines = [];
+
+            for await (const line of client.stream('/sse', null, { method: 'GET' })) {
+                if (line.trim()) {
+                    lines.push(line.trim());
+                    break; // Early break after first line
+                }
+            }
+
+            expect(lines.length).toBe(1);
+            expect(lines[0]).toBe('data: {"count": 1}');
+        });
+
         it('should return localDispatcher instance', () => {
             const dispatcher = UndiciHttpClient.getLocalDispatcher();
+            expect(dispatcher).toBeDefined();
+            expect(typeof dispatcher.dispatch).toBe('function');
+        });
+
+        it('should create SOCKS5 Undici Dispatcher with custom connect bridge', () => {
+            const dispatcher = getUndiciDispatcherForUrl('socks5://127.0.0.1:1080', 'test-socks');
             expect(dispatcher).toBeDefined();
             expect(typeof dispatcher.dispatch).toBe('function');
         });

@@ -224,10 +224,17 @@ class TLSSidecar {
         requestOptions.url = this.baseUrl;
 
         // 通过 header 传递目标和代理信息
-        requestOptions.headers = requestOptions.headers || {};
-        requestOptions.headers['X-Target-Url'] = targetUrl;
-        if (proxyUrl) {
-            requestOptions.headers['X-Proxy-Url'] = proxyUrl;
+        if (requestOptions.headers instanceof Headers) {
+            requestOptions.headers.set('X-Target-Url', targetUrl);
+            if (proxyUrl) {
+                requestOptions.headers.set('X-Proxy-Url', proxyUrl);
+            }
+        } else {
+            requestOptions.headers = requestOptions.headers || {};
+            requestOptions.headers['X-Target-Url'] = targetUrl;
+            if (proxyUrl) {
+                requestOptions.headers['X-Proxy-Url'] = proxyUrl;
+            }
         }
 
         // 走本地 Sidecar，严格使用本地专用 Dispatcher，严禁使用外部代理
