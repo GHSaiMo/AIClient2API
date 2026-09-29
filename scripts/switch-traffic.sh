@@ -59,7 +59,7 @@ switch_to_local() {
         tmux send-keys -t "${TMUX_LOCAL_SESSION}" "cd ${PROJECT_DIR} && npm start" Enter
     else
         echo "🚀 创建新 Tmux 会话启动本地服务: ${TMUX_LOCAL_SESSION}"
-        tmux new-session -d -s "${TMUX_LOCAL_SESSION}" "cd ${PROJECT_DIR} && npm start"
+        tmux new-session -d -s "${TMUX_LOCAL_SESSION}" "bash -c 'cd ${PROJECT_DIR} && npm start; exec bash'"
     fi
 
     # 5. 等待本地服务就绪
