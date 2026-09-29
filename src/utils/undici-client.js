@@ -45,6 +45,29 @@ function getLocalDispatcher() {
     return localDispatcherInstance;
 }
 
+/**
+ * 快速检查请求头是否存在（大小写不敏感，零数组分配）
+ */
+function hasHeader(headers, nameLower) {
+    if (!headers) return false;
+    for (const key in headers) {
+        if (key.toLowerCase() === nameLower) return true;
+    }
+    return false;
+}
+
+/**
+ * 快速删除请求头（大小写不敏感）
+ */
+function deleteHeader(headers, nameLower) {
+    if (!headers) return;
+    for (const key in headers) {
+        if (key.toLowerCase() === nameLower) {
+            delete headers[key];
+        }
+    }
+}
+
 export class UndiciHttpClient {
     /**
      * @param {Object} options
@@ -170,11 +193,7 @@ export class UndiciHttpClient {
             if (typeof FormData !== 'undefined' && reqBody instanceof FormData) {
                 isFormData = true;
                 // 让 fetch 自动注入带有正确 boundary 的 multipart/form-data
-                for (const key of Object.keys(mergedHeaders)) {
-                    if (key.toLowerCase() === 'content-type') {
-                        delete mergedHeaders[key];
-                    }
-                }
+                deleteHeader(mergedHeaders, 'content-type');
             } else if (
                 typeof reqBody === 'string' ||
                 reqBody instanceof ArrayBuffer ||
@@ -185,13 +204,13 @@ export class UndiciHttpClient {
             } else {
                 // 默认 JSON 序列化
                 reqBody = JSON.stringify(reqBody);
-                if (!Object.keys(mergedHeaders).some(k => k.toLowerCase() === 'content-type')) {
+                if (!hasHeader(mergedHeaders, 'content-type')) {
                     mergedHeaders['Content-Type'] = 'application/json';
                 }
             }
         }
 
-        if (!isFormData && !Object.keys(mergedHeaders).some(k => k.toLowerCase() === 'accept')) {
+        if (!isFormData && !hasHeader(mergedHeaders, 'accept')) {
             if (responseType === 'json') {
                 mergedHeaders['Accept'] = 'application/json, text/plain, */*';
             } else if (responseType === 'arraybuffer') {
@@ -330,10 +349,10 @@ export class UndiciHttpClient {
 
         const fullUrl = this._buildUrl(endpoint);
         const mergedHeaders = this._mergeHeaders(headers);
-        if (!Object.keys(mergedHeaders).some(k => k.toLowerCase() === 'accept')) {
+        if (!hasHeader(mergedHeaders, 'accept')) {
             mergedHeaders['Accept'] = 'text/event-stream';
         }
-        if (!Object.keys(mergedHeaders).some(k => k.toLowerCase() === 'content-type')) {
+        if (!hasHeader(mergedHeaders, 'content-type')) {
             mergedHeaders['Content-Type'] = 'application/json';
         }
 
