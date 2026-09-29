@@ -51,7 +51,7 @@ export function createGaxiosFetch(config, providerType) {
         const sidecar = getTLSSidecar();
         if (sidecar.isReady() && isTLSSidecarEnabledForProvider(config, providerType)) {
             const sidecarBase = sidecar.getBaseUrl();
-            const rawUrl = typeof url === 'string' ? url : (url?.href || url?.toString());
+            const rawUrl = typeof url === 'string' ? url : (url?.url || url?.href || url?.toString());
             
             // 确保 headers 对象结构可用
             const headers = fetchOpts.headers instanceof Headers

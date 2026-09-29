@@ -434,6 +434,11 @@ export class UndiciHttpClient {
                     }
                 } finally {
                     try {
+                        await reader.cancel();
+                    } catch {
+                        // ignore
+                    }
+                    try {
                         reader.releaseLock();
                     } catch {
                         // ignore
