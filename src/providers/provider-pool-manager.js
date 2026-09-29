@@ -1095,8 +1095,17 @@ export class ProviderPoolManager {
         // 获取固定时间戳，确保排序过程中一致
         const now = Date.now();
         
-        // 提前计算池中最小序列号，避免在排序算法中重复 O(N) 计算
-        const minSeq = Math.min(...availableProviders.map(p => p.config._lastSelectionSeq || 0));
+        // 提前计算池中最小序列号，避免在排序算法中重复 O(N) 计算，并避免数组展开的参数栈开销与多余分配
+        let minSeq = 0;
+        if (availableProviders.length > 0) {
+            minSeq = availableProviders[0].config?._lastSelectionSeq || 0;
+            for (let i = 1; i < availableProviders.length; i++) {
+                const seq = availableProviders[i].config?._lastSelectionSeq || 0;
+                if (seq < minSeq) {
+                    minSeq = seq;
+                }
+            }
+        }
 
         let availableAndHealthyProviders = availableProviders.filter(p =>
             p.config.isHealthy && !p.config.isDisabled && !p.config.needsRefresh

@@ -825,7 +825,20 @@ export function getServiceInstanceKey(provider, uuid = null) {
 
 export function invalidateServiceAdapter(provider, uuid = null) {
     const providerKey = getServiceInstanceKey(provider, uuid);
-    if (serviceInstances[providerKey]) {
+    const instance = serviceInstances[providerKey];
+    if (instance) {
+        try {
+            // 调用实例清理钩子，释放定时器与后台轮询资源，防止内存泄漏
+            if (typeof instance.destroy === 'function') {
+                instance.destroy();
+            } else if (typeof instance.stopCacheCleanup === 'function') {
+                instance.stopCacheCleanup();
+            } else if (instance.client && typeof instance.client.destroy === 'function') {
+                instance.client.destroy();
+            }
+        } catch (cleanupErr) {
+            logger.warn(`[Adapter] Error cleaning up service adapter instance for ${providerKey}:`, cleanupErr.message);
+        }
         delete serviceInstances[providerKey];
         logger.info(`[Adapter] Invalidated service adapter, provider: ${provider}, uuid: ${uuid || 'default'}`);
         return true;

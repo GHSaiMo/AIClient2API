@@ -1064,6 +1064,9 @@ export class CodexApiService {
                 }
             }
         }, 15 * 60 * 1000);
+        if (this.cleanupInterval.unref) {
+            this.cleanupInterval.unref();
+        }
     }
 
     /**
@@ -1073,6 +1076,16 @@ export class CodexApiService {
         if (this.cleanupInterval) {
             clearInterval(this.cleanupInterval);
             this.cleanupInterval = null;
+        }
+    }
+
+    /**
+     * 销毁实例并清理定时器与缓存
+     */
+    destroy() {
+        this.stopCacheCleanup();
+        if (this.conversationCache) {
+            this.conversationCache.clear();
         }
     }
 
