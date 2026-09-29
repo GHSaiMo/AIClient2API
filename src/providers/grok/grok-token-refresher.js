@@ -188,7 +188,18 @@ export async function refreshGrokToken(config = {}) {
             clearTimeout(timer);
 
             if (res.ok) {
-                const data = await res.json();
+                let data = await res.json();
+                if ((!data || !data.ok) && email) {
+                    logger.info(`[GrokRefresher] Specific email '${email}' not found on Mac bridge, attempting fallback to any available cookie...`);
+                    try {
+                        const fallbackRes = await fetch(`${bridgeBaseUrl}/api/grok-cookies`);
+                        if (fallbackRes.ok) {
+                            data = await fallbackRes.json();
+                        }
+                    } catch (fbErr) {
+                        logger.debug(`[GrokRefresher] Fallback query failed: ${fbErr.message}`);
+                    }
+                }
                 if (data && data.ok) {
                     if (data.sso) {
                         cookies = { sso: data.sso, cf_clearance: data.cf_clearance || '' };
