@@ -50,6 +50,8 @@ export const RETRYABLE_NETWORK_ERRORS = [
     'UND_ERR_ABORTED',            // undici 请求中止
 ];
 
+export const RETRYABLE_NETWORK_ERRORS_SET = new Set(RETRYABLE_NETWORK_ERRORS);
+
 /**
  * 检查是否为可重试的网络错误
  * @param {Error} error - 错误对象
@@ -59,11 +61,14 @@ export function isRetryableNetworkError(error) {
     if (!error) return false;
     
     const errorCode = error.code || error.cause?.code || '';
+    if (errorCode && RETRYABLE_NETWORK_ERRORS_SET.has(errorCode)) {
+        return true;
+    }
+
     const errorMessage = error.message || error.cause?.message || (typeof error === 'string' ? error : '');
-    
-    return RETRYABLE_NETWORK_ERRORS.some(err => 
-        errorCode === err || errorMessage.includes(err)
-    );
+    if (!errorMessage) return false;
+
+    return RETRYABLE_NETWORK_ERRORS.some(err => errorMessage.includes(err));
 }
 
 /**

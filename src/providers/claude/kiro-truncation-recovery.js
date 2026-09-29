@@ -17,6 +17,31 @@ import logger from '../../utils/logger.js';
 const toolTruncationCache = new Map();
 const contentTruncationCache = new Map();
 
+// 截断缓存安全 TTL (30 分钟) 与定期淘汰机制
+const TRUNCATION_CACHE_TTL_MS = 30 * 60 * 1000;
+let truncationCleanupTimer = null;
+
+function ensureTruncationCleanupStarted() {
+    if (!truncationCleanupTimer) {
+        truncationCleanupTimer = setInterval(() => {
+            const cutoff = Date.now() - TRUNCATION_CACHE_TTL_MS;
+            for (const [id, item] of toolTruncationCache.entries()) {
+                if (item.timestamp && item.timestamp < cutoff) {
+                    toolTruncationCache.delete(id);
+                }
+            }
+            for (const [hash, item] of contentTruncationCache.entries()) {
+                if (item.timestamp && item.timestamp < cutoff) {
+                    contentTruncationCache.delete(hash);
+                }
+            }
+        }, 10 * 60 * 1000);
+        if (truncationCleanupTimer.unref) {
+            truncationCleanupTimer.unref(); // 避免阻止进程正常退出
+        }
+    }
+}
+
 /**
  * 记录工具调用截断信息
  * @param {string} toolCallId - 工具调用 ID
@@ -25,6 +50,7 @@ const contentTruncationCache = new Map();
  */
 export function saveToolTruncation(toolCallId, toolName, diagnostics = {}) {
     if (!toolCallId) return;
+    ensureTruncationCleanupStarted();
     toolTruncationCache.set(toolCallId, {
         toolCallId,
         toolName: toolName || 'unknown_tool',
@@ -53,6 +79,7 @@ export function getToolTruncation(toolCallId) {
  */
 export function saveContentTruncation(content) {
     if (!content || typeof content !== 'string') return '';
+    ensureTruncationCleanupStarted();
     const preview = content.slice(0, 500);
     const hash = crypto.createHash('sha256').update(preview).digest('hex').slice(0, 16);
     contentTruncationCache.set(hash, {

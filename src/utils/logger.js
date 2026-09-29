@@ -28,6 +28,10 @@ class Logger {
             warn: 2,
             error: 3
         };
+        this._writeCount = 0;
+        this._lastRotateCheck = Date.now();
+        this._rotateCheckInterval = 500; // 每 500 次写入检查一次文件大小
+        this._rotateTimeInterval = 60 * 1000; // 或每 60 秒检查一次
     }
 
 
@@ -263,8 +267,13 @@ class Logger {
         if (this.config.outputMode === 'file' || this.config.outputMode === 'all') {
             if (this.logStream && !this.logStream.destroyed && this.logStream.writable) {
                 try {
-                    // 检查文件大小并轮转
-                    this.checkAndRotateLogFile();
+                    // 性能优化：按写入次数采样或时间间隔检查轮转，彻底消除每条日志的同步 statSync 阻塞
+                    this._writeCount++;
+                    const now = Date.now();
+                    if (this._writeCount % this._rotateCheckInterval === 0 || (now - this._lastRotateCheck) > this._rotateTimeInterval) {
+                        this._lastRotateCheck = now;
+                        this.checkAndRotateLogFile();
+                    }
                     this.logStream.write(message + '\n');
                 } catch (err) {
                     // 如果写入失败，输出到控制台作为备份
