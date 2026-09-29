@@ -205,6 +205,7 @@ function modelSupportsReasoning(model) {
         name.includes('grok-3-mini') ||
         name.includes('grok-4.3') ||
         name.includes('grok-4.5') ||
+        name.includes('grok-4.7') ||
         name.includes('grok-4.6') ||
         name.includes('grok-build') ||
         name.includes('multi-agent');
