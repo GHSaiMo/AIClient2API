@@ -58,10 +58,27 @@ function extractSessionId(token) {
   }
 }
 
-// 1. 解密 Chrome (Profile 1) Cookies -> 账户: taojiuzhen@gmail.com
-async function getChromeProfile1Cookies() {
-  const dbPath = path.resolve(process.env.HOME, 'Library/Application Support/Google/Chrome/Profile 1/Cookies');
-  if (!fs.existsSync(dbPath)) return null;
+// 1. 解密 Google Chrome Cookies -> 优先 Default，兼容 Profile 目录
+async function getChromeCookies(preferredProfile = null) {
+  const chromeBase = path.resolve(process.env.HOME || '', 'Library/Application Support/Google/Chrome');
+  if (!fs.existsSync(chromeBase)) return null;
+
+  const candidates = [];
+  if (preferredProfile) {
+    candidates.push(path.join(chromeBase, preferredProfile, 'Cookies'));
+  }
+  candidates.push(path.join(chromeBase, 'Default/Cookies'));
+  try {
+    const dirs = fs.readdirSync(chromeBase, { withFileTypes: true });
+    for (const d of dirs) {
+      if (d.isDirectory() && d.name.startsWith('Profile')) {
+        const p = path.join(chromeBase, d.name, 'Cookies');
+        if (!candidates.includes(p)) candidates.push(p);
+      }
+    }
+  } catch {
+    // ignore
+  }
 
   try {
     const secOut = execSync('security find-generic-password -ga Chrome 2>&1').toString();
@@ -71,43 +88,29 @@ async function getChromeProfile1Cookies() {
     const key = crypto.pbkdf2Sync(password, 'saltysalt', 1003, 16, 'sha1');
     const iv = Buffer.alloc(16, ' ');
 
-    const rows = queryCookiesWithPython(dbPath);
-    if (!rows.length) return null;
+    for (const dbPath of candidates) {
+      if (!fs.existsSync(dbPath)) continue;
+      const rows = queryCookiesWithPython(dbPath);
+      if (!rows.length) continue;
 
-    const result = {};
-    for (const [name, hexVal] of rows) {
-      const dec = cleanDecryptedCookie(Buffer.from(hexVal, 'hex'), key, iv);
-      if (dec) result[name] = dec;
+      const result = {};
+      for (const [name, hexVal] of rows) {
+        const dec = cleanDecryptedCookie(Buffer.from(hexVal, 'hex'), key, iv);
+        if (dec) result[name] = dec;
+      }
+      if (result.sso) {
+        return result;
+      }
     }
-    return result;
+    return null;
   } catch (err) {
     console.error('[Chrome] Extraction failed:', err.message);
     return null;
   }
 }
 
-// 2. 解密 Chrome for Testing (message-runtime 常驻进程) -> 账户: taojiuzhenitunes@gmail.com
-async function getChromeForTestingCookies() {
-  const dbPath = path.resolve('/Users/hal9000/Projects/message-runtime/data/playwright-profiles/truthsocial/Default/Cookies');
-  if (!fs.existsSync(dbPath)) return null;
-
-  try {
-    const key = crypto.pbkdf2Sync('mock_password', 'saltysalt', 1003, 16, 'sha1');
-    const iv = Buffer.alloc(16, ' ');
-
-    const rows = queryCookiesWithPython(dbPath);
-    if (!rows.length) return null;
-
-    const result = {};
-    for (const [name, hexVal] of rows) {
-      const dec = cleanDecryptedCookie(Buffer.from(hexVal, 'hex'), key, iv);
-      if (dec) result[name] = dec;
-    }
-    return result;
-  } catch (err) {
-    console.error('[Chrome for Testing] Extraction failed:', err.message);
-    return null;
-  }
+async function getChromeProfile1Cookies() {
+  return getChromeCookies('Profile 1');
 }
 
 function getEgoBrowserCookies() {
@@ -142,14 +145,9 @@ async function main() {
 
   const targets = [
     {
-      source: 'Google Chrome (Profile 1)',
-      email: 'taojiuzhen@gmail.com',
-      fetcher: getChromeProfile1Cookies
-    },
-    {
-      source: 'Chrome for Testing',
+      source: 'Google Chrome',
       email: 'taojiuzhenitunes@gmail.com',
-      fetcher: getChromeForTestingCookies
+      fetcher: getChromeCookies
     },
     {
       source: 'ego-browser',

@@ -1,6 +1,6 @@
 import {
+  getChromeCookies,
   getChromeProfile1Cookies,
-  getChromeForTestingCookies,
   getEgoBrowserCookies
 } from '../src/providers/grok/grok-token-refresher.js';
 
@@ -17,15 +17,27 @@ function extractSessionId(token) {
 }
 
 async function extractAllCookies() {
-  const [chrome1, testing, ego] = await Promise.all([
+  const [chromeCookies, chrome1, ego] = await Promise.all([
+    getChromeCookies().catch(() => null),
     getChromeProfile1Cookies().catch(() => null),
-    getChromeForTestingCookies().catch(() => null),
     getEgoBrowserCookies().catch(() => null),
   ]);
 
   const result = {};
 
-  if (chrome1?.sso) {
+  // Google Chrome (默认 Default profile，包含 taojiuzhenitunes@gmail.com 登录态)
+  if (chromeCookies?.sso) {
+    result['taojiuzhenitunes@gmail.com'] = {
+      email: 'taojiuzhenitunes@gmail.com',
+      sso: chromeCookies.sso,
+      cf_clearance: chromeCookies.cf_clearance || '',
+      session_id: extractSessionId(chromeCookies.sso),
+      source: 'Google Chrome'
+    };
+  }
+
+  // Google Chrome Profile 1 (针对 taojiuzhen@gmail.com，如果与 Default 互斥)
+  if (chrome1?.sso && chrome1.sso !== chromeCookies?.sso) {
     result['taojiuzhen@gmail.com'] = {
       email: 'taojiuzhen@gmail.com',
       sso: chrome1.sso,
@@ -35,16 +47,7 @@ async function extractAllCookies() {
     };
   }
 
-  if (testing?.sso) {
-    result['taojiuzhenitunes@gmail.com'] = {
-      email: 'taojiuzhenitunes@gmail.com',
-      sso: testing.sso,
-      cf_clearance: testing.cf_clearance || '',
-      session_id: extractSessionId(testing.sso),
-      source: 'Chrome for Testing'
-    };
-  }
-
+  // ego-browser (针对 taoxy0305@gmail.com)
   if (ego?.sso) {
     result['taoxy0305@gmail.com'] = {
       email: 'taoxy0305@gmail.com',
