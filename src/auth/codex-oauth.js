@@ -4,11 +4,11 @@ import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
 import open from 'open';
-import axios from 'axios';
+import { UndiciHttpClient } from '../utils/undici-client.js';
 import { broadcastEvent } from '../services/ui-manager.js';
 import { autoLinkProviderConfigs } from '../services/service-manager.js';
 import { CONFIG } from '../core/config-manager.js';
-import { getProxyConfigForProvider } from '../utils/proxy-utils.js';
+import { getUndiciDispatcherForProvider } from '../utils/proxy-utils.js';
 
 /**
  * Codex OAuth 配置
@@ -88,15 +88,12 @@ class CodexAuth {
         this.config = config;
         
         // 配置代理支持
-        const axiosConfig = { timeout: 30000 };
-        const proxyConfig = getProxyConfigForProvider(config, 'openai-codex-oauth');
-        if (proxyConfig) {
-            axiosConfig.httpAgent = proxyConfig.httpAgent;
-            axiosConfig.httpsAgent = proxyConfig.httpsAgent;
+        const dispatcher = getUndiciDispatcherForProvider(config, 'openai-codex-oauth');
+        if (dispatcher) {
             logger.info('[Codex Auth] Proxy enabled for OAuth requests');
         }
         
-        this.httpClient = axios.create(axiosConfig);
+        this.httpClient = new UndiciHttpClient({ dispatcher, timeout: 30000 });
         this.server = null; // 存储服务器实例
     }
 

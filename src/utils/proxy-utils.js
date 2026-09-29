@@ -8,11 +8,15 @@ import logger from './logger.js';
 import requestContext from './context.js';
 import { HttpProxyAgent } from 'http-proxy-agent';
 import { SocksProxyAgent } from 'socks-proxy-agent';
+import { Agent as UndiciAgent, ProxyAgent as UndiciProxyAgent } from 'undici';
 import { getTLSSidecar } from './tls-sidecar.js';
 import { NETWORK } from './constants.js';
 
 // 代理 Agent 缓存，避免重复创建 Agent 导致连接池失效和内存泄漏
 const agentCache = new Map();
+
+// Undici Dispatcher 缓存，复用连接池
+const undiciDispatcherCache = new Map();
 
 // 用于存储全局通配符代理获取器，解决启动初始化时无请求上下文的问题
 let wildcardProxyResolver = null;
@@ -296,3 +300,147 @@ export function getGoogleAuthProxyConfig(config, providerType) {
 
     return null;
 }
+
+/**
+ * 获取指定提供商适用的 Undici Dispatcher
+ * 完整支持 HTTP、HTTPS 和 SOCKS5/SOCKS5h 代理
+ * @param {Object} config - 应用配置对象
+ * @param {string} providerType - 提供商类型
+ * @returns {UndiciProxyAgent|UndiciAgent|null}
+/**
+ * 根据代理 URL 获取或创建 Undici Dispatcher
+ * @param {string} proxyUrl - 代理 URL (http, https, socks5, socks5h)
+ * @param {string} [sourceDisplay] - 来源描述（用于日志）
+ * @returns {any|null} Undici Dispatcher
+ */
+export function getUndiciDispatcherForUrl(proxyUrl, sourceDisplay = '') {
+    const cleanUrl = (proxyUrl || '').trim();
+    if (!cleanUrl) return null;
+
+    if (undiciDispatcherCache.has(cleanUrl)) {
+        return undiciDispatcherCache.get(cleanUrl);
+    }
+
+    try {
+        const url = new URL(cleanUrl);
+        const protocol = url.protocol.toLowerCase();
+
+        let dispatcher = null;
+        if (protocol === 'http:' || protocol === 'https:') {
+            // HTTP/HTTPS 代理：直接使用 Undici 原生 ProxyAgent
+            dispatcher = new UndiciProxyAgent({
+                uri: cleanUrl,
+                keepAliveTimeout: 30000,
+                keepAliveMaxTimeout: 60000,
+                maxRedirections: 3,
+            });
+        } else if (protocol.startsWith('socks')) {
+            // SOCKS 代理：通过 socks-proxy-agent 建立 TCP 隧道并桥接给 Undici Agent
+            const effectiveSocksUrl = cleanUrl.replace(/^socks5:\/\//i, 'socks5h://');
+            const socksAgent = new SocksProxyAgent(effectiveSocksUrl);
+            dispatcher = new UndiciAgent({
+                connect: (opts, cb) => {
+                    const target = {
+                        host: opts.hostname || opts.host,
+                        port: Number(opts.port),
+                        servername: opts.servername || opts.hostname || opts.host,
+                    };
+                    socksAgent.createConnection(target, cb);
+                },
+                keepAliveTimeout: 30000,
+                keepAliveMaxTimeout: 60000,
+            });
+        } else {
+            logger.warn(`[Proxy] Unsupported proxy protocol for Undici: ${protocol}`);
+            return null;
+        }
+
+        if (dispatcher) {
+            undiciDispatcherCache.set(cleanUrl, dispatcher);
+            const source = sourceDisplay ? ` for ${sourceDisplay}` : '';
+            logger.info(`[Proxy] Created Undici Dispatcher${source}: ${cleanUrl}`);
+        }
+        return dispatcher;
+    } catch (e) {
+        logger.error(`[Proxy] Failed to create Undici Dispatcher for ${cleanUrl}:`, e.message);
+        return null;
+    }
+}
+
+/**
+ * 根据提供商配置获取 Undici Dispatcher
+ * @param {Object} config - 应用配置对象
+ * @param {string} providerType - 提供商类型
+ * @returns {any|null} Undici Dispatcher
+ */
+export function getUndiciDispatcherForProvider(config, providerType) {
+    if (!isProxyEnabledForProvider(config, providerType)) {
+        return null;
+    }
+
+    const boundProxyUrl = getNodeProxyUrlFromBinding(config, providerType);
+    const proxyUrl = (boundProxyUrl || config.PROXY_URL || '').trim();
+    if (!proxyUrl) return null;
+
+    const nodeName = config?.customName || config?.uuid;
+    const nodeDisplay = nodeName ? `${providerType}/${nodeName}` : providerType;
+    const contextIpNodeProxy = requestContext.get('ipNodeProxy');
+    const clientIp = contextIpNodeProxy?.clientIp || config.ipNodeProxy?.clientIp || 'unknown';
+    const source = boundProxyUrl ? `${nodeDisplay} (IP binding ${clientIp})` : nodeDisplay;
+
+    return getUndiciDispatcherForUrl(proxyUrl, source);
+}
+
+/**
+ * 为 Undici 请求配置代理 Dispatcher
+ * @param {Object} requestOptions - 请求选项对象
+ * @param {Object} config - 应用配置对象
+ * @param {string} providerType - 提供商类型
+ * @returns {Object} 更新后的 requestOptions
+ */
+export function configureUndiciProxy(requestOptions, config, providerType) {
+    const dispatcher = getUndiciDispatcherForProvider(config, providerType);
+    if (dispatcher) {
+        requestOptions.dispatcher = dispatcher;
+    }
+    return requestOptions;
+}
+
+/**
+ * 为 Undici 请求配置 TLS Sidecar 或外部代理
+ * @param {Object} requestOptions - 请求选项对象
+ * @param {Object} config - 应用配置对象
+ * @param {string} providerType - 提供商类型
+ * @param {string} [defaultBaseUrl] - 默认基础 URL（用于解析相对路径）
+ * @returns {Object} 更新后的 requestOptions
+ */
+export function configureUndiciTLSSidecar(requestOptions, config, providerType, defaultBaseUrl = null) {
+    const sidecar = getTLSSidecar();
+    if (sidecar.isReady() && isTLSSidecarEnabledForProvider(config, providerType)) {
+        const boundProxyUrl = getNodeProxyUrlFromBinding(config, providerType);
+        const proxyUrl = boundProxyUrl || config.TLS_SIDECAR_PROXY_URL || config.PROXY_URL || null;
+
+        // 处理相对路径
+        if (requestOptions.url && !/^https?:\/\//i.test(requestOptions.url)) {
+            const baseUrl = (requestOptions.baseURL || defaultBaseUrl || '').replace(/\/$/, '');
+            if (baseUrl) {
+                const path = requestOptions.url.startsWith('/') ? requestOptions.url : '/' + requestOptions.url;
+                requestOptions.url = baseUrl + path;
+            }
+        }
+
+        const nodeName = config?.customName || config?.uuid;
+        const nodeDisplay = nodeName ? `${providerType}/${nodeName}` : providerType;
+        const contextIpNodeProxy = requestContext.get('ipNodeProxy');
+        const clientIp = contextIpNodeProxy?.clientIp || config.ipNodeProxy?.clientIp || 'unknown';
+        const source = boundProxyUrl ? `${nodeDisplay} (IP binding ${clientIp})` : nodeDisplay;
+        logger.info(`[TLS Sidecar] Using sidecar (Undici) for ${source}${proxyUrl ? ` (proxy: ${proxyUrl})` : ''}`);
+
+        sidecar.wrapUndiciRequest(requestOptions, proxyUrl);
+    } else {
+        // 未启用 TLS Sidecar，配置常规代理
+        configureUndiciProxy(requestOptions, config, providerType);
+    }
+    return requestOptions;
+}
+

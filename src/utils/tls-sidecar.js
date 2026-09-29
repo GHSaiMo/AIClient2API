@@ -13,6 +13,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import logger from './logger.js';
 import http from 'http';
+import { UndiciHttpClient } from './undici-client.js';
 
 const currentFilePath = fileURLToPath(import.meta.url);
 const currentDir = path.dirname(currentFilePath);
@@ -202,6 +203,37 @@ class TLSSidecar {
         axiosConfig.proxy = false;
 
         return axiosConfig;
+    }
+
+    /**
+     * 为 UndiciHttpClient 配置 sidecar 代理
+     * 将目标 URL 改为 sidecar 地址，原始目标通过 header 传递
+     * 
+     * @param {Object} requestOptions - undici 请求选项对象
+     * @param {string} [proxyUrl] - 上游代理 URL（可选）
+     * @returns {Object} 修改后的 requestOptions
+     */
+    wrapUndiciRequest(requestOptions, proxyUrl) {
+        if (!this.isReady()) {
+            return requestOptions; // sidecar 不可用，原样返回
+        }
+
+        const targetUrl = requestOptions.url;
+
+        // 将请求指向 sidecar
+        requestOptions.url = this.baseUrl;
+
+        // 通过 header 传递目标和代理信息
+        requestOptions.headers = requestOptions.headers || {};
+        requestOptions.headers['X-Target-Url'] = targetUrl;
+        if (proxyUrl) {
+            requestOptions.headers['X-Proxy-Url'] = proxyUrl;
+        }
+
+        // 走本地 Sidecar，严格使用本地专用 Dispatcher，严禁使用外部代理
+        requestOptions.dispatcher = UndiciHttpClient.getLocalDispatcher();
+
+        return requestOptions;
     }
 
     // ──── 内部方法 ────

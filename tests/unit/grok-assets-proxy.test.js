@@ -1,9 +1,8 @@
 import { describe, it, expect, jest, beforeEach } from '@jest/globals';
-import axios from 'axios';
 import { EventEmitter } from 'events';
 import { handleGrokAssetsProxy } from '../../src/utils/grok-assets-proxy.js';
+import { UndiciHttpClient } from '../../src/utils/undici-client.js';
 
-jest.mock('axios');
 jest.mock('../../src/utils/logger.js', () => ({
     __esModule: true,
     default: {
@@ -15,8 +14,10 @@ jest.mock('../../src/utils/logger.js', () => ({
 }));
 jest.mock('../../src/utils/proxy-utils.js', () => ({
     __esModule: true,
-    configureAxiosProxy: jest.fn(cfg => cfg)
+    configureUndiciProxy: jest.fn(cfg => cfg)
 }));
+
+const mockRequest = jest.spyOn(UndiciHttpClient.prototype, 'request');
 
 describe('handleGrokAssetsProxy timeout and retry tests', () => {
     beforeEach(() => {
@@ -27,7 +28,7 @@ describe('handleGrokAssetsProxy timeout and retry tests', () => {
         const streamMock = new EventEmitter();
         streamMock.pipe = jest.fn();
 
-        axios.mockResolvedValueOnce({
+        mockRequest.mockResolvedValueOnce({
             status: 200,
             headers: { 'content-type': 'image/jpeg' },
             data: streamMock
@@ -50,8 +51,8 @@ describe('handleGrokAssetsProxy timeout and retry tests', () => {
 
         await handleGrokAssetsProxy(req, res, config, mockProviderPool);
 
-        expect(axios).toHaveBeenCalledTimes(1);
-        expect(axios.mock.calls[0][0].timeout).toBe(60000);
+        expect(mockRequest).toHaveBeenCalledTimes(1);
+        expect(mockRequest.mock.calls[0][0].timeout).toBe(60000);
         expect(res.writeHead).toHaveBeenCalledWith(200, expect.objectContaining({
             'Content-Type': 'image/jpeg'
         }));
@@ -61,7 +62,7 @@ describe('handleGrokAssetsProxy timeout and retry tests', () => {
         const streamMock = new EventEmitter();
         streamMock.pipe = jest.fn();
 
-        axios.mockResolvedValueOnce({
+        mockRequest.mockResolvedValueOnce({
             status: 200,
             headers: { 'content-type': 'image/jpeg' },
             data: streamMock
@@ -84,8 +85,8 @@ describe('handleGrokAssetsProxy timeout and retry tests', () => {
 
         await handleGrokAssetsProxy(req, res, config, mockProviderPool);
 
-        expect(axios).toHaveBeenCalledTimes(1);
-        expect(axios.mock.calls[0][0].timeout).toBe(90000);
+        expect(mockRequest).toHaveBeenCalledTimes(1);
+        expect(mockRequest.mock.calls[0][0].timeout).toBe(90000);
     });
 
     it('should retry on timeout error (ECONNABORTED / timeout of ... exceeded) and succeed on subsequent attempt', async () => {
@@ -95,7 +96,7 @@ describe('handleGrokAssetsProxy timeout and retry tests', () => {
         const streamMock = new EventEmitter();
         streamMock.pipe = jest.fn();
 
-        axios
+        mockRequest
             .mockRejectedValueOnce(timeoutError)
             .mockResolvedValueOnce({
                 status: 200,
@@ -120,7 +121,7 @@ describe('handleGrokAssetsProxy timeout and retry tests', () => {
 
         await handleGrokAssetsProxy(req, res, config, mockProviderPool);
 
-        expect(axios).toHaveBeenCalledTimes(2);
+        expect(mockRequest).toHaveBeenCalledTimes(2);
         expect(res.writeHead).toHaveBeenCalledWith(200, expect.objectContaining({
             'Content-Type': 'image/jpeg'
         }));
@@ -130,7 +131,7 @@ describe('handleGrokAssetsProxy timeout and retry tests', () => {
         const streamMock = new EventEmitter();
         streamMock.pipe = jest.fn();
 
-        axios
+        mockRequest
             .mockResolvedValueOnce({
                 status: 503,
                 headers: {},
@@ -159,14 +160,14 @@ describe('handleGrokAssetsProxy timeout and retry tests', () => {
 
         await handleGrokAssetsProxy(req, res, config, mockProviderPool);
 
-        expect(axios).toHaveBeenCalledTimes(2);
+        expect(mockRequest).toHaveBeenCalledTimes(2);
         expect(res.writeHead).toHaveBeenCalledWith(200, expect.objectContaining({
             'Content-Type': 'image/jpeg'
         }));
     });
 
     it('should handle HEAD request properly without piping response body', async () => {
-        axios.mockResolvedValueOnce({
+        mockRequest.mockResolvedValueOnce({
             status: 200,
             headers: { 'content-type': 'image/jpeg', 'content-length': '12345' },
             data: null
@@ -190,8 +191,8 @@ describe('handleGrokAssetsProxy timeout and retry tests', () => {
 
         await handleGrokAssetsProxy(req, res, config, mockProviderPool);
 
-        expect(axios).toHaveBeenCalledTimes(1);
-        expect(axios.mock.calls[0][0].method).toBe('head');
+        expect(mockRequest).toHaveBeenCalledTimes(1);
+        expect(mockRequest.mock.calls[0][0].method.toUpperCase()).toBe('HEAD');
         expect(res.writeHead).toHaveBeenCalledWith(200, expect.objectContaining({
             'Content-Type': 'image/jpeg',
             'Content-Length': '12345'
@@ -217,7 +218,7 @@ describe('handleGrokAssetsProxy timeout and retry tests', () => {
 
         await handleGrokAssetsProxy(req, res, config, mockProviderPool);
 
-        expect(axios).not.toHaveBeenCalled();
+        expect(mockRequest).not.toHaveBeenCalled();
         expect(res.writeHead).toHaveBeenCalledWith(403, expect.objectContaining({
             'Content-Type': 'application/json'
         }));

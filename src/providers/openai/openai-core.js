@@ -1,8 +1,6 @@
-import axios from 'axios';
+import { UndiciHttpClient } from '../../utils/undici-client.js';
 import logger from '../../utils/logger.js';
-import * as http from 'http';
-import * as https from 'https';
-import { configureAxiosProxy, configureTLSSidecar, isTLSSidecarEnabledForProvider } from '../../utils/proxy-utils.js';
+import { configureUndiciTLSSidecar } from '../../utils/proxy-utils.js';
 import { isRetryableNetworkError, MODEL_PROVIDER, getRetryAfterMs } from '../../utils/common.js';
 
 // Assumed OpenAI API specification service for interacting with third-party models
@@ -17,19 +15,21 @@ export class OpenAIApiService {
         this.useSystemProxy = config?.USE_SYSTEM_PROXY_OPENAI ?? false;
         logger.info(`[OpenAI] System proxy ${this.useSystemProxy ? 'enabled' : 'disabled'}`);
 
-        const axiosConfig = {
+        this.client = new UndiciHttpClient({
             baseURL: this.baseUrl,
             headers: {
-                'Content-Type': 'application/json',
                 'Authorization': `Bearer ${this.apiKey}`
             },
-        };
-        
-        this.axiosInstance = axios.create(axiosConfig);
+        });
     }
 
-    _applySidecar(axiosConfig) {
-        return configureTLSSidecar(axiosConfig, this.config, this.config.MODEL_PROVIDER || MODEL_PROVIDER.OPENAI_CUSTOM, this.baseUrl);
+    _applySidecar(requestOptions) {
+        return configureUndiciTLSSidecar(
+            requestOptions,
+            this.config,
+            this.config.MODEL_PROVIDER || MODEL_PROVIDER.OPENAI_CUSTOM,
+            this.baseUrl
+        );
     }
 
     async callApi(endpoint, body, isRetry = false, retryCount = 0) {
@@ -37,13 +37,13 @@ export class OpenAIApiService {
         const baseDelay = this.config.REQUEST_BASE_DELAY || 1000;  // 1 second base delay
 
         try {
-            const axiosConfig = {
-                method: 'post',
+            const reqOptions = {
+                method: 'POST',
                 url: endpoint,
                 data: body
             };
-            this._applySidecar(axiosConfig);
-            const response = await this.axiosInstance.request(axiosConfig);
+            this._applySidecar(reqOptions);
+            const response = await this.client.request(reqOptions);
             return response.data;
         } catch (error) {
             const status = error.response?.status;
@@ -104,38 +104,30 @@ export class OpenAIApiService {
         const streamRequestBody = { ...body, stream: true };
 
         try {
-            const axiosConfig = {
-                method: 'post',
+            const reqOptions = {
+                method: 'POST',
                 url: endpoint,
                 data: streamRequestBody,
-                responseType: 'stream'
+                headers: {
+                    'Accept': 'text/event-stream'
+                }
             };
-            this._applySidecar(axiosConfig);
-            const response = await this.axiosInstance.request(axiosConfig);
+            this._applySidecar(reqOptions);
 
-            const stream = response.data;
-            let buffer = '';
+            for await (const line of this.client.stream(reqOptions.url, reqOptions.data, reqOptions)) {
+                const trimmedLine = line.trim();
+                if (!trimmedLine) continue;
 
-            for await (const chunk of stream) {
-                buffer += chunk.toString();
-                let newlineIndex;
-                while ((newlineIndex = buffer.indexOf('\n')) !== -1) {
-                    const line = buffer.substring(0, newlineIndex).trim();
-                    buffer = buffer.substring(newlineIndex + 1);
-
-                    if (line.startsWith('data: ')) {
-                        const jsonData = line.substring(6).trim();
-                        if (jsonData === '[DONE]') {
-                            return; // Stream finished
-                        }
-                        try {
-                            const parsedChunk = JSON.parse(jsonData);
-                            yield parsedChunk;
-                        } catch (e) {
-                            logger.warn("[OpenAIApiService] Failed to parse stream chunk JSON:", e.message, "Data:", jsonData);
-                        }
-                    } else if (line === '') {
-                        // Empty line, end of an event
+                if (trimmedLine.startsWith('data: ')) {
+                    const jsonData = trimmedLine.substring(6).trim();
+                    if (jsonData === '[DONE]') {
+                        return; // Stream finished
+                    }
+                    try {
+                        const parsedChunk = JSON.parse(jsonData);
+                        yield parsedChunk;
+                    } catch (e) {
+                        logger.warn("[OpenAIApiService] Failed to parse stream chunk JSON:", e.message, "Data:", jsonData);
                     }
                 }
             }
@@ -221,7 +213,12 @@ export class OpenAIApiService {
 
     async listModels() {
         try {
-            const response = await this.axiosInstance.get('/models');
+            const reqOptions = {
+                method: 'GET',
+                url: '/models'
+            };
+            this._applySidecar(reqOptions);
+            const response = await this.client.request(reqOptions);
             return response.data;
         } catch (error) {
             const status = error.response?.status;
@@ -231,4 +228,3 @@ export class OpenAIApiService {
         }
     }
 }
-

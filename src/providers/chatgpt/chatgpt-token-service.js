@@ -1,11 +1,19 @@
-import axios from 'axios';
+import { UndiciHttpClient } from '../../utils/undici-client.js';
 import logger from '../../utils/logger.js';
-import { parseProxyUrl } from '../../utils/proxy-utils.js';
+import { getUndiciDispatcherForUrl } from '../../utils/proxy-utils.js';
 import { getChatGPTRunnerManager } from './chatgpt-runner-manager.js';
 
 const OAUTH_TOKEN_URL = 'https://auth.openai.com/oauth/token';
 const OAUTH_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann';
 const DEFAULT_USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36';
+
+let localClientInstance = null;
+function getLocalClient() {
+    if (!localClientInstance) {
+        localClientInstance = new UndiciHttpClient({ dispatcher: UndiciHttpClient.getLocalDispatcher() });
+    }
+    return localClientInstance;
+}
 
 /**
  * 解码 JWT Payload
@@ -56,7 +64,8 @@ export async function refreshAccessToken(refreshToken, proxyUrl = null) {
         const runner = getChatGPTRunnerManager();
         const isReady = await runner.ensureReady();
         if (isReady) {
-            const res = await axios.post(`${runner.baseUrl}/refresh-token`, {
+            const localClient = getLocalClient();
+            const res = await localClient.post(`${runner.baseUrl}/refresh-token`, {
                 refresh_token: refreshToken,
                 proxy_url: proxyUrl
             }, { timeout: 30000 });
@@ -68,23 +77,8 @@ export async function refreshAccessToken(refreshToken, proxyUrl = null) {
         logger.warn(`[ChatGPT Token Service] Runner refresh failed, falling back to direct OAuth: ${e.message}`);
     }
 
-    const axiosConfig = {
-        headers: {
-            'Content-Type': 'application/json',
-            'User-Agent': DEFAULT_USER_AGENT,
-            'Accept': 'application/json'
-        },
-        timeout: 30000
-    };
-
-    if (proxyUrl) {
-        const proxyConfig = parseProxyUrl(proxyUrl);
-        if (proxyConfig) {
-            axiosConfig.httpAgent = proxyConfig.httpAgent;
-            axiosConfig.httpsAgent = proxyConfig.httpsAgent;
-            axiosConfig.proxy = false;
-        }
-    }
+    const dispatcher = proxyUrl ? getUndiciDispatcherForUrl(proxyUrl, 'ChatGPT-Token-Service') : null;
+    const client = new UndiciHttpClient({ dispatcher });
 
     const payload = {
         grant_type: 'refresh_token',
@@ -93,7 +87,14 @@ export async function refreshAccessToken(refreshToken, proxyUrl = null) {
     };
 
     logger.info('[ChatGPT Token Service] Refreshing access token via OAuth endpoint...');
-    const response = await axios.post(OAUTH_TOKEN_URL, payload, axiosConfig);
+    const response = await client.post(OAUTH_TOKEN_URL, payload, {
+        headers: {
+            'Content-Type': 'application/json',
+            'User-Agent': DEFAULT_USER_AGENT,
+            'Accept': 'application/json'
+        },
+        timeout: 30000
+    });
     const data = response.data || {};
 
     if (!data.access_token) {
@@ -145,7 +146,8 @@ export async function fetchUserInfo(accessToken, proxyUrl = null, fp = {}) {
         throw new Error('ChatGPT-Web Python runner engine is not ready');
     }
 
-    const res = await axios.post(`${runner.baseUrl}/user-info`, {
+    const localClient = getLocalClient();
+    const res = await localClient.post(`${runner.baseUrl}/user-info`, {
         access_token: accessToken,
         proxy_url: proxyUrl
     }, { timeout: 30000 });

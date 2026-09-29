@@ -59,63 +59,50 @@ const activeKiroPollingTasks = new Map();
 
 /**
  * 创建带代理支持的 fetch 请求
- * 使用 axios 替代原生 fetch，以正确支持代理配置
+ * 使用 UndiciHttpClient 替代原生 fetch，以正确支持代理配置
  * @param {string} url - 请求 URL
  * @param {Object} options - fetch 选项（兼容 fetch API 格式）
  * @param {string} providerType - 提供商类型，用于获取代理配置
  * @returns {Promise<Object>} 返回类似 fetch Response 的对象
  */
 async function fetchWithProxy(url, options = {}, providerType) {
-    const proxyConfig = getProxyConfigForProvider(CONFIG, providerType);
+    const { UndiciHttpClient } = await import('../utils/undici-client.js');
+    const { getUndiciDispatcherForProvider } = await import('../utils/proxy-utils.js');
 
-    // 构建 axios 配置
-    const axiosConfig = {
+    const dispatcher = getUndiciDispatcherForProvider(CONFIG, providerType);
+    const client = new UndiciHttpClient({ dispatcher });
+
+    const reqOptions = {
         url,
         method: options.method || 'GET',
         headers: options.headers || {},
-        timeout: 30000, // 30 秒超时
+        data: options.body,
+        timeout: 30000,
+        validateStatus: () => true
     };
 
-    // 处理请求体
-    if (options.body) {
-        axiosConfig.data = options.body;
-    }
-
-    // 配置代理
-    if (proxyConfig) {
-        axiosConfig.httpAgent = proxyConfig.httpAgent;
-        axiosConfig.httpsAgent = proxyConfig.httpsAgent;
-        axiosConfig.proxy = false; // 禁用 axios 内置代理，使用我们的 agent
-        logger.info(`[OAuth] Using proxy for ${providerType}: ${CONFIG.PROXY_URL}`);
-    }
-
     try {
-        const axios = (await import('axios')).default;
-        const response = await axios(axiosConfig);
-        
-        // 返回类似 fetch Response 的对象
+        const response = await client.request(reqOptions);
+
         return {
             ok: response.status >= 200 && response.status < 300,
             status: response.status,
             statusText: response.statusText,
             headers: response.headers,
-            json: async () => response.data,
+            json: async () => typeof response.data === 'string' ? JSON.parse(response.data) : response.data,
             text: async () => typeof response.data === 'string' ? response.data : JSON.stringify(response.data),
         };
     } catch (error) {
-        // 处理 axios 错误，转换为类似 fetch 的响应格式
         if (error.response) {
-            // 服务器返回了错误状态码
             return {
                 ok: false,
                 status: error.response.status,
                 statusText: error.response.statusText,
                 headers: error.response.headers,
-                json: async () => error.response.data,
+                json: async () => typeof error.response.data === 'string' ? JSON.parse(error.response.data) : error.response.data,
                 text: async () => typeof error.response.data === 'string' ? error.response.data : JSON.stringify(error.response.data),
             };
         }
-        // 网络错误或其他错误
         throw error;
     }
 }

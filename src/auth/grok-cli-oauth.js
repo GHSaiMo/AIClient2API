@@ -3,11 +3,11 @@ import logger from '../utils/logger.js';
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
-import axios from 'axios';
+import { UndiciHttpClient } from '../utils/undici-client.js';
 import { broadcastEvent } from '../services/ui-manager.js';
 import { autoLinkProviderConfigs } from '../services/service-manager.js';
 import { CONFIG } from '../core/config-manager.js';
-import { getProxyConfigForProvider } from '../utils/proxy-utils.js';
+import { getUndiciDispatcherForProvider } from '../utils/proxy-utils.js';
 
 const GROK_CLI_PROVIDER = 'grok-cli-oauth';
 
@@ -158,16 +158,12 @@ function validateOAuthEndpoint(rawUrl, field) {
 class GrokCliAuth {
     constructor(config) {
         this.config = config;
-        const axiosConfig = { timeout: 30000 };
-        const proxyConfig = getProxyConfigForProvider(config, GROK_CLI_PROVIDER);
-        if (proxyConfig) {
-            axiosConfig.httpAgent = proxyConfig.httpAgent;
-            axiosConfig.httpsAgent = proxyConfig.httpsAgent;
-            axiosConfig.proxy = false;
+        const dispatcher = getUndiciDispatcherForProvider(config, GROK_CLI_PROVIDER);
+        if (dispatcher) {
             logger.info(`${GROK_CLI_OAUTH_CONFIG.logPrefix} Proxy enabled for OAuth requests`);
         }
 
-        this.httpClient = axios.create(axiosConfig);
+        this.httpClient = new UndiciHttpClient({ dispatcher, timeout: 30000 });
         this.server = null;
         this.discovery = null;
     }
