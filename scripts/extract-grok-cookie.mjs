@@ -1,6 +1,6 @@
 import {
+  getChromeCookies,
   getChromeProfile1Cookies,
-  getChromeForTestingCookies,
   getEgoBrowserCookies
 } from '../src/providers/grok/grok-token-refresher.js';
 
@@ -17,15 +17,27 @@ function extractSessionId(token) {
 }
 
 async function extractAllCookies() {
-  const [chrome1, testing, ego] = await Promise.all([
+  const [chromeCookies, chrome1, ego] = await Promise.all([
+    getChromeCookies().catch(() => null),
     getChromeProfile1Cookies().catch(() => null),
-    getChromeForTestingCookies().catch(() => null),
     getEgoBrowserCookies().catch(() => null),
   ]);
 
   const result = {};
 
-  if (chrome1?.sso) {
+  // Google Chrome (默认 Default profile，包含 acct-935ea9@example.com 登录态)
+  if (chromeCookies?.sso) {
+    result['acct-935ea9@example.com'] = {
+      email: 'acct-935ea9@example.com',
+      sso: chromeCookies.sso,
+      cf_clearance: chromeCookies.cf_clearance || '',
+      session_id: extractSessionId(chromeCookies.sso),
+      source: 'Google Chrome'
+    };
+  }
+
+  // Google Chrome Profile 1 (针对 acct-be1f04@example.com，如果与 Default 互斥)
+  if (chrome1?.sso && chrome1.sso !== chromeCookies?.sso) {
     result['acct-be1f04@example.com'] = {
       email: 'acct-be1f04@example.com',
       sso: chrome1.sso,
@@ -35,16 +47,7 @@ async function extractAllCookies() {
     };
   }
 
-  if (testing?.sso) {
-    result['acct-935ea9@example.com'] = {
-      email: 'acct-935ea9@example.com',
-      sso: testing.sso,
-      cf_clearance: testing.cf_clearance || '',
-      session_id: extractSessionId(testing.sso),
-      source: 'Chrome for Testing'
-    };
-  }
-
+  // ego-browser (针对 acct-554d5c@example.com)
   if (ego?.sso) {
     result['acct-554d5c@example.com'] = {
       email: 'acct-554d5c@example.com',
