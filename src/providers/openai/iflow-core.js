@@ -17,15 +17,13 @@
  */
 
 import { atomicWriteFile } from '../../utils/file-lock.js';
-import axios from 'axios';
+import { UndiciHttpClient } from '../../utils/undici-client.js';
 import logger from '../../utils/logger.js';
-import * as http from 'http';
-import * as https from 'https';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import * as crypto from 'crypto';
-import { configureAxiosProxy } from '../../utils/proxy-utils.js';
+import { configureUndiciProxy } from '../../utils/proxy-utils.js';
 import { isRetryableNetworkError, MODEL_PROVIDER, formatExpiryLog, getRetryAfterMs } from '../../utils/common.js';
 import { getProviderPoolManager } from '../../services/service-manager.js';
 import { getProviderModels } from '../provider-models.js';
@@ -148,10 +146,10 @@ async function saveTokenToFile(filePath, tokenStorage, uuid = null) {
 /**
  * 使用 refresh_token 刷新 OAuth Token
  * @param {string} refreshToken - 刷新令牌
- * @param {Object} axiosInstance - axios 实例（可选，用于代理配置）
+ * @param {Object} httpClient - HTTP 客户端实例（可选，用于代理配置）
  * @returns {Promise<Object>} - 新的 Token 数据
  */
-async function refreshOAuthTokens(refreshToken, axiosInstance = null) {
+async function refreshOAuthTokens(refreshToken, httpClient = null) {
     if (!refreshToken || refreshToken.trim() === '') {
         throw new Error('[iFlow] refresh_token is empty');
     }
@@ -181,9 +179,8 @@ async function refreshOAuthTokens(refreshToken, axiosInstance = null) {
     };
     
     try {
-        const response = axiosInstance
-            ? await axiosInstance.request(requestConfig)
-            : await axios.request(requestConfig);
+        const client = httpClient instanceof UndiciHttpClient ? httpClient : new UndiciHttpClient();
+        const response = await client.request(requestConfig);
         
         const tokenResp = response.data;
         
@@ -208,7 +205,7 @@ async function refreshOAuthTokens(refreshToken, axiosInstance = null) {
         logger.info('[iFlow] OAuth tokens refreshed successfully');
         
         // 获取用户信息以获取 API Key
-        const userInfo = await fetchUserInfo(tokenData.accessToken, axiosInstance);
+        const userInfo = await fetchUserInfo(tokenData.accessToken, client);
         if (userInfo && userInfo.apiKey) {
             tokenData.apiKey = userInfo.apiKey;
             tokenData.email = userInfo.email || userInfo.phone || '';
@@ -226,10 +223,10 @@ async function refreshOAuthTokens(refreshToken, axiosInstance = null) {
 /**
  * 获取用户信息（包含 API Key）
  * @param {string} accessToken - 访问令牌
- * @param {Object} axiosInstance - axios 实例（可选）
+ * @param {Object} httpClient - HTTP 客户端实例（可选）
  * @returns {Promise<Object>} - 用户信息
  */
-async function fetchUserInfo(accessToken, axiosInstance = null) {
+async function fetchUserInfo(accessToken, httpClient = null) {
     if (!accessToken || accessToken.trim() === '') {
         throw new Error('[iFlow] access_token is empty');
     }
@@ -246,9 +243,8 @@ async function fetchUserInfo(accessToken, axiosInstance = null) {
     };
     
     try {
-        const response = axiosInstance
-            ? await axiosInstance.request(requestConfig)
-            : await axios.request(requestConfig);
+        const client = httpClient instanceof UndiciHttpClient ? httpClient : new UndiciHttpClient();
+        const response = await client.request(requestConfig);
         
         const result = response.data;
         // logger.info('[iFlow] User info response:', JSON.stringify(result));
@@ -485,34 +481,21 @@ export class IFlowApiService {
         this.isInitialized = false;
         this.tokenStorage = null;
 
-        // 配置 HTTP/HTTPS agent
-        const httpAgent = new http.Agent({
-            keepAlive: true,
-            maxSockets: 100,
-            maxFreeSockets: 5,
-            timeout: 120000,
-        });
-        const httpsAgent = new https.Agent({
-            keepAlive: true,
-            maxSockets: 100,
-            maxFreeSockets: 5,
-            timeout: 120000,
-        });
-
-        const axiosConfig = {
-            baseURL: this.baseUrl,
-            httpAgent,
-            httpsAgent,
-            headers: {
-                'Content-Type': 'application/json',
-                'User-Agent': IFLOW_USER_AGENT,
-            },
+        const headers = {
+            'Content-Type': 'application/json',
+            'User-Agent': IFLOW_USER_AGENT,
         };
+        if (this.apiKey) {
+            headers['Authorization'] = `Bearer ${this.apiKey}`;
+        }
+
+        this.client = new UndiciHttpClient({
+            baseURL: this.baseUrl,
+            headers,
+        });
 
         // 配置自定义代理
-        configureAxiosProxy(axiosConfig, config, 'openai-iflow');
-
-        this.axiosInstance = axios.create(axiosConfig);
+        configureUndiciProxy(this.client, config, 'openai-iflow');
     }
 
     /**
@@ -539,8 +522,8 @@ export class IFlowApiService {
             this.tokenStorage = await loadTokenFromFile(this.tokenFilePath);
             if (this.tokenStorage && this.tokenStorage.apiKey) {
                 this.apiKey = this.tokenStorage.apiKey;
-                // 更新 axios 实例的 Authorization header
-                this.axiosInstance.defaults.headers['Authorization'] = `Bearer ${this.apiKey}`;
+                // 更新 client 的 Authorization header
+                this.client.defaultHeaders['Authorization'] = `Bearer ${this.apiKey}`;
                 logger.info('[iFlow Auth] Credentials loaded successfully from file');
             }
         } catch (error) {
@@ -644,7 +627,7 @@ export class IFlowApiService {
         
         // 调用刷新函数
         const oldRefreshToken = this.tokenStorage.refreshToken;
-        const tokenData = await refreshOAuthTokens(oldRefreshToken, this.axiosInstance);
+        const tokenData = await refreshOAuthTokens(oldRefreshToken, this.client);
         
         // 更新 tokenStorage - 必须更新 refreshToken，因为 OAuth 服务器可能返回新的 refresh_token
         this.tokenStorage.accessToken = tokenData.accessToken;
@@ -666,8 +649,8 @@ export class IFlowApiService {
             this.tokenStorage.email = tokenData.email;
         }
         
-        // 更新 axios 实例的 Authorization header
-        this.axiosInstance.defaults.headers['Authorization'] = `Bearer ${this.apiKey}`;
+        // 更新 client 的 Authorization header
+        this.client.defaultHeaders['Authorization'] = `Bearer ${this.apiKey}`;
         
         // 保存到文件
         await saveTokenToFile(this.tokenFilePath, this.tokenStorage, this.uuid);
@@ -804,7 +787,7 @@ export class IFlowApiService {
         const processedBody = preprocessRequestBody(body, model, this.config);
 
         try {
-            const response = await this.axiosInstance.post(endpoint, processedBody, {
+            const response = await this.client.post(endpoint, processedBody, {
                 headers: this._getHeaders(false)
             });
             return response.data;
@@ -894,68 +877,14 @@ export class IFlowApiService {
         const processedBody = preprocessRequestBody({ ...body, stream: true }, model, this.config);
 
         try {
-            const response = await this.axiosInstance.post(endpoint, processedBody, {
-                responseType: 'stream',
+            for await (const line of this.client.stream(endpoint, processedBody, {
                 headers: this._getHeaders(true)
-            });
-
-            const stream = response.data;
-            let buffer = '';
-
-            for await (const chunk of stream) {
-                // 将 chunk 转换为字符串并追加到缓冲区
-                buffer += chunk.toString();
-                
-                // 逐行处理
-                let newlineIndex;
-                while ((newlineIndex = buffer.indexOf('\n')) !== -1) {
-                    // 提取一行（不包含换行符）
-                    const line = buffer.substring(0, newlineIndex);
-                    buffer = buffer.substring(newlineIndex + 1);
-                    
-                    // 去除行首尾空白（处理 \r\n 情况）
-                    const trimmedLine = line.trim();
-                    
-                    // 跳过空行（SSE 格式中的分隔符）
-                    if (trimmedLine === '') {
-                        continue;
-                    }
-
-                    // 处理 SSE data: 前缀
-                    if (trimmedLine.startsWith('data:')) {
-                        // 提取 data: 后的内容（注意：data: 后可能有空格也可能没有）
-                        let jsonData = trimmedLine.substring(5);
-                        // 去除前导空格
-                        if (jsonData.startsWith(' ')) {
-                            jsonData = jsonData.substring(1);
-                        }
-                        jsonData = jsonData.trim();
-                        
-                        // 检查流结束标记
-                        if (jsonData === '[DONE]') {
-                            return; // 流结束
-                        }
-                        
-                        // 跳过空数据
-                        if (jsonData === '') {
-                            continue;
-                        }
-                        
-                        try {
-                            const parsedChunk = JSON.parse(jsonData);
-                            yield parsedChunk;
-                        } catch (e) {
-                            // JSON 解析失败，记录警告但继续处理
-                            logger.warn("[iFlow] Failed to parse stream chunk JSON:", e.message, "Data:", jsonData.substring(0, 200));
-                        }
-                    }
-                    // 忽略其他 SSE 字段（如 event:, id:, retry: 等）
+            })) {
+                const trimmedLine = line.trim();
+                if (!trimmedLine) {
+                    continue;
                 }
-            }
-            
-            // 处理缓冲区中剩余的数据（如果有的话）
-            if (buffer.trim() !== '') {
-                const trimmedLine = buffer.trim();
+
                 if (trimmedLine.startsWith('data:')) {
                     let jsonData = trimmedLine.substring(5);
                     if (jsonData.startsWith(' ')) {
@@ -963,13 +892,19 @@ export class IFlowApiService {
                     }
                     jsonData = jsonData.trim();
                     
-                    if (jsonData !== '[DONE]' && jsonData !== '') {
-                        try {
-                            const parsedChunk = JSON.parse(jsonData);
-                            yield parsedChunk;
-                        } catch (e) {
-                            logger.warn("[iFlow] Failed to parse final stream chunk JSON:", e.message);
-                        }
+                    if (jsonData === '[DONE]') {
+                        return; // 流结束
+                    }
+                    
+                    if (jsonData === '') {
+                        continue;
+                    }
+                    
+                    try {
+                        const parsedChunk = JSON.parse(jsonData);
+                        yield parsedChunk;
+                    } catch (e) {
+                        logger.warn("[iFlow] Failed to parse stream chunk JSON:", e.message, "Data:", jsonData.substring(0, 200));
                     }
                 }
             }
@@ -1121,7 +1056,7 @@ export class IFlowApiService {
         const manualModels = ['glm-4.7', 'glm-5', 'kimi-k2.5', 'minimax-m2.1', 'minimax-m2.5'];
         
         try {
-            const response = await this.axiosInstance.get('/models', {
+            const response = await this.client.get('/models', {
                 headers: this._getHeaders(false)
             });
             

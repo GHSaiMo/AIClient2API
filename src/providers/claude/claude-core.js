@@ -1,8 +1,6 @@
-import axios from 'axios';
+import { UndiciHttpClient } from '../../utils/undici-client.js';
 import logger from '../../utils/logger.js';
-import * as http from 'http';
-import * as https from 'https';
-import { configureAxiosProxy, configureTLSSidecar, isTLSSidecarEnabledForProvider } from '../../utils/proxy-utils.js';
+import { configureUndiciTLSSidecar } from '../../utils/proxy-utils.js';
 import { isRetryableNetworkError, MODEL_PROVIDER, getRetryAfterMs } from '../../utils/common.js';
 
 /**
@@ -12,8 +10,7 @@ import { isRetryableNetworkError, MODEL_PROVIDER, getRetryAfterMs } from '../../
 export class ClaudeApiService {
     /**
      * Constructor
-     * @param {string} apiKey - Anthropic Claude API Key.
-     * @param {string} baseUrl - Anthropic Claude API Base URL.
+     * @param {Object} config - Provider configuration.
      */
     constructor(config) {
         if (!config.CLAUDE_API_KEY) {
@@ -28,24 +25,26 @@ export class ClaudeApiService {
     }
 
     /**
-     * Creates an Axios instance for communication with the Claude API.
-     * @returns {object} Axios instance.
+     * Creates an UndiciHttpClient instance for communication with the Claude API.
+     * @returns {UndiciHttpClient}
      */
     createClient() {
-        const axiosConfig = {
+        return new UndiciHttpClient({
             baseURL: this.baseUrl,
             headers: {
                 'x-api-key': this.apiKey,
-                'Content-Type': 'application/json',
                 'anthropic-version': '2023-06-01', // Claude API 版本
             },
-        };
-        
-        return axios.create(axiosConfig);
+        });
     }
 
-    _applySidecar(axiosConfig) {
-        return configureTLSSidecar(axiosConfig, this.config, this.config.MODEL_PROVIDER || MODEL_PROVIDER.CLAUDE_CUSTOM, this.baseUrl);
+    _applySidecar(requestOptions) {
+        return configureUndiciTLSSidecar(
+            requestOptions,
+            this.config,
+            this.config.MODEL_PROVIDER || MODEL_PROVIDER.CLAUDE_CUSTOM,
+            this.baseUrl
+        );
     }
 
     /**
@@ -61,13 +60,13 @@ export class ClaudeApiService {
         const baseDelay = this.config.REQUEST_BASE_DELAY || 1000; // 1 second base delay
 
         try {
-            const axiosConfig = {
-                method: 'post',
+            const reqOptions = {
+                method: 'POST',
                 url: endpoint,
                 data: body
             };
-            this._applySidecar(axiosConfig);
-            const response = await this.client.request(axiosConfig);
+            this._applySidecar(reqOptions);
+            const response = await this.client.request(reqOptions);
             return response.data;
         } catch (error) {
             const status = error.response?.status;
@@ -133,32 +132,22 @@ export class ClaudeApiService {
         const baseDelay = this.config.REQUEST_BASE_DELAY || 1000; // 1 second base delay
 
         try {
-            const axiosConfig = {
-                method: 'post',
+            const reqOptions = {
+                method: 'POST',
                 url: endpoint,
                 data: { ...body, stream: true },
-                responseType: 'stream'
+                headers: {
+                    'Accept': 'text/event-stream'
+                }
             };
-            this._applySidecar(axiosConfig);
-            const response = await this.client.request(axiosConfig);
-            const reader = response.data;
-            let buffer = '';
+            this._applySidecar(reqOptions);
 
-            for await (const chunk of reader) {
-                buffer += chunk.toString('utf-8');
-                let boundary;
-                while ((boundary = buffer.indexOf('\n\n')) !== -1) {
-                    const eventBlock = buffer.substring(0, boundary);
-                    buffer = buffer.substring(boundary + 2);
+            for await (const line of this.client.stream(reqOptions.url, reqOptions.data, reqOptions)) {
+                const trimmed = line.trim();
+                if (!trimmed) continue;
 
-                    const lines = eventBlock.split('\n');
-                    let data = '';
-                    for (const line of lines) {
-                        if (line.startsWith('data: ')) {
-                            data = line.substring(6).trim();
-                        }
-                    }
-
+                if (trimmed.startsWith('data: ')) {
+                    const data = trimmed.substring(6).trim();
                     if (data) {
                         try {
                             const parsedChunk = JSON.parse(data);
@@ -266,12 +255,12 @@ export class ClaudeApiService {
     async listModels() {
         logger.info('[ClaudeApiService] Listing available models.');
         try {
-            const axiosConfig = {
-                method: 'get',
+            const reqOptions = {
+                method: 'GET',
                 url: '/models'
             };
-            this._applySidecar(axiosConfig);
-            const response = await this.client.request(axiosConfig);
+            this._applySidecar(reqOptions);
+            const response = await this.client.request(reqOptions);
             if (Array.isArray(response.data?.data)) {
                 return { models: response.data.data };
             }
@@ -296,4 +285,3 @@ export class ClaudeApiService {
         return { models: models.map(m => ({ name: m.name })) };
     }
 }
-

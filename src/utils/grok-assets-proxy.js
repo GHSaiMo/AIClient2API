@@ -1,6 +1,6 @@
-import axios from 'axios';
+import { UndiciHttpClient } from './undici-client.js';
 import logger from './logger.js';
-import { configureAxiosProxy } from './proxy-utils.js';
+import { configureUndiciProxy } from './proxy-utils.js';
 import { MODEL_PROVIDER } from './common.js';
 
 /**
@@ -87,22 +87,24 @@ export async function handleGrokAssetsProxy(req, res, config, providerPoolManage
 
         const isHead = req.method === 'HEAD';
 
+        const client = new UndiciHttpClient();
+
         for (let attempt = 1; attempt <= maxProxyAttempts; attempt++) {
             try {
-                const axiosConfig = {
-                    method: isHead ? 'head' : 'get',
+                const reqOptions = {
+                    method: isHead ? 'HEAD' : 'GET',
                     url: finalTargetUrl,
                     headers: headers,
-                    responseType: isHead ? undefined : 'stream',
+                    responseType: isHead ? 'text' : 'stream',
                     timeout: proxyTimeout,
-                    validateStatus: false
+                    validateStatus: () => true
                 };
 
                 // 配置代理（每次重试重新创建/绑定 agent，确保重新进行 TLS 握手）
-                configureAxiosProxy(axiosConfig, config, MODEL_PROVIDER.GROK_WEB);
+                configureUndiciProxy(reqOptions, config, MODEL_PROVIDER.GROK_WEB);
 
                 logger.debug(`[Grok Proxy] Proxying request to: ${finalTargetUrl} (method: ${req.method}, attempt ${attempt}/${maxProxyAttempts}, timeout: ${proxyTimeout}ms)`);
-                response = await axios(axiosConfig);
+                response = await client.request(reqOptions);
 
                 // 上游网关临时错误（502/503/504）触发重试
                 if (response.status >= 502 && response.status <= 504 && attempt < maxProxyAttempts) {

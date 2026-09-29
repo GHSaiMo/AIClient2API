@@ -1,5 +1,5 @@
 import { atomicWriteFile } from '../../utils/file-lock.js';
-import axios from 'axios';
+import { UndiciHttpClient } from '../../utils/undici-client.js';
 import logger from '../../utils/logger.js';
 import crypto from 'crypto';
 import {promises as fs} from 'fs';
@@ -7,7 +7,7 @@ import path from 'path';
 import os from 'os';
 import {refreshCodexTokensWithRetry} from '../../auth/oauth-handlers.js';
 import {getProviderPoolManager} from '../../services/service-manager.js';
-import {configureTLSSidecar, isTLSSidecarEnabledForProvider} from '../../utils/proxy-utils.js';
+import {configureUndiciTLSSidecar, isTLSSidecarEnabledForProvider} from '../../utils/proxy-utils.js';
 import {MODEL_PROVIDER, formatExpiryLog, normalizeProviderErrorMessage} from '../../utils/common.js';
 import {getProxyConfigForProvider} from '../../utils/proxy-utils.js';
 import {getProviderModels} from '../provider-models.js';
@@ -136,10 +136,11 @@ export class CodexApiService {
         this.startCacheCleanup();
 
         this.imageGenTool = {type: 'image_generation', output_format: 'png'};
+        this.client = new UndiciHttpClient();
     }
 
-    _applySidecar(axiosConfig) {
-        return configureTLSSidecar(axiosConfig, this.config, this.config.MODEL_PROVIDER || MODEL_PROVIDER.CODEX_API, this.baseUrl);
+    _applySidecar(requestOptions) {
+        return configureUndiciTLSSidecar(requestOptions, this.config, this.config.MODEL_PROVIDER || MODEL_PROVIDER.CODEX_API, this.baseUrl);
     }
 
     /**
@@ -311,15 +312,15 @@ export class CodexApiService {
                 timeout: 300000 // 5 分钟超时，适应慢速模型
             };
 
-            const axiosRequestConfig = {
+            const reqOptions = {
                 method: 'post',
                 url,
                 data: body,
                 ...config
             };
-            this._applySidecar(axiosRequestConfig);
+            this._applySidecar(reqOptions);
 
-            const response = await axios.request(axiosRequestConfig);
+            const response = await this.client.request(reqOptions);
 
             return this.parseNonStreamResponse(response.data);
         } catch (error) {
@@ -382,23 +383,18 @@ export class CodexApiService {
         const headers = this.buildHeaders(body.prompt_cache_key, true);
 
         try {
-            const config = {
-                headers,
-                responseType: 'stream',
-                timeout: 300000 // 5 分钟超时
-            };
-
-            const axiosRequestConfig = {
+            const reqOptions = {
                 method: 'post',
                 url,
                 data: body,
-                ...config
+                headers,
+                timeout: 300000 // 5 分钟超时
             };
-            this._applySidecar(axiosRequestConfig);
+            this._applySidecar(reqOptions);
 
-            const response = await axios.request(axiosRequestConfig);
+            const streamRes = await this.client.streamRequest(reqOptions.url, reqOptions);
 
-            yield* this.parseSSEStream(response.data);
+            yield* this.parseSSEStream(streamRes.lines());
         } catch (error) {
             if (error.response?.status === 401) {
                 logger.info('[Codex] Received 401 during stream. Triggering background refresh...');
@@ -793,6 +789,38 @@ export class CodexApiService {
         const outputItemsFallback = [];
 
         for await (const chunk of stream) {
+            if (typeof chunk === 'string' && !chunk.includes('\n')) {
+                const trimmedLine = chunk.trim();
+                if (!trimmedLine) continue;
+                const dataStr = extractSSEData(trimmedLine);
+
+                if (dataStr && dataStr !== '[DONE]') {
+                    try {
+                        let parsed = JSON.parse(dataStr);
+
+                        const terminalError = createCodexTerminalError(parsed);
+                        if (terminalError) {
+                            logger.error('[Codex] API returned terminal error in stream:', parsed.error || parsed.response?.error || parsed);
+                            throw terminalError;
+                        }
+
+                        if (parsed.type === 'response.output_item.done') {
+                            this.collectCodexOutputItemDone(parsed, outputItemsByIndex, outputItemsFallback);
+                        } else if (parsed.type === 'response.completed') {
+                            parsed = this.patchCodexCompletedOutput(parsed, outputItemsByIndex, outputItemsFallback);
+                        }
+
+                        yield parsed;
+                    } catch (e) {
+                        if (e.message.startsWith('Codex API error')) {
+                            throw e;
+                        }
+                        logger.error('[Codex] Failed to parse SSE data:', e.message);
+                    }
+                }
+                continue;
+            }
+
             buffer += chunk.toString();
             const lines = buffer.split('\n');
             buffer = lines.pop(); // 保留不完整的行
@@ -1066,14 +1094,14 @@ export class CodexApiService {
                 timeout: 30000
             };
 
-            const axiosRequestConfig = {
+            const reqOptions = {
                 method: 'get',
                 url,
                 ...config
             };
-            this._applySidecar(axiosRequestConfig);
+            this._applySidecar(reqOptions);
 
-            const response = await axios.request(axiosRequestConfig);
+            const response = await this.client.request(reqOptions);
             return {
                 ...response.data,
                 account: this.email
@@ -1111,16 +1139,16 @@ export class CodexApiService {
                 redeem_request_id: crypto.randomUUID()
             };
 
-            const axiosRequestConfig = {
+            const reqOptions = {
                 method: 'post',
                 url,
                 data: body,
                 headers,
                 timeout: 30000
             };
-            this._applySidecar(axiosRequestConfig);
+            this._applySidecar(reqOptions);
 
-            const response = await axios.request(axiosRequestConfig);
+            const response = await this.client.request(reqOptions);
             const latestUsage = await this.getUsageLimits();
 
             return {

@@ -1,8 +1,6 @@
-import axios from 'axios';
+import { UndiciHttpClient } from '../../utils/undici-client.js';
 import logger from '../../utils/logger.js';
-import * as http from 'http';
-import * as https from 'https';
-import { configureAxiosProxy, configureTLSSidecar, isTLSSidecarEnabledForProvider } from '../../utils/proxy-utils.js';
+import { configureUndiciTLSSidecar } from '../../utils/proxy-utils.js';
 import { isRetryableNetworkError, MODEL_PROVIDER, getRetryAfterMs } from '../../utils/common.js';
 
 /**
@@ -27,21 +25,22 @@ export class ForwardApiService {
 
         logger.info(`[Forward] Base URL: ${this.baseUrl}, System proxy ${this.useSystemProxy ? 'enabled' : 'disabled'}`);
 
-        const headers = {
-            'Content-Type': 'application/json'
-        };
+        const headers = {};
         headers[this.headerName] = `${this.headerValuePrefix}${this.apiKey}`;
 
-        const axiosConfig = {
+        this.client = new UndiciHttpClient({
             baseURL: this.baseUrl,
             headers,
-        };
-        
-        this.axiosInstance = axios.create(axiosConfig);
+        });
     }
 
-    _applySidecar(axiosConfig) {
-        return configureTLSSidecar(axiosConfig, this.config, this.config.MODEL_PROVIDER || MODEL_PROVIDER.FORWARD_API, this.baseUrl);
+    _applySidecar(requestOptions) {
+        return configureUndiciTLSSidecar(
+            requestOptions,
+            this.config,
+            this.config.MODEL_PROVIDER || MODEL_PROVIDER.FORWARD_API,
+            this.baseUrl
+        );
     }
 
     async callApi(endpoint, body, isRetry = false, retryCount = 0) {
@@ -49,13 +48,13 @@ export class ForwardApiService {
         const baseDelay = this.config.REQUEST_BASE_DELAY || 1000;
 
         try {
-            const axiosConfig = {
-                method: 'post',
+            const reqOptions = {
+                method: 'POST',
                 url: endpoint,
                 data: body
             };
-            this._applySidecar(axiosConfig);
-            const response = await this.axiosInstance.request(axiosConfig);
+            this._applySidecar(reqOptions);
+            const response = await this.client.request(reqOptions);
             return response.data;
         } catch (error) {
             const status = error.response?.status;
@@ -100,37 +99,30 @@ export class ForwardApiService {
         const baseDelay = this.config.REQUEST_BASE_DELAY || 1000;
 
         try {
-            const axiosConfig = {
-                method: 'post',
+            const reqOptions = {
+                method: 'POST',
                 url: endpoint,
                 data: body,
-                responseType: 'stream'
+                headers: {
+                    'Accept': 'text/event-stream'
+                }
             };
-            this._applySidecar(axiosConfig);
-            const response = await this.axiosInstance.request(axiosConfig);
+            this._applySidecar(reqOptions);
 
-            const stream = response.data;
-            let buffer = '';
+            for await (const line of this.client.stream(reqOptions.url, reqOptions.data, reqOptions)) {
+                const trimmedLine = line.trim();
+                if (!trimmedLine) continue;
 
-            for await (const chunk of stream) {
-                buffer += chunk.toString();
-                let newlineIndex;
-                while ((newlineIndex = buffer.indexOf('\n')) !== -1) {
-                    const line = buffer.substring(0, newlineIndex).trim();
-                    buffer = buffer.substring(newlineIndex + 1);
-
-                    if (line.startsWith('data: ')) {
-                        const jsonData = line.substring(6).trim();
-                        if (jsonData === '[DONE]') {
-                            return;
-                        }
-                        try {
-                            const parsedChunk = JSON.parse(jsonData);
-                            yield parsedChunk;
-                        } catch (e) {
-                            // If it's not JSON, it might be a different format, but for a forwarder we try to parse common SSE formats
-                            logger.warn("[ForwardApiService] Failed to parse stream chunk JSON:", e.message, "Data:", jsonData);
-                        }
+                if (trimmedLine.startsWith('data: ')) {
+                    const jsonData = trimmedLine.substring(6).trim();
+                    if (jsonData === '[DONE]') {
+                        return;
+                    }
+                    try {
+                        const parsedChunk = JSON.parse(jsonData);
+                        yield parsedChunk;
+                    } catch (e) {
+                        logger.warn("[ForwardApiService] Failed to parse stream chunk JSON:", e.message, "Data:", jsonData);
                     }
                 }
             }
@@ -199,12 +191,12 @@ export class ForwardApiService {
 
     async listModels() {
         try {
-            const axiosConfig = {
-                method: 'get',
+            const reqOptions = {
+                method: 'GET',
                 url: '/models'
             };
-            this._applySidecar(axiosConfig);
-            const response = await this.axiosInstance.request(axiosConfig);
+            this._applySidecar(reqOptions);
+            const response = await this.client.request(reqOptions);
             return response.data;
         } catch (error) {
             logger.error(`Error listing Forward models:`, error.message);

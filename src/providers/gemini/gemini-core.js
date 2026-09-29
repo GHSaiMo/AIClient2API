@@ -15,6 +15,7 @@ import { handleGeminiCliOAuth } from '../../auth/oauth-handlers.js';
 import { getProxyConfigForProvider, getGoogleAuthProxyConfig, isTLSSidecarEnabledForProvider } from '../../utils/proxy-utils.js';
 import { getProviderPoolManager } from '../../services/service-manager.js';
 import { MODEL_PROVIDER } from '../../utils/common.js';
+import { createGaxiosFetch } from '../../utils/gaxios-fetch-adapter.js';
 
 // --- Constants ---
 const AUTH_REDIRECT_PORT = 8085;
@@ -271,25 +272,16 @@ export class GeminiApiService {
         // 检查是否启用了 TLS Sidecar
         const isTLSSidecarEnabled = isTLSSidecarEnabledForProvider(config, config.MODEL_PROVIDER || MODEL_PROVIDER.GEMINI_CLI);
         
-        // 配置 OAuth2Client 使用自定义的 HTTP agent
+        // 配置 OAuth2Client 使用基于 Undici 的 fetch 适配层
+        const providerType = config.MODEL_PROVIDER || MODEL_PROVIDER.GEMINI_CLI;
         const oauth2Options = {
             clientId: OAUTH_CLIENT_ID,
             clientSecret: OAUTH_CLIENT_SECRET,
-        };
-        
-        if (proxyConfig) {
-            oauth2Options.transporterOptions = proxyConfig;
-            logger.info('[Gemini] Using proxy for OAuth2Client');
-        } else {
-            // 根据 base URL 判断使用 http 还是 https agent
-            const useHttp = this.codeAssistEndpoint && this.codeAssistEndpoint.startsWith('http://');
-            oauth2Options.transporterOptions = {
-                agent: useHttp ? this.httpAgent : this.httpsAgent,
-            };
-            if (useHttp) {
-                logger.info('[Gemini] Using HTTP agent for OAuth2Client');
+            transporterOptions: {
+                fetchImplementation: createGaxiosFetch(config, providerType)
             }
-        }
+        };
+        logger.info('[Gemini] Configured OAuth2Client with Undici fetch adapter');
 
         this.authClient = new OAuth2Client(oauth2Options);
         this._lastSavedAccessToken = null;

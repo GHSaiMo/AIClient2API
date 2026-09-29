@@ -801,8 +801,9 @@ export class ProviderPoolManager {
         };
         
         try {
-            const axios = (await import('axios')).default;
-            await axios.post(webhookUrl, payload, {
+            const { UndiciHttpClient } = await import('../utils/undici-client.js');
+            const client = new UndiciHttpClient();
+            await client.post(webhookUrl, payload, {
                 timeout: 5000,
                 headers: { 'Content-Type': 'application/json' }
             });

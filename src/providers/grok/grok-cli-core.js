@@ -1,12 +1,12 @@
 import { atomicWriteFile } from '../../utils/file-lock.js';
-import axios from 'axios';
+import { UndiciHttpClient } from '../../utils/undici-client.js';
 import logger from '../../utils/logger.js';
 import crypto from 'crypto';
 import { promises as fs } from 'fs';
 import path from 'path';
 import { refreshGrokCliTokensWithRetry } from '../../auth/oauth-handlers.js';
 import { getProviderPoolManager } from '../../services/service-manager.js';
-import { configureTLSSidecar } from '../../utils/proxy-utils.js';
+import { configureUndiciTLSSidecar } from '../../utils/proxy-utils.js';
 import { MODEL_PROVIDER, formatExpiryLog, getRetryAfterMs, normalizeProviderErrorMessage } from '../../utils/common.js';
 import { getProviderModels } from '../provider-models.js';
 import { grokReasoningCache } from './grok-reasoning-cache.js';
@@ -1241,11 +1241,12 @@ export class GrokCliApiService {
         this.subscriptionsCache = null;
         this.subscriptionsSyncedAt = 0;
         this.loggedGrokAccountTier = null;
+        this.client = new UndiciHttpClient();
     }
 
-    _applySidecar(axiosConfig) {
-        return configureTLSSidecar(
-            axiosConfig,
+    _applySidecar(requestOptions) {
+        return configureUndiciTLSSidecar(
+            requestOptions,
             this.config,
             this.config.MODEL_PROVIDER || MODEL_PROVIDER.GROK_CLI,
             this.baseUrl
@@ -1392,17 +1393,17 @@ export class GrokCliApiService {
         const url = `${this.baseUrl}/responses`;
 
         try {
-            const axiosRequestConfig = {
-                method: 'post',
+            const reqOptions = {
+                method: 'POST',
                 url,
                 data: body,
                 headers: this.buildHeaders(true, body.prompt_cache_key),
                 responseType: 'text',
                 timeout: 300000
             };
-            this._applySidecar(axiosRequestConfig);
+            this._applySidecar(reqOptions);
 
-            const response = await axios.request(axiosRequestConfig);
+            const response = await this.client.request(reqOptions);
             return this.parseNonStreamResponse(response.data);
         } catch (error) {
             await this.handleRequestError(error, 'non-stream');
@@ -1435,17 +1436,17 @@ export class GrokCliApiService {
         const url = `${this.baseUrl}/responses`;
 
         try {
-            const axiosRequestConfig = {
-                method: 'post',
+            const reqOptions = {
+                method: 'POST',
                 url,
                 data: body,
                 headers: this.buildHeaders(true, body.prompt_cache_key),
                 responseType: 'stream',
                 timeout: 300000
             };
-            this._applySidecar(axiosRequestConfig);
+            this._applySidecar(reqOptions);
 
-            const response = await axios.request(axiosRequestConfig);
+            const response = await this.client.request(reqOptions);
             yield* this.parseSSEStream(response.data);
         } catch (error) {
             await this.handleRequestError(error, 'stream');
@@ -1457,17 +1458,17 @@ export class GrokCliApiService {
         const url = `${this.baseUrl}${endpointPath}`;
 
         try {
-            const axiosRequestConfig = {
-                method: 'post',
+            const reqOptions = {
+                method: 'POST',
                 url,
                 data: body,
                 headers: this.buildImageHeaders(),
                 timeout: 300000
             };
-            this._applySidecar(axiosRequestConfig);
+            this._applySidecar(reqOptions);
 
             logger.info(`[Grok CLI] Image request model=${model}, endpoint=${endpointPath}, aspect_ratio=${body.aspect_ratio}, resolution=${body.resolution}, response_format=${body.response_format}`);
-            const response = await axios.request(axiosRequestConfig);
+            const response = await this.client.request(reqOptions);
             return this.normalizeImageResponse(response.data, model);
         } catch (error) {
             await this.handleRequestError(error, endpointPath === XAI_IMAGES_EDITS_PATH ? 'image-edit' : 'image-generation');
@@ -1540,17 +1541,17 @@ export class GrokCliApiService {
         const url = `${this.baseUrl}${endpointPath}`;
 
         try {
-            const axiosRequestConfig = {
-                method: 'post',
+            const reqOptions = {
+                method: 'POST',
                 url,
                 data: body,
                 headers: this.buildJsonHeaders(),
                 timeout: 300000
             };
-            this._applySidecar(axiosRequestConfig);
+            this._applySidecar(reqOptions);
 
             logger.info(`[Grok CLI] Video request model=${selectedModel}, endpoint=${endpointPath}`);
-            const response = await axios.request(axiosRequestConfig);
+            const response = await this.client.request(reqOptions);
             return this.normalizeVideoResponse(response.data, selectedModel);
         } catch (error) {
             const mode = endpointPath === XAI_VIDEOS_EDITS_PATH
@@ -1577,15 +1578,15 @@ export class GrokCliApiService {
         }
 
         try {
-            const axiosRequestConfig = {
-                method: 'get',
+            const reqOptions = {
+                method: 'GET',
                 url: `${this.baseUrl}/videos/${encodeURIComponent(cleanRequestId)}`,
                 headers: this.buildJsonHeaders(),
                 timeout: 300000
             };
-            this._applySidecar(axiosRequestConfig);
+            this._applySidecar(reqOptions);
 
-            const response = await axios.request(axiosRequestConfig);
+            const response = await this.client.request(reqOptions);
             return this.normalizeVideoResponse(response.data);
         } catch (error) {
             await this.handleRequestError(error, 'video-status');
@@ -2477,6 +2478,11 @@ export class GrokCliApiService {
         let buffer = '';
 
         for await (const chunk of stream) {
+            if (typeof chunk === 'string' && !chunk.includes('\n')) {
+                const event = this.parseSSELine(chunk);
+                if (event) yield event;
+                continue;
+            }
             buffer += chunk.toString();
             const lines = buffer.split('\n');
             buffer = lines.pop();
@@ -2642,8 +2648,8 @@ export class GrokCliApiService {
 
         try {
             const url = this.config.GROK_CLI_BILLING_URL || GROK_CLI_DEFAULT_BILLING_URL;
-            const axiosRequestConfig = {
-                method: 'get',
+            const reqOptions = {
+                method: 'GET',
                 url,
                 headers: {
                     ...this.buildJsonHeaders(),
@@ -2651,9 +2657,9 @@ export class GrokCliApiService {
                 },
                 timeout: 30000
             };
-            this._applySidecar(axiosRequestConfig);
+            this._applySidecar(reqOptions);
 
-            const response = await axios.request(axiosRequestConfig);
+            const response = await this.client.request(reqOptions);
             const subscriptions = await this.getSubscriptionsForUsage(response.data);
             const summary = summarizeBillingUsage(response.data, subscriptions);
             this.logGrokAccountTier(summary);
@@ -2700,15 +2706,15 @@ export class GrokCliApiService {
         }
 
         try {
-            const axiosRequestConfig = {
-                method: 'get',
+            const reqOptions = {
+                method: 'GET',
                 url,
                 headers: this.buildSubscriptionHeaders(),
                 timeout: 30000
             };
-            this._applySidecar(axiosRequestConfig);
+            this._applySidecar(reqOptions);
 
-            const response = await axios.request(axiosRequestConfig);
+            const response = await this.client.request(reqOptions);
             if (Array.isArray(response.data?.subscriptions)) {
                 this.subscriptionsCache = response.data;
                 this.subscriptionsSyncedAt = Date.now();

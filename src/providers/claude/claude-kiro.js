@@ -1,5 +1,5 @@
 import { atomicWriteFile } from '../../utils/file-lock.js';
-import axios from 'axios';
+import { UndiciHttpClient } from '../../utils/undici-client.js';
 import logger from '../../utils/logger.js';
 import { v4 as uuidv4 } from 'uuid';
 import { promises as fs } from 'fs';
@@ -16,7 +16,7 @@ import {
     processContent as processContentUtil,
     getContentText as getContentTextUtil
 } from '../../utils/token-utils.js';
-import { configureAxiosProxy, configureTLSSidecar, isTLSSidecarEnabledForProvider } from '../../utils/proxy-utils.js';
+import { configureUndiciTLSSidecar, isTLSSidecarEnabledForProvider } from '../../utils/proxy-utils.js';
 import { isRetryableNetworkError, MODEL_PROVIDER, formatExpiryLog, getNormalizedErrorResponseText, buildHttpErrorReason, normalizeProviderErrorMessage, createEmptyUpstreamResponseError } from '../../utils/common.js';
 import { getProviderPoolManager } from '../../services/service-manager.js';
 import { sanitizeJsonSchema } from '../../utils/schema-sanitizer.js';
@@ -708,8 +708,8 @@ export class KiroApiService {
         }
 
         this.modelName = KIRO_CONSTANTS.DEFAULT_MODEL_NAME;
-        this.axiosInstance = null; // Initialize later in async method
-        this.axiosSocialRefreshInstance = null;
+        this.client = null; // Initialize later in async method
+        this.socialRefreshClient = null;
         this._tokenRefreshPromise = null;
     }
  
@@ -729,31 +729,34 @@ export class KiroApiService {
         const kiroVersion = KIRO_CONSTANTS.KIRO_VERSION;
         const { osName, nodeVersion } = getSystemRuntimeInfo();
 
-        const axiosConfig = {
+        const defaultHeaders = {
+            'Content-Type': KIRO_CONSTANTS.CONTENT_TYPE_JSON,
+            'Accept': KIRO_CONSTANTS.ACCEPT_JSON,
+            'amz-sdk-invocation-id': uuidv4(),
+            'amz-sdk-request': 'attempt=1; max=3',
+            'x-amzn-codewhisperer-optout': true,
+            'x-amzn-kiro-agent-mode': 'vibe',
+            'x-amz-user-agent': `aws-sdk-js/1.0.34 KiroIDE-${kiroVersion}-${machineId}`,
+            'user-agent': `aws-sdk-js/1.0.34 ua/2.1 os/${osName} lang/js md/nodejs#${nodeVersion} api/codewhispererstreaming#1.0.34 m/E KiroIDE-${kiroVersion}-${machineId}`,
+            'Connection': 'close'
+        };
+        
+        this.client = new UndiciHttpClient({
+            timeout: KIRO_CONSTANTS.AXIOS_TIMEOUT,
+            headers: defaultHeaders,
+        });
+
+        this.socialRefreshClient = new UndiciHttpClient({
             timeout: KIRO_CONSTANTS.AXIOS_TIMEOUT,
             headers: {
                 'Content-Type': KIRO_CONSTANTS.CONTENT_TYPE_JSON,
-                'Accept': KIRO_CONSTANTS.ACCEPT_JSON,
-                'amz-sdk-invocation-id': uuidv4(),
-                'amz-sdk-request': 'attempt=1; max=3',
-                'x-amzn-codewhisperer-optout': true,
-                'x-amzn-kiro-agent-mode': 'vibe',
-                'x-amz-user-agent': `aws-sdk-js/1.0.34 KiroIDE-${kiroVersion}-${machineId}`,
-                'user-agent': `aws-sdk-js/1.0.34 ua/2.1 os/${osName} lang/js md/nodejs#${nodeVersion} api/codewhispererstreaming#1.0.34 m/E KiroIDE-${kiroVersion}-${machineId}`,
-                'Connection': 'close'
             },
-        };
-        
-        this.axiosInstance = axios.create(axiosConfig);
-
-        axiosConfig.headers = new Headers();
-        axiosConfig.headers.set('Content-Type', KIRO_CONSTANTS.CONTENT_TYPE_JSON);
-        this.axiosSocialRefreshInstance = axios.create(axiosConfig);
+        });
         this.isInitialized = true;
     }
 
-    _applySidecar(axiosConfig) {
-        return configureTLSSidecar(axiosConfig, this.config, this.config.MODEL_PROVIDER || MODEL_PROVIDER.KIRO_API);
+    _applySidecar(requestOptions) {
+        return configureUndiciTLSSidecar(requestOptions, this.config, this.config.MODEL_PROVIDER || MODEL_PROVIDER.KIRO_API);
     }
 
 /**
@@ -1010,19 +1013,19 @@ async saveCredentialsToFile(filePath, newData) {
             // 使用更短的超时时间进行 token 刷新，避免阻塞其他请求
             const refreshConfig = { timeout: KIRO_CONSTANTS.TOKEN_REFRESH_TIMEOUT };
             
-            const axiosConfig = {
+            const reqOptions = {
                 method: 'post',
                 url: refreshUrl,
                 data: requestBody,
                 ...refreshConfig
             };
-            this._applySidecar(axiosConfig);
+            this._applySidecar(reqOptions);
 
             if (isSocialAuth) {
-                response = await this.axiosSocialRefreshInstance.request(axiosConfig);
+                response = await this.socialRefreshClient.request(reqOptions);
                 logger.info('[Kiro Auth] Token refresh social response: ok');
             } else {
-                response = await this.axiosInstance.request(axiosConfig);
+                response = await this.client.request(reqOptions);
                 logger.info('[Kiro Auth] Token refresh idc response: ok');
             }
 
@@ -1921,17 +1924,17 @@ async saveCredentialsToFile(filePath, newData) {
 
             // 当 model 以 kiro-amazonq 开头时，使用 amazonQUrl，否则使用 baseUrl
             const requestUrl = model.startsWith('amazonq') ? this.amazonQUrl : this.baseUrl;
-            const axiosConfig = {
+            const reqOptions = {
                 method: 'post',
                 url: requestUrl,
                 data: requestData,
                 headers
             };
-            this._applySidecar(axiosConfig);
+            this._applySidecar(reqOptions);
             const releaseThrottle = await acquireKiroRequestSlot(this.config);
             let response;
             try {
-                response = await this.axiosInstance.request(axiosConfig);
+                response = await this.client.request(reqOptions);
             } finally {
                 releaseThrottle();
             }
@@ -2526,16 +2529,16 @@ async saveCredentialsToFile(filePath, newData) {
         // 一旦产出过内容，流中途断线就不能重发（会导致内容重复/错位）。
         let hasYieldedContent = false;
         try {
-            const axiosConfig = {
+            const reqOptions = {
                 method: 'post',
                 url: requestUrl,
                 data: requestData,
                 headers,
                 responseType: 'stream'
             };
-            this._applySidecar(axiosConfig);
+            this._applySidecar(reqOptions);
             releaseThrottle = await acquireKiroRequestSlot(this.config);
-            const response = await this.axiosInstance.request(axiosConfig);
+            const response = await this.client.request(reqOptions);
 
             stream = response.data;
             let buffer = Buffer.alloc(0);
@@ -3660,15 +3663,15 @@ async saveCredentialsToFile(filePath, newData) {
             'Connection': 'close'
         };
 
-        const axiosConfig = {
+        const reqOptions = {
             method: 'get',
             url: fullUrl,
             headers
         };
-        this._applySidecar(axiosConfig);
+        this._applySidecar(reqOptions);
 
         try {
-            const response = await this.axiosInstance.request(axiosConfig);
+            const response = await this.client.request(reqOptions);
             logger.info('[Kiro] Usage limits fetched successfully');
             return response.data;
         } catch (error) {

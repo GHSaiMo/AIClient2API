@@ -1,6 +1,6 @@
-import axios from 'axios';
+import { UndiciHttpClient } from '../../utils/undici-client.js';
 import logger from '../../utils/logger.js';
-import { parseProxyUrl } from '../../utils/proxy-utils.js';
+import { getUndiciDispatcherForUrl } from '../../utils/proxy-utils.js';
 
 /**
  * 将 Base64 字符串或 Data URI 转换为 Buffer
@@ -142,36 +142,25 @@ export async function uploadImageToChatGPT({
         ...headers
     };
 
-    const axiosConfig = {
-        headers: baseHeaders,
-        timeout: 60000
-    };
-
-    if (proxyUrl) {
-        const proxyConfig = parseProxyUrl(proxyUrl);
-        if (proxyConfig) {
-            axiosConfig.httpAgent = proxyConfig.httpAgent;
-            axiosConfig.httpsAgent = proxyConfig.httpsAgent;
-            axiosConfig.proxy = false;
-        }
-    }
+    const dispatcher = proxyUrl ? getUndiciDispatcherForUrl(proxyUrl, 'ChatGPT-File-Service') : null;
+    const client = new UndiciHttpClient({ dispatcher });
 
     // 1. 请求上传凭证
     const path = '/backend-api/files';
-    const initRes = await axios.post('https://chatgpt.com' + path, {
+    const initRes = await client.post('https://chatgpt.com' + path, {
         file_name: fileName,
         file_size: data.length,
         use_case: 'multimodal',
         width,
         height
     }, {
-        ...axiosConfig,
         headers: {
             ...baseHeaders,
             'Content-Type': 'application/json',
             'X-OpenAI-Target-Path': path,
             'X-OpenAI-Target-Route': path
-        }
+        },
+        timeout: 60000
     });
 
     const uploadMeta = initRes.data || {};
@@ -180,8 +169,10 @@ export async function uploadImageToChatGPT({
     }
 
     // 2. 直传 Azure Blob
-    await axios.put(uploadMeta.upload_url, data, {
-        ...axiosConfig,
+    await client.request({
+        method: 'PUT',
+        url: uploadMeta.upload_url,
+        data,
         headers: {
             'Content-Type': mimeType,
             'x-ms-blob-type': 'BlockBlob',
@@ -195,14 +186,14 @@ export async function uploadImageToChatGPT({
 
     // 3. 确认上传完成
     const uploadedPath = `/backend-api/files/${uploadMeta.file_id}/uploaded`;
-    await axios.post('https://chatgpt.com' + uploadedPath, {}, {
-        ...axiosConfig,
+    await client.post('https://chatgpt.com' + uploadedPath, {}, {
         headers: {
             ...baseHeaders,
             'Content-Type': 'application/json',
             'X-OpenAI-Target-Path': uploadedPath,
             'X-OpenAI-Target-Route': uploadedPath
-        }
+        },
+        timeout: 60000
     });
 
     return {

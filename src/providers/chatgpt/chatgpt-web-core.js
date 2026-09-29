@@ -1,4 +1,4 @@
-import axios from 'axios';
+import { UndiciHttpClient } from '../../utils/undici-client.js';
 import { v4 as uuidv4 } from 'uuid';
 import logger from '../../utils/logger.js';
 import { MODEL_PROVIDER, MODEL_PROTOCOL_PREFIX, isRetryableNetworkError, formatExpiryLog } from '../../utils/common.js';
@@ -37,6 +37,7 @@ export class ChatGPTWebService {
         this.restoreAt = this.config.restore_at || this.config.restoreAt || null;
         this.proxyUrl = this.config.PROXY_URL || this.config.proxy || null;
         this.runner = getChatGPTRunnerManager();
+        this.client = new UndiciHttpClient({ dispatcher: UndiciHttpClient.getLocalDispatcher() });
         this.isInitialized = false;
     }
 
@@ -173,7 +174,7 @@ export class ChatGPTWebService {
         if (isImageModel || prompt) {
             logger.info(`[ChatGPT Web] Generating image via chatgpt2api runner: model=${model}, prompt="${prompt.slice(0, 40)}..."`);
             try {
-                const res = await axios.post(`${this.runner.baseUrl}/images/generations`, {
+                const res = await this.client.post(`${this.runner.baseUrl}/images/generations`, {
                     access_token: this.accessToken,
                     prompt,
                     model: model || 'gpt-image-2',
@@ -222,7 +223,7 @@ export class ChatGPTWebService {
         }
 
         // Text streaming via conversation endpoint
-        const response = await axios.post(`${this.runner.baseUrl}/conversation`, {
+        const response = await this.client.post(`${this.runner.baseUrl}/conversation`, {
             access_token: this.accessToken,
             prompt,
             model: model || 'auto',

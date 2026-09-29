@@ -1,4 +1,5 @@
-import axios from 'axios';
+import { UndiciHttpClient } from '../utils/undici-client.js';
+import { Agent as UndiciAgent } from 'undici';
 import AdmZip from 'adm-zip';
 import { promises as fs } from 'fs';
 import { existsSync } from 'fs';
@@ -106,15 +107,17 @@ export async function validatePluginDownloadUrl(downloadUrl) {
 
 async function downloadPluginArchive(downloadUrl, redirectsRemaining = MAX_DOWNLOAD_REDIRECTS) {
     const safeUrl = await validatePluginDownloadUrl(downloadUrl);
-    const response = await axios({
-        method: 'get',
+    const dispatcher = new UndiciAgent({
+        connect: {
+            lookup: secureLookup
+        }
+    });
+    const client = new UndiciHttpClient({ dispatcher });
+    const response = await client.request({
+        method: 'GET',
         url: safeUrl,
         responseType: 'arraybuffer',
         timeout: 30000,
-        maxRedirects: 0,
-        maxContentLength: MAX_PLUGIN_ZIP_BYTES,
-        maxBodyLength: MAX_PLUGIN_ZIP_BYTES,
-        lookup: secureLookup,
         validateStatus: status => (status >= 200 && status < 300) || (status >= 300 && status < 400)
     });
 
@@ -157,7 +160,8 @@ export async function fetchMarketPlugins(url = null) {
     
     try {
         // 优先从网络获取
-        const response = await axios.get(targetUrl, { timeout: 10000 });
+        const client = new UndiciHttpClient();
+        const response = await client.get(targetUrl, { timeout: 10000 });
         const marketData = response.data;
 
         // 成功获取后更新本地缓存

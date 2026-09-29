@@ -5,9 +5,9 @@ import { promises as fs } from 'fs';
 import path from 'path';
 import { exec, execFile } from 'child_process';
 import { promisify } from 'util';
-import axios from 'axios';
+import { UndiciHttpClient } from '../utils/undici-client.js';
 import { CONFIG } from '../core/config-manager.js';
-import { parseProxyUrl } from '../utils/proxy-utils.js';
+import { getUndiciDispatcherForUrl } from '../utils/proxy-utils.js';
 import { getRequestBody } from '../utils/common.js';
 import { isValidVersionTag } from '../utils/version-tag.js';
 
@@ -69,19 +69,14 @@ function buildTarballCandidates(repo, tag) {
 }
 
 /**
- * 获取更新检查使用的代理配置
- * @returns {Object|null} 代理配置对象或 null
+ * 获取更新检查使用的代理 Dispatcher
+ * @returns {any|null} Undici Dispatcher 或 null
  */
-function getUpdateProxyConfig() {
+function getUpdateDispatcher() {
     if (!CONFIG || !CONFIG.PROXY_URL) {
         return null;
     }
-    
-    const proxyConfig = parseProxyUrl(CONFIG.PROXY_URL);
-    if (proxyConfig) {
-        logger.info(`[Update] Using ${proxyConfig.proxyType} proxy for update check: ${CONFIG.PROXY_URL}`);
-    }
-    return proxyConfig;
+    return getUndiciDispatcherForUrl(CONFIG.PROXY_URL, 'Update-API');
 }
 
 /**
@@ -91,37 +86,28 @@ function getUpdateProxyConfig() {
  * @returns {Promise<Response>}
  */
 async function fetchWithProxy(url, options = {}) {
-    const proxyConfig = getUpdateProxyConfig();
+    const dispatcher = getUpdateDispatcher();
+    const client = new UndiciHttpClient({ dispatcher });
 
     const method = options.method || 'GET';
     const headers = options.headers || {};
-    const timeout = options.timeout || 0;
+    const timeout = options.timeout || undefined;
     const responseType = options.responseType || 'arraybuffer';
-    const maxRedirects = options.redirect === 'manual' ? 0 : 5;
 
     try {
-        const axiosOptions = {
+        const response = await client.request({
             method,
             url,
             headers,
             data: options.body,
             timeout,
             responseType,
-            maxRedirects,
             validateStatus: () => true
-        };
+        });
 
-        if (proxyConfig) {
-            const urlObj = new URL(url);
-            axiosOptions.httpAgent = urlObj.protocol === 'https:' ? proxyConfig.httpsAgent : proxyConfig.httpAgent;
-            axiosOptions.httpsAgent = proxyConfig.httpsAgent;
-            axiosOptions.proxy = false;
-        }
-
-        const response = await axios.request(axiosOptions);
         const payloadBuffer = Buffer.isBuffer(response.data)
             ? response.data
-            : Buffer.from(response.data || '');
+            : (response.data instanceof ArrayBuffer ? Buffer.from(response.data) : Buffer.from(response.data || ''));
 
         return {
             ok: response.status >= 200 && response.status < 300,

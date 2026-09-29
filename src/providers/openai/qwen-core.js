@@ -1,18 +1,16 @@
 import { atomicWriteFile } from '../../utils/file-lock.js';
-import axios from 'axios';
+import { UndiciHttpClient } from '../../utils/undici-client.js';
 import logger from '../../utils/logger.js';
 import crypto from 'crypto';
 import path from 'node:path';
 import { promises as fs, unlinkSync } from 'node:fs';
 import * as os from 'os';
-import * as http from 'http';
-import * as https from 'https';
 import open from 'open';
 import { EventEmitter } from 'events';
 import { randomUUID } from 'node:crypto';
 import { getProviderModels } from '../provider-models.js';
 import { handleQwenOAuth } from '../../auth/oauth-handlers.js';
-import { configureAxiosProxy, configureTLSSidecar } from '../../utils/proxy-utils.js';
+import { configureUndiciProxy, configureUndiciTLSSidecar, getUndiciDispatcherForProvider } from '../../utils/proxy-utils.js';
 import { isRetryableNetworkError, MODEL_PROVIDER, formatExpiryLog, getRetryAfterMs } from '../../utils/common.js';
 import { getProviderPoolManager } from '../../services/service-manager.js';
 
@@ -198,12 +196,13 @@ async function commonFetch(url, options = {}, useSystemProxy = false) {
         },
     };
 
-    // 如果不使用系统代理,设置空的代理配置
-    // 注意: Node.js 的 fetch 实现会自动使用环境变量中的代理设置
-    // 这里通过设置 agent 为 null 来尝试禁用代理
-    if (!useSystemProxy && typeof mergedOptions.agent === 'undefined') {
-        // 对于 Node.js fetch,我们可以通过设置 dispatcher 来控制代理
-        // 但这需要 undici 支持,这里我们先记录日志
+    // 使用统一的 Undici Dispatcher 代理控制
+    if (config) {
+        const dispatcher = getUndiciDispatcherForProvider(config, MODEL_PROVIDER.QWEN_API);
+        if (dispatcher) {
+            mergedOptions.dispatcher = dispatcher;
+        }
+    } else if (!useSystemProxy) {
         logger.debug('[Qwen] System proxy disabled for fetch request');
     }
 
@@ -306,7 +305,6 @@ export class QwenApiService {
         this.config = config;
         this.isInitialized = false;
         this.sharedManager = SharedTokenManager.getInstance();
-        this.currentAxiosInstance = null;
         this.tokenManagerOptions = { credentialFilePath: this._getQwenCachedCredentialPath() };
         this.useSystemProxy = config?.USE_SYSTEM_PROXY_QWEN ?? false;
         this.uuid = config.uuid; // 保存 uuid 用于号池管理
@@ -319,55 +317,19 @@ export class QwenApiService {
 
         logger.info(`[Qwen] System proxy ${this.useSystemProxy ? 'enabled' : 'disabled'}`);
         this.qwenClient = new QwenOAuth2Client(config, this.useSystemProxy);
+        this.client = new UndiciHttpClient({ baseURL: this.baseUrl });
     }
 
     async initialize() {
         if (this.isInitialized) return;
         logger.info('[Qwen] Initializing Qwen API Service...');
-        // 注意：V2 读写分离架构下，初始化不再执行同步认证/刷新逻辑
-        // 仅执行基础的凭证加载
         await this.loadCredentials();
-        
-        // 配置 HTTP/HTTPS agent 限制连接池大小，避免资源泄漏
-        const httpAgent = new http.Agent({
-            keepAlive: true,
-            maxSockets: 100,
-            maxFreeSockets: 5,
-            timeout: 120000,
-        });
-        const httpsAgent = new https.Agent({
-            keepAlive: true,
-            maxSockets: 100,
-            maxFreeSockets: 5,
-            timeout: 120000,
-        });
-
-        const axiosConfig = {
-            baseURL: this.baseUrl,
-            httpAgent,
-            httpsAgent,
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer `,
-            },
-        };
-        
-        // 禁用系统代理
-        if (!this.useSystemProxy) {
-            axiosConfig.proxy = false;
-        }
-        
-        // 配置自定义代理
-        configureAxiosProxy(axiosConfig, this.config, this.config.MODEL_PROVIDER || MODEL_PROVIDER.QWEN_API);
-        
-        this.currentAxiosInstance = axios.create(axiosConfig);
-
         this.isInitialized = true;
         logger.info('[Qwen] Initialization complete.');
     }
 
-    _applySidecar(axiosConfig) {
-        return configureTLSSidecar(axiosConfig, this.config, this.config.MODEL_PROVIDER || MODEL_PROVIDER.QWEN_API, this.baseUrl);
+    _applySidecar(requestOptions) {
+        return configureUndiciTLSSidecar(requestOptions, this.config, this.config.MODEL_PROVIDER || MODEL_PROVIDER.QWEN_API, this.baseUrl);
     }
 
     /**
@@ -690,18 +652,6 @@ export class QwenApiService {
                 'Accept': isStream ? 'text/event-stream' : 'application/json',
             };
 
-            const axiosConfig = {
-                baseURL: qwenBaseUrl,
-                headers,
-                // axios 默认不传 proxy 配置时会遵循环境变量，这里明确控制
-                proxy: this.useSystemProxy ? undefined : false,
-            };
-            
-            // 配置自定义代理 (如果 config.json 中有定义)
-            configureAxiosProxy(axiosConfig, this.config, this.config.MODEL_PROVIDER || MODEL_PROVIDER.QWEN_API);
-            
-            const instance = axios.create(axiosConfig);
-
             // 处理消息和模型
             let processedBody = ensureQwenSystemMessage(body);
 
@@ -729,22 +679,29 @@ export class QwenApiService {
             } else {
                 processedBody.tools = [dummyTool];
             }
-            
+
             if (isStream) {
                 processedBody.stream = true;
                 processedBody.stream_options = { include_usage: true };
             }
 
-            const requestConfig = {
+            const targetUrl = `${qwenBaseUrl.replace(/\/$/, '')}${endpoint.startsWith('/') ? endpoint : '/' + endpoint}`;
+            const reqOptions = {
                 method: 'post',
-                url: endpoint,
+                url: targetUrl,
                 data: processedBody,
-                ...(isStream ? { responseType: 'stream' } : {})
+                headers,
+                timeout: 300000,
             };
-            this._applySidecar(requestConfig);
+            this._applySidecar(reqOptions);
             
-            const response = await instance.request(requestConfig);
-            return response.data;
+            if (isStream) {
+                const streamRes = await this.client.streamRequest(reqOptions.url, reqOptions);
+                return streamRes.lines();
+            } else {
+                const response = await this.client.request(reqOptions);
+                return response.data;
+            }
 
         } catch (error) {
             const status = error.response?.status;
@@ -852,23 +809,18 @@ export class QwenApiService {
             }
         }
         
-        const stream = await this.callApiWithAuthAndRetry('/chat/completions', requestBody, true);
-        let buffer = '';
-        for await (const chunk of stream) {
-            buffer += chunk.toString();
-            let newlineIndex;
-            while ((newlineIndex = buffer.indexOf('\n')) !== -1) {
-                const line = buffer.substring(0, newlineIndex).trim();
-                buffer = buffer.substring(newlineIndex + 1);
+        const lines = await this.callApiWithAuthAndRetry('/chat/completions', requestBody, true);
+        for await (const chunk of lines) {
+            const line = (typeof chunk === 'string' ? chunk : chunk.toString()).trim();
+            if (!line) continue;
 
-                if (line.startsWith('data: ')) {
-                    const jsonData = line.substring(6).trim();
-                    if (jsonData === '[DONE]') return;
-                    try {
-                        yield JSON.parse(jsonData);
-                    } catch (e) {
-                        logger.warn("[QwenApiService] Failed to parse stream chunk:", jsonData);
-                    }
+            if (line.startsWith('data: ')) {
+                const jsonData = line.substring(6).trim();
+                if (jsonData === '[DONE]') return;
+                try {
+                    yield JSON.parse(jsonData);
+                } catch (e) {
+                    logger.warn("[QwenApiService] Failed to parse stream chunk:", jsonData);
                 }
             }
         }

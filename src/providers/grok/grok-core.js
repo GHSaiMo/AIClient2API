@@ -1,10 +1,10 @@
-import axios from 'axios';
+import { UndiciHttpClient } from '../../utils/undici-client.js';
 import logger from '../../utils/logger.js';
 import * as http from 'http';
 import * as https from 'https';
 import { v4 as uuidv4 } from 'uuid';
 import { MODEL_PROTOCOL_PREFIX, isRetryableNetworkError, getRetryAfterMs, normalizeProviderErrorMessage, getNormalizedErrorResponseText } from '../../utils/common.js';
-import { configureAxiosProxy, configureTLSSidecar, isTLSSidecarEnabledForProvider } from '../../utils/proxy-utils.js';
+import { configureUndiciTLSSidecar, isTLSSidecarEnabledForProvider } from '../../utils/proxy-utils.js';
 import { MODEL_PROVIDER } from '../../utils/common.js';
 import { ConverterFactory } from '../../converters/ConverterFactory.js';
 import * as readline from 'readline';
@@ -83,6 +83,7 @@ export class GrokApiService {
         this.converter = ConverterFactory.getConverter(MODEL_PROTOCOL_PREFIX.GROK);
         if (this.converter && this.uuid) this.converter.setUuid(this.uuid);
         this.lastSyncAt = null;
+        this.client = new UndiciHttpClient();
     }
 
     getMaxRequestRetries() {
@@ -208,8 +209,8 @@ export class GrokApiService {
         return `https://assets.grok.com/${url.startsWith('/') ? url.slice(1) : url}`;
     }
 
-    _applySidecar(axiosConfig) {
-        return configureTLSSidecar(axiosConfig, this.config, this.config.MODEL_PROVIDER || MODEL_PROVIDER.GROK_WEB);
+    _applySidecar(requestOptions) {
+        return configureUndiciTLSSidecar(requestOptions, this.config, this.config.MODEL_PROVIDER || MODEL_PROVIDER.GROK_WEB);
     }
 
     /**
@@ -222,7 +223,7 @@ export class GrokApiService {
     }
 
     /**
-     * 统一的 Axios 请求封装
+     * 统一的 HTTP 请求封装
      */
     async _request(options) {
         const {
@@ -235,7 +236,7 @@ export class GrokApiService {
             ...otherOptions
         } = options;
 
-        const axiosConfig = { 
+        const reqOptions = { 
             method, 
             url, 
             headers, 
@@ -243,12 +244,12 @@ export class GrokApiService {
             timeout,
             ...otherOptions
         };
-        if (responseType) axiosConfig.responseType = responseType;
+        if (responseType) reqOptions.responseType = responseType;
         
-        this._applySidecar(axiosConfig);
+        this._applySidecar(reqOptions);
 
         try {
-            return await axios(axiosConfig);
+            return await this.client.request(reqOptions);
         } catch (err) {
             const status = err.response?.status;
             const errMsg = String(err.response?.data?.error || err.response?.data?.message || err.message || '');
