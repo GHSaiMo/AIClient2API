@@ -1067,7 +1067,36 @@ async saveCredentialsToFile(filePath, newData) {
             }
         } catch (error) {
             logger.error('[Kiro Auth] Token refresh failed:', error.message);
-            throw new Error(`Token refresh failed: ${error.message}`);
+            const msg = String(error?.message || '').toLowerCase();
+            const dataStr = typeof error?.response?.data === 'string'
+                ? error.response.data.toLowerCase()
+                : JSON.stringify(error?.response?.data || '').toLowerCase();
+            const status = error?.response?.status || error?.status;
+
+            const isDefinitive = msg.includes('bad credentials') ||
+                dataStr.includes('bad credentials') ||
+                msg.includes('invalid_grant') ||
+                dataStr.includes('invalid_grant') ||
+                msg.includes('invalid grant') ||
+                dataStr.includes('invalid grant') ||
+                msg.includes('unauthorized') ||
+                dataStr.includes('unauthorized') ||
+                msg.includes('missing accesstoken') ||
+                msg.includes('no refresh token available') ||
+                status === 400 ||
+                status === 401;
+
+            if (isDefinitive) {
+                logger.warn(`[Kiro Auth] Definitive token refresh failure for node ${this.uuid || 'unknown'}: ${error.message}. Marking credential as unhealthy immediately.`);
+                this._markCredentialUnhealthy(`Token refresh failed: ${error.message}`, error);
+            }
+
+            const refreshError = new Error(`Token refresh failed: ${error.message}`);
+            refreshError.credentialMarkedUnhealthy = isDefinitive;
+            refreshError.shouldSwitchCredential = true;
+            refreshError.isDefinitiveAuthFailure = isDefinitive;
+            refreshError.status = status || (isDefinitive ? 401 : null);
+            throw refreshError;
         }
     }
 

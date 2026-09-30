@@ -579,10 +579,12 @@ export class ProviderPoolManager {
                 // 增加错误计数（用于普通的健康检查参考，虽然刷新错误主要参考 refreshCount）
                 config.errorCount = (config.errorCount || 0) + 1;
 
-                // 只有当刷新重试次数达到上限（5次）时，才标记为不健康
-                // 注意：refreshCount 在进入本方法后的 try 块前已经自增（L466）
-                if (config.refreshCount >= 5) {
-                    this.markProviderUnhealthyImmediately(providerType, config, `Refresh failed after maximum attempts (5): ${error.message}`);
+                const isDefinitive = error.isDefinitiveAuthFailure === true ||
+                    /bad credentials|invalid_grant|invalid grant|unauthorized/i.test(String(error?.message || ''));
+
+                // 刷新重试次数达到上限（5次）或明确凭据致命失效时，立即标记为不健康
+                if (config.refreshCount >= 5 || isDefinitive) {
+                    this.markProviderUnhealthyImmediately(providerType, config, `Refresh failed (${isDefinitive ? 'definitive failure' : 'max attempts (5)'}): ${error.message}`);
                 } else {
                     // 关键修复：重置 needsRefresh 为 false，允许该节点回到池中
                     // 这样它才有机会被下一次请求选中，从而再次触发刷新重试

@@ -1342,6 +1342,10 @@ export async function handleStreamRequest(res, service, model, requestBody, from
                 logger.warn(`[Provider Pool] Grok auth failure for ${toProvider} (${pooluuid}). Marking as needsRefresh: ${error.message}`);
                 providerPoolManager.markProviderNeedRefresh(toProvider, { uuid: pooluuid });
                 credentialMarkedUnhealthy = true;
+            } else if (error.isDefinitiveAuthFailure === true || status === 401) {
+                logger.warn(`[Provider Pool] Definitive auth failure for ${toProvider} (${pooluuid}). Marking as unhealthy immediately: ${error.message}`);
+                providerPoolManager.markProviderUnhealthyImmediately(toProvider, { uuid: pooluuid }, error.message);
+                credentialMarkedUnhealthy = true;
             } else if (error.response?.status === 400) {
                 // 400 报错码通常是请求参数问题，不记录为提供商错误
                 logger.info(`[Provider Pool] Skipping unhealthy marking for ${toProvider} (${pooluuid}) due to status 400 (client error)`);
@@ -1631,6 +1635,10 @@ export async function handleUnaryRequest(res, service, model, requestBody, fromP
             if (isGrokAuthFailure) {
                 logger.warn(`[Provider Pool] Grok auth failure for ${toProvider} (${pooluuid}). Marking as needsRefresh: ${error.message}`);
                 providerPoolManager.markProviderNeedRefresh(toProvider, { uuid: pooluuid });
+                credentialMarkedUnhealthy = true;
+            } else if (error.isDefinitiveAuthFailure === true || status === 401) {
+                logger.warn(`[Provider Pool] Definitive auth failure for ${toProvider} (${pooluuid}). Marking as unhealthy immediately: ${error.message}`);
+                providerPoolManager.markProviderUnhealthyImmediately(toProvider, { uuid: pooluuid }, error.message);
                 credentialMarkedUnhealthy = true;
             } else if (error.response?.status === 400) {
                 // 400 报错码通常是请求参数问题，不记录为提供商错误
