@@ -52,14 +52,19 @@ switch_to_local() {
     done
 
     # 4. 启动本地 AIClient2API 服务
+    local start_cmd="npm start"
+    if command -v bun >/dev/null 2>&1 || [ -x "$HOME/.bun/bin/bun" ]; then
+        start_cmd="bun run start"
+    fi
+
     if tmux has-session -t "${TMUX_LOCAL_SESSION}" 2>/dev/null; then
         echo "🔄 重启已有本地 Tmux 会话: ${TMUX_LOCAL_SESSION}"
         tmux send-keys -t "${TMUX_LOCAL_SESSION}" C-c
         sleep 1
-        tmux send-keys -t "${TMUX_LOCAL_SESSION}" "cd ${PROJECT_DIR} && npm start" Enter
+        tmux send-keys -t "${TMUX_LOCAL_SESSION}" "cd ${PROJECT_DIR} && export PATH=\"\$HOME/.bun/bin:\$PATH\" && ${start_cmd}" Enter
     else
         echo "🚀 创建新 Tmux 会话启动本地服务: ${TMUX_LOCAL_SESSION}"
-        tmux new-session -d -s "${TMUX_LOCAL_SESSION}" "bash -c 'cd ${PROJECT_DIR} && npm start; exec bash'"
+        tmux new-session -d -s "${TMUX_LOCAL_SESSION}" "bash -c 'cd ${PROJECT_DIR} && export PATH=\"\$HOME/.bun/bin:\$PATH\" && ${start_cmd}; exec bash'"
     fi
 
     # 5. 等待本地服务就绪
@@ -102,8 +107,8 @@ switch_to_nas() {
     if [ -n "$pids" ]; then
         for pid in $pids; do
             local cmd=$(ps -p $pid -o comm= 2>/dev/null || true)
-            if [[ "$cmd" == *"node"* ]]; then
-                echo "🛑 杀死残留本地 Node 进程 (PID: $pid)"
+            if [[ "$cmd" == *"node"* || "$cmd" == *"bun"* ]]; then
+                echo "🛑 杀死残留本地 Node/Bun 进程 (PID: $pid)"
                 kill -9 $pid 2>/dev/null || true
             fi
         done
