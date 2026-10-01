@@ -409,11 +409,10 @@ export async function performUpdate(targetTag = null) {
         const localVersionTag = updateInfo.localVersion.startsWith('v') ? updateInfo.localVersion : `v${updateInfo.localVersion}`;
         if (isValidVersionTag(localVersionTag) && isValidVersionTag(finalTag)) {
             const { stdout: diffOutput } = await execFileAsync('git', ['diff', `${localVersionTag}..${finalTag}`, '--name-only']);
-            if (diffOutput.includes('package.json') || diffOutput.includes('package-lock.json')) {
-                logger.info('[Update] package.json changed, running npm install...');
-                await execAsync('npm install');
+                const installCmd = process.versions.bun ? 'bun install' : 'npm install';
+                logger.info(`[Update] package.json changed, running ${installCmd}...`);
+                await execAsync(installCmd);
                 needsRestart = true;
-            }
         } else {
             logger.warn('[Update] Skipping package change check due to invalid version tag');
         }
@@ -595,13 +594,14 @@ async function performTarballUpdate(localVersion, latestTag) {
         if (oldPackageJson) {
             const newPackageJson = readFileSync(path.join(appDir, 'package.json'), 'utf-8');
             if (oldPackageJson !== newPackageJson) {
-                logger.info('[Update] package.json changed, running npm install...');
+                const installCmd = process.versions.bun ? 'bun install' : 'npm install';
+                logger.info(`[Update] package.json changed, running ${installCmd}...`);
                 needsNpmInstall = true;
                 try {
-                    await execAsync('npm install', { cwd: appDir });
-                    logger.info('[Update] npm install completed');
+                    await execAsync(installCmd, { cwd: appDir });
+                    logger.info(`[Update] ${installCmd} completed`);
                 } catch (npmError) {
-                    logger.error('[Update] npm install failed:', npmError.message);
+                    logger.error(`[Update] ${installCmd} failed:`, npmError.message);
                     // 不抛出错误，继续更新流程
                 }
             }

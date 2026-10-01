@@ -32,9 +32,12 @@
     "supertest": "^6.3.3"
   },
   "scripts": {
-    "start": "node src/core/master.js",
-    "start:standalone": "node src/services/api-server.js",
-    "start:dev": "node src/core/master.js --dev",
+    "start": "bun src/core/master.js",
+    "start:node": "node src/core/master.js",
+    "start:standalone": "bun src/services/api-server.js",
+    "start:node:standalone": "node src/services/api-server.js",
+    "start:dev": "bun --watch src/core/master.js --dev",
+    "start:node:dev": "node src/core/master.js --dev",
     "test": "jest --forceExit",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",

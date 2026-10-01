@@ -48,7 +48,7 @@ function getPluginStack() {
     const stack = err.stack || '';
     const lines = stack.split('\n');
     for (const line of lines) {
-        if (line.includes('node:internal') || line.includes('node:')) continue;
+        if (line.includes('node:internal') || line.includes('node:') || line.includes('bun:') || line.includes('[native code]')) continue;
         if (line.includes('plugin-installer.js') || line.includes('plugin-manager.js') || line.includes('security-hardening.js')) continue;
         
         if (/src[\\/]plugins(-user)?[\\/]/.test(line)) {
@@ -62,7 +62,7 @@ function getPluginContext(stack) {
     if (!stack) return null;
     const lines = stack.split('\n');
     for (const line of lines) {
-        if (line.includes('node:internal') || line.includes('node:')) continue;
+        if (line.includes('node:internal') || line.includes('node:') || line.includes('bun:') || line.includes('[native code]')) continue;
         if (line.includes('plugin-installer.js') || line.includes('plugin-manager.js') || line.includes('security-hardening.js')) continue;
 
         const match = line.match(/src[\\/](plugins|plugins-user)[\\/]([^\\/]+)/);
@@ -968,6 +968,8 @@ process.env = new Proxy(process.env, {
     }
 });
 
-syncBuiltinESMExports();
+if (typeof syncBuiltinESMExports === 'function') {
+    syncBuiltinESMExports();
+}
 
 console.log('[Security Hardening] Active: Plugin file write constraints and command execution ban are successfully configured.');
