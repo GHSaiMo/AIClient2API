@@ -361,6 +361,7 @@ export function getUndiciDispatcherForUrl(proxyUrl, sourceDisplay = '') {
         }
 
         if (dispatcher) {
+            dispatcher._proxyUrl = cleanUrl;
             undiciDispatcherCache.set(cleanUrl, dispatcher);
             const source = sourceDisplay ? ` for ${sourceDisplay}` : '';
             logger.info(`[Proxy] Created Undici Dispatcher${source}: ${cleanUrl}`);
@@ -404,6 +405,16 @@ export function getUndiciDispatcherForProvider(config, providerType) {
  * @returns {Object} 更新后的 requestOptions
  */
 export function configureUndiciProxy(requestOptions, config, providerType) {
+    if (!isProxyEnabledForProvider(config, providerType)) {
+        return requestOptions;
+    }
+
+    const boundProxyUrl = getNodeProxyUrlFromBinding(config, providerType);
+    const proxyUrl = (boundProxyUrl || config.PROXY_URL || '').trim();
+    if (proxyUrl) {
+        requestOptions.proxyUrl = proxyUrl;
+    }
+
     const dispatcher = getUndiciDispatcherForProvider(config, providerType);
     if (dispatcher) {
         requestOptions.dispatcher = dispatcher;

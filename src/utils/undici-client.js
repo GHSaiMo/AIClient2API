@@ -31,6 +31,45 @@ export class HttpError extends Error {
     }
 }
 
+const isBun = typeof Bun !== 'undefined' || !!process.versions?.bun;
+
+/**
+ * 格式化代理 URL 供 Bun 原生 fetch 使用（Bun 原生 fetch 仅支持 HTTP/HTTPS 代理）
+ * 对于 SOCKS5 代理（如 Clash 混合端口），转换为 http:// 协议
+ */
+function formatBunProxy(proxyUrl) {
+    if (!proxyUrl || typeof proxyUrl !== 'string') return undefined;
+    const trimmed = proxyUrl.trim();
+    if (!trimmed) return undefined;
+    return trimmed.replace(/^socks5h?:\/\//i, 'http://');
+}
+
+/**
+ * 检查目标 URL 是否为本机回环或受 NO_PROXY 豁免的局域网地址
+ */
+function isLocalOrNoProxy(urlStr) {
+    try {
+        const u = new URL(urlStr);
+        const host = u.hostname.toLowerCase();
+        if (host === 'localhost' || host === '127.0.0.1' || host === '::1') return true;
+        const noProxyEnv = process.env.NO_PROXY || process.env.no_proxy || '';
+        if (noProxyEnv) {
+            const parts = noProxyEnv.split(',').map(p => p.trim().toLowerCase());
+            for (const part of parts) {
+                if (!part) continue;
+                if (host === part || host.endsWith('.' + part)) return true;
+                if (part.includes('/')) {
+                    const prefix = part.split('/')[0].replace(/\.0+$/, '');
+                    if (host.startsWith(prefix)) return true;
+                }
+            }
+        }
+        return false;
+    } catch {
+        return false;
+    }
+}
+
 // 本地专用 Dispatcher 单例（仅用于与本地 Sidecar 通信，严格禁用外部代理）
 let localDispatcherInstance = null;
 
@@ -41,6 +80,7 @@ function getLocalDispatcher() {
             keepAliveMaxTimeout: 60000,
             connections: 64,
         });
+        localDispatcherInstance._isLocal = true;
     }
     return localDispatcherInstance;
 }
@@ -81,6 +121,7 @@ export class UndiciHttpClient {
         this.defaultHeaders = options.headers || {};
         this.defaultTimeout = options.timeout || NETWORK.DEFAULT_TIMEOUT || 120000;
         this.dispatcher = options.dispatcher || null;
+        this.proxyUrl = options.proxyUrl || options.proxy || options.dispatcher?._proxyUrl || null;
     }
 
     /**
@@ -170,6 +211,7 @@ export class UndiciHttpClient {
             timeout,
             signal: customSignal,
             dispatcher = this.dispatcher,
+            proxyUrl = options.proxyUrl || options.proxy || dispatcher?._proxyUrl || this.proxyUrl,
             responseType = 'json',
             validateStatus
         } = options;
@@ -220,14 +262,26 @@ export class UndiciHttpClient {
 
         const reqMeta = { url: fullUrl, method: method.toUpperCase() };
 
+        const fetchOptions = {
+            method: reqMeta.method,
+            headers: mergedHeaders,
+            body: reqBody,
+            signal,
+            dispatcher: dispatcher || undefined,
+        };
+
+        if (isBun) {
+            const isLocal = dispatcher?._isLocal || isLocalOrNoProxy(fullUrl);
+            if (!isLocal && proxyUrl) {
+                const bunProxy = formatBunProxy(proxyUrl);
+                if (bunProxy) {
+                    fetchOptions.proxy = bunProxy;
+                }
+            }
+        }
+
         try {
-            const response = await fetch(fullUrl, {
-                method: reqMeta.method,
-                headers: mergedHeaders,
-                body: reqBody,
-                signal,
-                dispatcher: dispatcher || undefined,
-            });
+            const response = await fetch(fullUrl, fetchOptions);
 
             // 转换响应 Headers 为普通小写 key 对象
             const resHeaders = {};
@@ -344,6 +398,7 @@ export class UndiciHttpClient {
             timeout = 300000,
             signal: customSignal,
             dispatcher = this.dispatcher,
+            proxyUrl = options.proxyUrl || options.proxy || dispatcher?._proxyUrl || this.proxyUrl,
             validateStatus
         } = options;
 
@@ -364,15 +419,27 @@ export class UndiciHttpClient {
 
         const reqMeta = { url: fullUrl, method: method.toUpperCase() };
 
+        const fetchOptions = {
+            method: reqMeta.method,
+            headers: mergedHeaders,
+            body: reqBody,
+            signal,
+            dispatcher: dispatcher || undefined,
+        };
+
+        if (isBun) {
+            const isLocal = dispatcher?._isLocal || isLocalOrNoProxy(fullUrl);
+            if (!isLocal && proxyUrl) {
+                const bunProxy = formatBunProxy(proxyUrl);
+                if (bunProxy) {
+                    fetchOptions.proxy = bunProxy;
+                }
+            }
+        }
+
         let response;
         try {
-            response = await fetch(fullUrl, {
-                method: reqMeta.method,
-                headers: mergedHeaders,
-                body: reqBody,
-                signal,
-                dispatcher: dispatcher || undefined,
-            });
+            response = await fetch(fullUrl, fetchOptions);
         } catch (error) {
             const isTimeout = error.name === 'TimeoutError' || error.code === 23 || (error.name === 'AbortError' && signal.aborted && signal.reason?.name === 'TimeoutError');
             const isAbort = error.name === 'AbortError' || error.code === 20;

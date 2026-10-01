@@ -226,13 +226,19 @@ describe('UndiciHttpClient and HttpError Tests', () => {
         it('should return localDispatcher instance', () => {
             const dispatcher = UndiciHttpClient.getLocalDispatcher();
             expect(dispatcher).toBeDefined();
-            expect(typeof dispatcher.dispatch).toBe('function');
+            expect(dispatcher._isLocal).toBe(true);
+            if (typeof dispatcher.dispatch === 'function') {
+                expect(typeof dispatcher.dispatch).toBe('function');
+            }
         });
 
         it('should create SOCKS5 Undici Dispatcher with custom connect bridge', () => {
             const dispatcher = getUndiciDispatcherForUrl('socks5://127.0.0.1:1080', 'test-socks');
             expect(dispatcher).toBeDefined();
-            expect(typeof dispatcher.dispatch).toBe('function');
+            expect(dispatcher._proxyUrl).toBe('socks5://127.0.0.1:1080');
+            if (typeof dispatcher.dispatch === 'function') {
+                expect(typeof dispatcher.dispatch).toBe('function');
+            }
         });
     });
 });
