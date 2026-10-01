@@ -201,6 +201,9 @@ async function commonFetch(url, options = {}, useSystemProxy = false) {
         const dispatcher = getUndiciDispatcherForProvider(config, MODEL_PROVIDER.QWEN_API);
         if (dispatcher) {
             mergedOptions.dispatcher = dispatcher;
+            if (dispatcher._proxyUrl) {
+                mergedOptions.proxy = dispatcher._proxyUrl.replace(/^socks5h?:\/\//i, 'http://');
+            }
         }
     } else if (!useSystemProxy) {
         logger.debug('[Qwen] System proxy disabled for fetch request');
