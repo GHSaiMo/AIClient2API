@@ -52,12 +52,22 @@ export class ImagineWebSocketService {
 
         logger.debug(`[Grok WS] Connecting to ${this.wsUrl} for prompt: ${prompt.substring(0, 50)}... (pro=${enablePro})`);
 
-        const ws = new WebSocket(this.wsUrl, {
+        const wsOptions = {
             headers,
-            agent,
             handshakeTimeout: 30000,
             rejectUnauthorized: false
-        });
+        };
+
+        const isBun = typeof Bun !== 'undefined' || !!process.versions?.bun;
+        const rawProxyUrl = this.config?.PROXY_URL || this.config?.TLS_SIDECAR_PROXY_URL;
+        if (isBun && rawProxyUrl) {
+            // Bun 原生 WebSocket 支持 HTTP/HTTPS 代理隧道；将 socks5 转为混合端口的 http 代理
+            wsOptions.proxy = rawProxyUrl.replace(/^socks5h?:\/\//i, 'http://');
+        } else if (agent) {
+            wsOptions.agent = agent;
+        }
+
+        const ws = new WebSocket(this.wsUrl, wsOptions);
 
         const queue = [];
         let done = false;
