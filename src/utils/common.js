@@ -1101,6 +1101,19 @@ export async function handleStreamRequest(res, service, model, requestBody, from
                 logger.info('[Stream] Stopping iteration due to client disconnect');
                 break;
             }
+
+            // 检查上游是否因内容安全策略在首帧拦截了 Prompt
+            if (nativeChunk?.promptFeedback?.blockReason && !anyDataSent) {
+                const blockReason = nativeChunk.promptFeedback.blockReason;
+                const blockMessage = nativeChunk.promptFeedback.blockReasonMessage || `The prompt was blocked by upstream safety policy: ${blockReason}`;
+                logger.warn(`[Stream] [${toProvider}] Upstream stream blocked prompt by content policy: ${blockReason}. ${blockMessage}`);
+                const policyError = new Error(`[${toProvider}] Request blocked by content policy: ${blockReason}. ${blockMessage}`);
+                policyError.status = 400;
+                policyError.code = 'content_filter';
+                policyError.type = 'content_filter_error';
+                policyError.isPromptBlocked = true;
+                throw policyError;
+            }
             
             // Extract text for logging purposes
             const chunkText = extractResponseText(nativeChunk, toProvider);
@@ -1514,6 +1527,55 @@ export async function handleUnaryRequest(res, service, model, requestBody, fromP
         }
         
         const responseText = extractResponseText(nativeResponse, toProvider);
+
+        // 1. 检查上游是否因内容安全策略拦截了 Prompt (如 Google Gemini promptFeedback.blockReason)
+        if (nativeResponse?.promptFeedback?.blockReason) {
+            const blockReason = nativeResponse.promptFeedback.blockReason;
+            const blockMessage = nativeResponse.promptFeedback.blockReasonMessage || `The prompt was blocked by upstream safety policy: ${blockReason}`;
+            logger.warn(`[${toProvider}] Upstream blocked prompt by content policy: ${blockReason}. ${blockMessage}`);
+            const policyError = new Error(`[${toProvider}] Request blocked by content policy: ${blockReason}. ${blockMessage}`);
+            policyError.status = 400;
+            policyError.code = 'content_filter';
+            policyError.type = 'content_filter_error';
+            policyError.isPromptBlocked = true;
+            throw policyError;
+        }
+
+        // 2. 检查候选回复的结束原因是否为内容策略拦截
+        const primaryCandidate = nativeResponse?.candidates?.[0];
+        const candidateFinishReason = primaryCandidate?.finishReason;
+        const isContentBlockedCandidate = candidateFinishReason && [
+            'SAFETY', 'RECITATION', 'BLOCKLIST', 'PROHIBITED_CONTENT', 'SPII', 'MODEL_ARMOR'
+        ].includes(String(candidateFinishReason).toUpperCase());
+
+        // 3. 检查是否有实质内容（文本、工具调用、或思考过程）
+        const hasContent = Boolean(responseText && responseText.trim().length > 0);
+        const hasTools = Boolean(
+            primaryCandidate?.content?.parts?.some(p => p.functionCall) ||
+            nativeResponse?.functionCalls ||
+            nativeResponse?.tool_calls ||
+            nativeResponse?.choices?.[0]?.message?.tool_calls?.length > 0 ||
+            (Array.isArray(nativeResponse?.content) && nativeResponse.content.some(c => c.type === 'tool_use'))
+        );
+        const hasReasoning = Boolean(
+            primaryCandidate?.content?.parts?.some(p => p.thought || (p.text && p.thought === true)) ||
+            nativeResponse?.choices?.[0]?.message?.reasoning_content ||
+            (Array.isArray(nativeResponse?.content) && nativeResponse.content.some(c => c.type === 'thinking'))
+        );
+
+        if (!hasContent && !hasTools && !hasReasoning) {
+            if (isContentBlockedCandidate) {
+                logger.warn(`[${toProvider}] Upstream candidate blocked by content policy: ${candidateFinishReason}.`);
+                const policyError = new Error(`[${toProvider}] Response blocked by content policy: ${candidateFinishReason}`);
+                policyError.status = 400;
+                policyError.code = 'content_filter';
+                policyError.type = 'content_filter_error';
+                policyError.isPromptBlocked = true;
+                throw policyError;
+            }
+            logger.warn(`[${toProvider}] Upstream returned empty response (no text, tools, or reasoning) in unary request.`);
+            throw createEmptyUpstreamResponseError(customName ? `${toProvider}/${customName}` : toProvider);
+        }
 
         // Convert the response back to the client's format (fromProvider), if necessary.
         let clientResponse = nativeResponse;
