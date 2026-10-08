@@ -295,7 +295,26 @@ export class GeminiConverter extends BaseConverter {
         
         // 提取 tool_calls
         const toolCalls = [];
+        const finishReasonMap = {
+            'FINISH_REASON_UNSPECIFIED': 'stop',
+            'STOP': 'stop',
+            'MAX_TOKENS': 'length',
+            'SAFETY': 'content_filter',
+            'RECITATION': 'content_filter',
+            'OTHER': 'stop',
+            'BLOCKLIST': 'content_filter',
+            'PROHIBITED_CONTENT': 'content_filter',
+            'SPII': 'content_filter',
+            'MALFORMED_FUNCTION_CALL': 'stop',
+            'MODEL_ARMOR': 'content_filter',
+        };
+
         let finishReason = "stop";
+        if (geminiResponse?.promptFeedback?.blockReason) {
+            finishReason = "content_filter";
+        } else if (geminiResponse?.candidates?.[0]?.finishReason) {
+            finishReason = finishReasonMap[geminiResponse.candidates[0].finishReason] || 'stop';
+        }
         
         if (geminiResponse && geminiResponse.candidates) {
             for (const candidate of geminiResponse.candidates) {
@@ -664,13 +683,14 @@ export class GeminiConverter extends BaseConverter {
      */
     toClaudeResponse(geminiResponse, model) {
         if (!geminiResponse || !geminiResponse.candidates || geminiResponse.candidates.length === 0) {
+            const isBlocked = Boolean(geminiResponse?.promptFeedback?.blockReason);
             return {
                 id: `msg_${uuidv4()}`,
                 type: "message",
                 role: "assistant",
                 content: [],
                 model: model,
-                stop_reason: "end_turn",
+                stop_reason: isBlocked ? "refusal" : "end_turn",
                 stop_sequence: null,
                 usage: {
                     input_tokens: geminiResponse?.usageMetadata?.promptTokenCount || 0,
@@ -696,10 +716,12 @@ export class GeminiConverter extends BaseConverter {
                     stopReason = 'max_tokens';
                     break;
                 case 'SAFETY':
-                    stopReason = 'safety';
-                    break;
                 case 'RECITATION':
-                    stopReason = 'recitation';
+                case 'BLOCKLIST':
+                case 'PROHIBITED_CONTENT':
+                case 'SPII':
+                case 'MODEL_ARMOR':
+                    stopReason = 'refusal';
                     break;
                 case 'OTHER':
                     stopReason = 'other';
