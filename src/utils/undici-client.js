@@ -85,6 +85,21 @@ function getLocalDispatcher() {
     return localDispatcherInstance;
 }
 
+// 直连（无代理）默认 Dispatcher：undici 默认 keepAliveTimeout 仅 4s，低频请求每次都要重新握手 TLS
+let defaultDispatcherInstance = null;
+
+function getDefaultDispatcher() {
+    if (isBun) return undefined; // Bun 走原生 fetch，保持原行为
+    if (!defaultDispatcherInstance) {
+        defaultDispatcherInstance = new UndiciAgent({
+            keepAliveTimeout: 30000,
+            keepAliveMaxTimeout: 60000,
+            connections: 128,
+        });
+    }
+    return defaultDispatcherInstance;
+}
+
 /**
  * 快速检查请求头是否存在（大小写不敏感，零数组分配）
  */
@@ -267,7 +282,7 @@ export class UndiciHttpClient {
             headers: mergedHeaders,
             body: reqBody,
             signal,
-            dispatcher: dispatcher || undefined,
+            dispatcher: dispatcher || getDefaultDispatcher(),
         };
 
         if (isBun) {
@@ -424,7 +439,7 @@ export class UndiciHttpClient {
             headers: mergedHeaders,
             body: reqBody,
             signal,
-            dispatcher: dispatcher || undefined,
+            dispatcher: dispatcher || getDefaultDispatcher(),
         };
 
         if (isBun) {
@@ -507,12 +522,14 @@ export class UndiciHttpClient {
                         if (done) break;
 
                         buffer += decoder.decode(value, { stream: true });
+                        // 用游标切行，只在块末尾做一次 slice，避免长缓冲被反复拷贝
+                        let start = 0;
                         let newlineIndex;
-                        while ((newlineIndex = buffer.indexOf('\n')) !== -1) {
-                            const line = buffer.substring(0, newlineIndex);
-                            buffer = buffer.substring(newlineIndex + 1);
-                            yield line;
+                        while ((newlineIndex = buffer.indexOf('\n', start)) !== -1) {
+                            yield buffer.substring(start, newlineIndex);
+                            start = newlineIndex + 1;
                         }
+                        if (start > 0) buffer = buffer.substring(start);
                     }
 
                     if (buffer.length > 0) {

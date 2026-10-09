@@ -1076,6 +1076,8 @@ export async function handleStreamRequest(res, service, model, requestBody, from
         await handleUnifiedResponse(res, '', true);
     }
 
+    // 流式钩子按顺序串行执行，但不阻塞向客户端写数据；流结束时统一等待
+    let streamHookChain = Promise.resolve();
     let hasToolCall = false;
     let hasMessageStop = false; // 跟踪是否已经发送过结束标志（message_stop / done）
 
@@ -1131,14 +1133,17 @@ export async function handleStreamRequest(res, service, model, requestBody, from
             if (hookRequestId) {
                 try {
                     const pluginManager = getPluginManager();
-                    await pluginManager.executeHook('onStreamChunk', {
+                    const hookPayload = {
                         nativeChunk,
                         chunkToSend,
                         fromProvider,
                         toProvider,
                         model,
                         requestId: hookRequestId
-                    });
+                    };
+                    streamHookChain = streamHookChain
+                        .then(() => pluginManager.executeHook('onStreamChunk', hookPayload))
+                        .catch(() => {});
                 } catch (e) {}
             }
 
@@ -1198,17 +1203,11 @@ export async function handleStreamRequest(res, service, model, requestBody, from
                     hasMessageStop = true;
                 }
 
-                if (addEvent) {
-                    const written = await safeStreamWriteChunk(res, `event: ${chunk.type}\n`, clientDisconnected);
-                    if (written) {
-                        anyDataSent = true;
-                    }
-                    if (clientDisconnected.value) {
-                        break;
-                    }
-                }
-
-                const written = await safeStreamWriteChunk(res, `data: ${JSON.stringify(chunk)}\n\n`, clientDisconnected);
+                // event 行与 data 行合并为一次写入，减少 write 调用与小包
+                const ssePayload = addEvent
+                    ? `event: ${chunk.type}\ndata: ${JSON.stringify(chunk)}\n\n`
+                    : `data: ${JSON.stringify(chunk)}\n\n`;
+                const written = await safeStreamWriteChunk(res, ssePayload, clientDisconnected);
                 if (written) {
                     anyDataSent = true;
                 }
@@ -1495,6 +1494,9 @@ export async function handleStreamRequest(res, service, model, requestBody, from
             }
         }
         
+        // 确保所有流式钩子已执行完毕
+        await streamHookChain;
+
         // 只在首次请求时记录日志（避免重试时重复记录）
         if (!isRetry) {
             const fullResponseText = fullResponseTextChunks.join('');

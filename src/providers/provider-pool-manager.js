@@ -100,7 +100,11 @@ export class ProviderPoolManager {
         
         // 添加防抖机制，避免频繁的文件 I/O 操作
         this.saveDebounceTime = options.saveDebounceTime || 1000; // 默认1秒防抖
+        this.saveMaxWaitTime = options.saveMaxWaitTime || 5000; // 持续有更新时，最迟 5 秒必须落盘
+        this.selectionSaveDebounceTime = options.selectionSaveDebounceTime || 3000; // 选号产生的 lastUsed/usageCount 更新不紧急
         this.saveTimer = null;
+        this.saveDeadline = 0;
+        this.firstPendingAt = 0;
         this.pendingSaves = new Set(); // 记录待保存的 providerType
         
         // Fallback 链配置
@@ -1166,15 +1170,17 @@ export class ProviderPoolManager {
             return null;
         }
 
-        // 改进：使用统一的评分策略进行选择
-        // 传入当前时间戳 now 确保一致性
-        const selected = availableAndHealthyProviders.sort((a, b) => {
-            const scoreA = this._calculateNodeScore(a, now, minSeq);
-            const scoreB = this._calculateNodeScore(b, now, minSeq);
-            if (scoreA !== scoreB) return scoreA - scoreB;
-            // 如果分值相同，使用 UUID 排序确保确定性
-            return a.uuid < b.uuid ? -1 : 1;
-        })[0];
+        // 改进：使用统一的评分策略进行选择（单次线性扫描取最小值，避免整体排序并重复计算评分）
+        let selected = null;
+        let selectedScore = Infinity;
+        for (const candidate of availableAndHealthyProviders) {
+            const score = this._calculateNodeScore(candidate, now, minSeq);
+            // 分值相同，使用 UUID 排序确保确定性
+            if (selected === null || score < selectedScore || (score === selectedScore && candidate.uuid < selected.uuid)) {
+                selected = candidate;
+                selectedScore = score;
+            }
+        }
 
         // 始终更新 lastUsed（确保 LRU 策略生效，避免并发请求选到同一个 provider）
         // usageCount 只在请求成功后才增加（由 skipUsageCount 控制）
@@ -1184,14 +1190,13 @@ export class ProviderPoolManager {
         this._selectionSequence++;
         selected.config._lastSelectionSeq = this._selectionSequence;
         
-        // 强制打印选中日志，方便排查并发问题
-        this._log('info', `[Concurrency Control] Atomic selection: ${this._getDisplayName(selected.config)} (Seq: ${this._selectionSequence})`);
+        this._log('debug', `[Concurrency Control] Atomic selection: ${this._getDisplayName(selected.config)} (Seq: ${this._selectionSequence})`);
 
         if (!options.skipUsageCount) {
             selected.config.usageCount++;
         }
-        // 使用防抖保存（文件 I/O 是异步的，但内存已经更新）
-        this._debouncedSave(providerType);
+        // 使用防抖保存（文件 I/O 是异步的，但内存已经更新）；选号路径使用更长的防抖窗口，降低整文件写入频率
+        this._debouncedSave(providerType, this.selectionSaveDebounceTime);
 
         this._log('debug', `Selected provider for ${providerType} (LRU): ${this._getDisplayName(selected.config)}${requestedModel ? ` for model: ${requestedModel}` : ''}${options.skipUsageCount ? ' (skip usage count)' : ''}`);
         
@@ -2476,19 +2481,30 @@ export class ProviderPoolManager {
      * 延迟保存操作，避免频繁的文件 I/O
      * @private
      */
-    _debouncedSave(providerType) {
+    _debouncedSave(providerType, delay = this.saveDebounceTime) {
         // 将待保存的 providerType 添加到集合中
         this.pendingSaves.add(providerType);
-        
-        // 清除之前的定时器
+
+        const now = Date.now();
+        if (!this.firstPendingAt) {
+            this.firstPendingAt = now;
+        }
+
+        // 持续高频更新时防抖会不断被推迟，这里设置最长等待上限，避免崩溃时丢失大量计数
+        const deadline = Math.min(now + delay, this.firstPendingAt + this.saveMaxWaitTime);
+
+        // 已有更早的定时器则保留；否则（含新的更紧急请求）重设为更早的时间点
+        if (this.saveTimer && this.saveDeadline <= deadline) {
+            return;
+        }
         if (this.saveTimer) {
             clearTimeout(this.saveTimer);
         }
-        
-        // 设置新的定时器
+
+        this.saveDeadline = deadline;
         this.saveTimer = setTimeout(() => {
             this._flushPendingSaves();
-        }, this.saveDebounceTime);
+        }, Math.max(0, deadline - now));
     }
     
     /**
@@ -2501,6 +2517,8 @@ export class ProviderPoolManager {
             clearTimeout(this.saveTimer);
             this.saveTimer = null;
         }
+        this.saveDeadline = 0;
+        this.firstPendingAt = 0;
 
         const filePath = this.globalConfig.PROVIDER_POOLS_FILE_PATH || 'configs/provider_pools.json';
         
