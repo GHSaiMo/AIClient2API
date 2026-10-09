@@ -18,6 +18,22 @@ const agentCache = new Map();
 // Undici Dispatcher 缓存，复用连接池
 const undiciDispatcherCache = new Map();
 
+/**
+ * 脱敏代理 URL 中的账号密码，避免凭据写入日志
+ */
+function redactProxyUrl(proxyUrl) {
+    try {
+        const u = new URL(proxyUrl);
+        if (u.username || u.password) {
+            u.username = '***';
+            u.password = '';
+        }
+        return u.toString().replace(/\/$/, '');
+    } catch {
+        return '[invalid proxy url]';
+    }
+}
+
 // 用于存储全局通配符代理获取器，解决启动初始化时无请求上下文的问题
 let wildcardProxyResolver = null;
 
@@ -185,7 +201,7 @@ export function getProxyConfigForProvider(config, providerType) {
         const clientIp = contextIpNodeProxy?.clientIp || config.ipNodeProxy?.clientIp || 'unknown';
         
         const source = boundProxyUrl ? `${nodeDisplay} (IP binding ${clientIp})` : nodeDisplay;
-        logger.info(`[Proxy] Using ${proxyConfig.proxyType} proxy for ${source}: ${proxyUrl}`);
+        logger.debug(`[Proxy] Using ${proxyConfig.proxyType} proxy for ${source}: ${redactProxyUrl(proxyUrl)}`);
     }
 
     return proxyConfig;
@@ -273,7 +289,7 @@ export function configureTLSSidecar(axiosConfig, config, providerType, defaultBa
         const clientIp = contextIpNodeProxy?.clientIp || config.ipNodeProxy?.clientIp || 'unknown';
         
         const source = boundProxyUrl ? `${nodeDisplay} (IP binding ${clientIp})` : nodeDisplay;
-        logger.info(`[TLS Sidecar] Using sidecar for ${source}${proxyUrl ? ` (proxy: ${proxyUrl})` : ''}`);
+        logger.debug(`[TLS Sidecar] Using sidecar for ${source}${proxyUrl ? ` (proxy: ${redactProxyUrl(proxyUrl)})` : ''}`);
         
         sidecar.wrapAxiosConfig(axiosConfig, proxyUrl);
     }else{
@@ -327,7 +343,6 @@ export function getUndiciDispatcherForUrl(proxyUrl, sourceDisplay = '') {
                 uri: cleanUrl,
                 keepAliveTimeout: 30000,
                 keepAliveMaxTimeout: 60000,
-                maxRedirections: 3,
             });
         } else if (protocol.startsWith('socks')) {
             // SOCKS 代理：通过 socks-proxy-agent 建立 TCP 隧道并桥接给 Undici Agent
@@ -364,7 +379,7 @@ export function getUndiciDispatcherForUrl(proxyUrl, sourceDisplay = '') {
             dispatcher._proxyUrl = cleanUrl;
             undiciDispatcherCache.set(cleanUrl, dispatcher);
             const source = sourceDisplay ? ` for ${sourceDisplay}` : '';
-            logger.info(`[Proxy] Created Undici Dispatcher${source}: ${cleanUrl}`);
+            logger.info(`[Proxy] Created Undici Dispatcher${source}: ${redactProxyUrl(cleanUrl)}`);
         }
         return dispatcher;
     } catch (e) {
@@ -450,7 +465,7 @@ export function configureUndiciTLSSidecar(requestOptions, config, providerType, 
         const contextIpNodeProxy = requestContext.get('ipNodeProxy');
         const clientIp = contextIpNodeProxy?.clientIp || config.ipNodeProxy?.clientIp || 'unknown';
         const source = boundProxyUrl ? `${nodeDisplay} (IP binding ${clientIp})` : nodeDisplay;
-        logger.info(`[TLS Sidecar] Using sidecar (Undici) for ${source}${proxyUrl ? ` (proxy: ${proxyUrl})` : ''}`);
+        logger.debug(`[TLS Sidecar] Using sidecar (Undici) for ${source}${proxyUrl ? ` (proxy: ${redactProxyUrl(proxyUrl)})` : ''}`);
 
         sidecar.wrapUndiciRequest(requestOptions, proxyUrl);
     } else {

@@ -1,8 +1,6 @@
 import { atomicWriteFile } from '../../utils/file-lock.js';
 import { OAuth2Client } from 'google-auth-library';
 import logger from '../../utils/logger.js';
-import * as http from 'http';
-import * as https from 'https';
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -236,20 +234,6 @@ async function* apply_anti_truncation_to_stream(service, model, requestBody) {
 
 export class GeminiApiService {
     constructor(config) {
-        // 配置 HTTP/HTTPS agent 限制连接池大小，避免资源泄漏
-        this.httpAgent = new http.Agent({
-            keepAlive: true,
-            maxSockets: 100,
-            maxFreeSockets: 5,
-            timeout: 120000,
-        });
-        this.httpsAgent = new https.Agent({
-            keepAlive: true,
-            maxSockets: 100,
-            maxFreeSockets: 5,
-            timeout: 120000,
-        });
-
         this.availableModels = [];
         this.isInitialized = false;
 

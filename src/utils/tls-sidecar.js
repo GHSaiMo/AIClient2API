@@ -24,6 +24,9 @@ const HEALTH_CHECK_TIMEOUT = 3000;   // 3s
 const MAX_RESTART_ATTEMPTS = 5;
 const RESTART_DELAY = 2000;          // 2s
 
+// 复用同一个 keep-alive Agent，避免每次请求新建连接池导致 sidecar 连接无法复用
+const sidecarHttpAgent = new http.Agent({ keepAlive: true, maxSockets: 128, maxFreeSockets: 16 });
+
 class TLSSidecar {
     constructor() {
         this.process = null;
@@ -198,7 +201,7 @@ class TLSSidecar {
         // 走 sidecar 不需要 Node.js 侧的 TLS agent，显式使用本地 HTTP agent 避免继承 gaxios 外部代理
         delete axiosConfig.httpAgent;
         delete axiosConfig.httpsAgent;
-        axiosConfig.agent = new http.Agent({ keepAlive: true });
+        axiosConfig.agent = sidecarHttpAgent;
         // 确保 axios 不使用自己的代理
         axiosConfig.proxy = false;
 

@@ -306,8 +306,9 @@ async function startServer() {
     serverInstance = http.createServer({
         // 设置服务器级别的超时
         requestTimeout: 0, // 禁用请求超时（流式响应需要）
-        headersTimeout: 60000, // 头部超时 60 秒
-        keepAliveTimeout: 65000 // Keep-alive 超时
+        keepAliveTimeout: 65000, // Keep-alive 超时
+        // headersTimeout 必须大于 keepAliveTimeout，否则空闲复用的长连接会被提前断开（表现为 ECONNRESET）
+        headersTimeout: 70000
     }, requestHandlerInstance);
 
     // 设置服务器的最大连接数
