@@ -25,10 +25,10 @@ async function extractAllCookies() {
 
   const result = {};
 
-  // Google Chrome (默认 Default profile，包含 acct-935ea9@example.com 登录态)
+  // Google Chrome (默认 Default profile，包含 acct-554d5c@example.com 登录态)
   if (chromeCookies?.sso) {
-    result['acct-935ea9@example.com'] = {
-      email: 'acct-935ea9@example.com',
+    result['acct-554d5c@example.com'] = {
+      email: 'acct-554d5c@example.com',
       sso: chromeCookies.sso,
       cf_clearance: chromeCookies.cf_clearance || '',
       session_id: extractSessionId(chromeCookies.sso),
@@ -36,7 +36,7 @@ async function extractAllCookies() {
     };
   }
 
-  // Google Chrome Profile 1 (针对 acct-be1f04@example.com，如果与 Default 互斥)
+  // Google Chrome Profile 1 (针对备用 profile，如果与 Default 互斥)
   if (chrome1?.sso && chrome1.sso !== chromeCookies?.sso) {
     result['acct-be1f04@example.com'] = {
       email: 'acct-be1f04@example.com',
@@ -47,10 +47,10 @@ async function extractAllCookies() {
     };
   }
 
-  // ego-browser (针对 acct-554d5c@example.com)
+  // ego-browser (针对 acct-935ea9@example.com 登录态)
   if (ego?.sso) {
-    result['acct-554d5c@example.com'] = {
-      email: 'acct-554d5c@example.com',
+    result['acct-935ea9@example.com'] = {
+      email: 'acct-935ea9@example.com',
       sso: ego.sso,
       cf_clearance: ego.cf_clearance || '',
       session_id: extractSessionId(ego.sso),
