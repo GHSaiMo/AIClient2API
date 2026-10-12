@@ -25,10 +25,10 @@ async function extractAllCookies() {
 
   const result = {};
 
-  // Google Chrome (默认 Default profile，包含 taojiuzhenitunes@gmail.com 登录态)
+  // Google Chrome (默认 Default profile，包含 taoxy0305@gmail.com 登录态)
   if (chromeCookies?.sso) {
-    result['taojiuzhenitunes@gmail.com'] = {
-      email: 'taojiuzhenitunes@gmail.com',
+    result['taoxy0305@gmail.com'] = {
+      email: 'taoxy0305@gmail.com',
       sso: chromeCookies.sso,
       cf_clearance: chromeCookies.cf_clearance || '',
       session_id: extractSessionId(chromeCookies.sso),
@@ -36,7 +36,7 @@ async function extractAllCookies() {
     };
   }
 
-  // Google Chrome Profile 1 (针对 taojiuzhen@gmail.com，如果与 Default 互斥)
+  // Google Chrome Profile 1 (针对备用 profile，如果与 Default 互斥)
   if (chrome1?.sso && chrome1.sso !== chromeCookies?.sso) {
     result['taojiuzhen@gmail.com'] = {
       email: 'taojiuzhen@gmail.com',
@@ -47,10 +47,10 @@ async function extractAllCookies() {
     };
   }
 
-  // ego-browser (针对 taoxy0305@gmail.com)
+  // ego-browser (针对 taojiuzhenitunes@gmail.com 登录态)
   if (ego?.sso) {
-    result['taoxy0305@gmail.com'] = {
-      email: 'taoxy0305@gmail.com',
+    result['taojiuzhenitunes@gmail.com'] = {
+      email: 'taojiuzhenitunes@gmail.com',
       sso: ego.sso,
       cf_clearance: ego.cf_clearance || '',
       session_id: extractSessionId(ego.sso),

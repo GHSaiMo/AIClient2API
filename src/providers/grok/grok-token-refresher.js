@@ -130,9 +130,26 @@ export async function getChromeForTestingCookies() {
     }
 }
 
-export async function getEgoBrowserCookies() {
-    const dbPath = path.resolve(process.env.HOME || '', 'Library/Application Support/Citro Labs/ego lite/Default/Cookies');
-    if (!fs.existsSync(dbPath)) return null;
+export async function getEgoBrowserCookies(preferredProfile = null) {
+    const egoBase = path.resolve(process.env.HOME || '', 'Library/Application Support/Citro Labs/ego lite');
+    if (!fs.existsSync(egoBase)) return null;
+
+    const candidates = [];
+    if (preferredProfile) {
+        candidates.push(path.join(egoBase, preferredProfile, 'Cookies'));
+    }
+    candidates.push(path.join(egoBase, 'Default/Cookies'));
+    try {
+        const dirs = fs.readdirSync(egoBase, { withFileTypes: true });
+        for (const d of dirs) {
+            if (d.isDirectory() && d.name.startsWith('Profile')) {
+                const p = path.join(egoBase, d.name, 'Cookies');
+                if (!candidates.includes(p)) candidates.push(p);
+            }
+        }
+    } catch {
+        // ignore
+    }
 
     try {
         const secOut = execSync('security find-generic-password -ga "ego" 2>&1').toString();
@@ -142,15 +159,21 @@ export async function getEgoBrowserCookies() {
         const key = crypto.pbkdf2Sync(password, 'saltysalt', 1003, 16, 'sha1');
         const iv = Buffer.alloc(16, ' ');
 
-        const rows = queryCookiesWithPython(dbPath);
-        if (!rows.length) return null;
+        for (const dbPath of candidates) {
+            if (!fs.existsSync(dbPath)) continue;
+            const rows = queryCookiesWithPython(dbPath);
+            if (!rows.length) continue;
 
-        const result = {};
-        for (const [name, hexVal] of rows) {
-            const dec = cleanDecryptedCookie(Buffer.from(hexVal, 'hex'), key, iv);
-            if (dec) result[name] = dec;
+            const result = {};
+            for (const [name, hexVal] of rows) {
+                const dec = cleanDecryptedCookie(Buffer.from(hexVal, 'hex'), key, iv);
+                if (dec) result[name] = dec;
+            }
+            if (result.sso) {
+                return result;
+            }
         }
-        return result;
+        return null;
     } catch (err) {
         logger.error(`[GrokRefresher] ego lite cookie extraction failed: ${err.message}`);
         return null;
@@ -189,8 +212,8 @@ export async function refreshGrokToken(config = {}) {
 
             if (res.ok) {
                 let data = await res.json();
-                if ((!data || !data.ok) && email) {
-                    logger.info(`[GrokRefresher] Specific email '${email}' not found on Mac bridge, attempting fallback to any available cookie...`);
+                if ((!data || !data.ok) && !email) {
+                    logger.info(`[GrokRefresher] Attempting fallback to any available cookie...`);
                     try {
                         const fallbackRes = await fetch(`${bridgeBaseUrl}/api/grok-cookies`);
                         if (fallbackRes.ok) {
@@ -205,7 +228,7 @@ export async function refreshGrokToken(config = {}) {
                         cookies = { sso: data.sso, cf_clearance: data.cf_clearance || '' };
                     } else if (data.cookies && email && data.cookies[email]) {
                         cookies = { sso: data.cookies[email].sso, cf_clearance: data.cookies[email].cf_clearance || '' };
-                    } else if (data.cookies) {
+                    } else if (data.cookies && !email) {
                         const first = Object.values(data.cookies)[0];
                         if (first?.sso) {
                             cookies = { sso: first.sso, cf_clearance: first.cf_clearance || '' };
@@ -223,9 +246,9 @@ export async function refreshGrokToken(config = {}) {
     // 2. 如果桥接未成功获取，且当前处于 macOS 本地，则尝试本地 Keychain 解密兜底
     if (!cookies && process.platform === 'darwin') {
         if (email.includes('taojiuzhenitunes@gmail.com') || email.includes('taojiuzhen@gmail.com')) {
-            cookies = await getChromeCookies();
-        } else if (email.includes('taoxy0305@gmail.com')) {
             cookies = await getEgoBrowserCookies();
+        } else if (email.includes('taoxy0305@gmail.com')) {
+            cookies = await getChromeCookies();
         } else {
             // 未匹配到特定邮箱，按顺序尝试提取
             cookies = await getChromeCookies() || await getEgoBrowserCookies();
