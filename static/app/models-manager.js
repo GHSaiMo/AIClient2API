@@ -195,7 +195,9 @@ function getProviderDisplayName(providerType) {
         'openai-iflow': 'iFlow',
         'openai-codex-oauth': 'OpenAI Codex (OAuth)',
         'grok-cli-oauth': 'Grok CLI (OAuth)',
-        'grok-web': 'Grok Web'
+        'grok-web': 'Grok Web',
+        'chatgpt-web': 'ChatGPT Web',
+        'gemini-web': 'Gemini Web'
     };
 
     if (displayNames[providerType]) {

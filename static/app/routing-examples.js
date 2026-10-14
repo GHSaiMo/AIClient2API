@@ -297,6 +297,17 @@ function getAvailableRoutes() {
             description: t('dashboard.routing.oauth'),
             badge: t('dashboard.routing.oauth'),
             badgeClass: 'oauth'
+        },
+        {
+            provider: 'gemini-web',
+            name: t('dashboard.routing.nodeName.geminiWeb') || 'Gemini Web',
+            paths: {
+                openai: '/gemini-web/v1/chat/completions',
+                claude: '/gemini-web/v1/messages'
+            },
+            description: t('dashboard.routing.description.geminiWeb') || 'Gemini Web (Argon Sidecar)',
+            badge: 'Argon',
+            badgeClass: 'oauth'
         }
     ];
 }
@@ -565,7 +576,8 @@ function renderRoutingExamples(providerConfigs) {
         'openai-codex-oauth': 'fa-keyboard',
         'grok-cli-oauth': 'fa-terminal',
         'grok-web': 'fa-search',
-        'chatgpt-web': 'fa-paintbrush'
+        'chatgpt-web': 'fa-paintbrush',
+        'gemini-web': 'fa-globe'
     };
 
     // 默认模型映射 (用于 curl 示例)
@@ -585,6 +597,7 @@ function renderRoutingExamples(providerConfigs) {
         'grok-web': 'grok-imagine-image-2.0',
         'grok-cli-oauth': 'grok-4.6',
         'chatgpt-web': 'gpt-image-2',
+        'gemini-web': 'gemini-4-argon',
         'forward-api': 'gpt-5.5'
     };
 

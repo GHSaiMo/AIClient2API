@@ -20,6 +20,8 @@ const recommendedModelMap = {
     'openaiResponses-custom': 'gpt-5.5',
     'grok-web': 'grok-imagine-image-2.0',
     'grok-cli-oauth': 'grok-4.6',
+    'chatgpt-web': 'gpt-image-2',
+    'gemini-web': 'gemini-4-argon',
     'forward-api': 'gpt-5.5'
 };
 

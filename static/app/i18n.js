@@ -118,6 +118,8 @@ const translations = {
         'dashboard.routing.nodeName.grok': 'Grok Web',
         'dashboard.routing.nodeName.chatgptWeb': 'ChatGPT Web',
         'dashboard.routing.description.chatgptWeb': 'ChatGPT Web 图像生成与编辑',
+        'dashboard.routing.nodeName.geminiWeb': 'Gemini Web',
+        'dashboard.routing.description.geminiWeb': 'Gemini Web (Argon Sidecar)',
         'dashboard.contact.title': '联系与赞助',
         'dashboard.contact.wechat': '扫码进群，注明来意',
         'dashboard.contact.wechatDesc': '添加微信获取更多技术支持和交流',
@@ -1343,6 +1345,8 @@ const translations = {
         'dashboard.routing.nodeName.grok': 'Grok Web',
         'dashboard.routing.nodeName.chatgptWeb': 'ChatGPT Web',
         'dashboard.routing.description.chatgptWeb': 'ChatGPT Web Image Generation & Editing',
+        'dashboard.routing.nodeName.geminiWeb': 'Gemini Web',
+        'dashboard.routing.description.geminiWeb': 'Gemini Web (Argon Sidecar)',
         'dashboard.contact.title': 'Contact & Support',
 
         'dashboard.contact.wechat': 'Scan to Join Group',

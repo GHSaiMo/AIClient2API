@@ -1122,6 +1122,12 @@ function detectProviderFromPath(filePath) {
             providerType: 'openai-codex-oauth',
             displayName: 'OpenAI Codex OAuth',
             shortName: 'codex-oauth'
+        },
+        {
+            patterns: ['configs/gemini-web/', '/gemini-web/'],
+            providerType: 'gemini-web',
+            displayName: 'Gemini Web',
+            shortName: 'gemini-web'
         }
     ];
 
