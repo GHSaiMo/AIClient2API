@@ -10,8 +10,8 @@ export class GeminiWebCore {
     constructor(config = {}) {
         this.config = config;
         this.uuid = config.uuid || 'gemini-web-default';
-        this.sidecar = getGeminiWebSidecar();
         this.port = parseInt(config.port || process.env.GEMINI_WEB_SIDECAR_PORT || '4981', 10);
+        this.sidecar = getGeminiWebSidecar(this.port);
         this.baseUrl = `http://127.0.0.1:${this.port}`;
         // 使用针对本地 sidecar 的高性能直连 dispatcher
         this.client = new UndiciHttpClient({
@@ -152,6 +152,7 @@ export class GeminiWebCore {
     }
 
     async forceRefreshToken() {
-        return await this.sidecar.checkHealth();
+        await this.sidecar.stop();
+        return await this.sidecar.start({ config: this.config, port: this.port });
     }
 }
