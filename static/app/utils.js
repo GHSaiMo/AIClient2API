@@ -77,6 +77,13 @@ function getBaseProviderConfigs() {
             usageName: 'Codex',
             icon: 'fa-code',
             defaultPath: 'configs/codex/'
+        },
+        { 
+            id: 'gemini-web', 
+            name: t('dashboard.routing.nodeName.geminiWeb') || 'Gemini Web', 
+            usageName: 'Gemini Web',
+            icon: 'fa-globe',
+            defaultPath: 'configs/gemini-web/'
         }
     ];
 }
@@ -532,6 +539,26 @@ function getProviderTypeFields(providerType) {
                 label: `${t('modal.provider.field.headerPrefix')} <span class="optional-tag">${t('config.optional')}</span>`,
                 type: 'text',
                 placeholder: 'Bearer '
+            }
+        ],
+        'gemini-web': [
+            {
+                id: 'customName',
+                label: t('modal.provider.field.customName'),
+                type: 'text',
+                placeholder: 'Gemini Web (Argon Sidecar)'
+            },
+            {
+                id: 'port',
+                label: 'Sidecar 端口',
+                type: 'number',
+                placeholder: '4981'
+            },
+            {
+                id: 'GEMINI_WEB_TOKEN',
+                label: `Gemini Cookie (__Secure-1PSID) <span class="optional-tag">${t('config.optional')}</span>`,
+                type: 'password',
+                placeholder: 'g.a000... (可选，留空将自动解密提取本地 Chrome 会话)'
             }
         ]
     };

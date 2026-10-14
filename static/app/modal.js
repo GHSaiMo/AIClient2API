@@ -1364,6 +1364,8 @@ function getFieldOrder(provider) {
             providerType = 'grok-web';
         } else if (provider.FORWARD_API_KEY) {
             providerType = 'forward-api';
+        } else if (provider.GEMINI_WEB_TOKEN || provider.port === 4981 || (provider.uuid && provider.uuid.startsWith('gemini-web-'))) {
+            providerType = 'gemini-web';
         }
     }
 
