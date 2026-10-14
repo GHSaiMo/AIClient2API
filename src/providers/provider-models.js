@@ -90,6 +90,9 @@ export const PROVIDER_MODELS = {
         'gemini-claude-opus-4-6-thinking',
         'gpt-oss-120b-medium',
     ],
+    'gemini-web': [
+        'gemini-4-argon',
+    ],
     'claude-custom': [],
     'claude-kiro-oauth': [
         'gpt-5.6-sol',

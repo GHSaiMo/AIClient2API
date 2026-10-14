@@ -637,6 +637,10 @@ export function getProtocolPrefix(provider) {
     if (provider === 'chatgpt-web' || provider.startsWith('chatgpt-web-')) {
         return MODEL_PROTOCOL_PREFIX.CHATGPT;
     }
+    // Gemini Web (talks OpenAI format locally to sidecar)
+    if (provider === 'gemini-web' || provider.startsWith('gemini-web-')) {
+        return MODEL_PROTOCOL_PREFIX.OPENAI;
+    }
 
     const hyphenIndex = provider.indexOf('-');
     if (hyphenIndex !== -1) {

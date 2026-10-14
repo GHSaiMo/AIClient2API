@@ -23,4 +23,8 @@ src/plugins-user/
 /.codegraph/
 tls-sidecar/tls-sidecar-linux-*
 tls-sidecar/tls-sidecar-darwin-*
+gemini-web-sidecar/gemini-web-sidecar-linux-*
+gemini-web-sidecar/gemini-web-sidecar-darwin-*
+gemini-web-sidecar/.cookies/
+gemini-web-sidecar/*.txt
 .local_mode

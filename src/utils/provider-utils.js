@@ -100,6 +100,17 @@ export const PROVIDER_MAPPINGS = [
         displayName: 'OpenAI Codex OAuth',
         needsProjectId: false,
         urlKeys: ['CODEX_BASE_URL']
+    },
+    {
+        // Gemini Web (Argon Sidecar) 配置
+        dirName: 'gemini-web',
+        patterns: ['configs/gemini-web/', '/gemini-web/'],
+        providerType: 'gemini-web',
+        credPathKey: 'GEMINI_WEB_TOKEN',
+        defaultCheckModel: 'gemini-4-argon',
+        displayName: 'Gemini Web',
+        needsProjectId: false,
+        urlKeys: ['GEMINI_WEB_BASE_URL']
     }
 ];
 

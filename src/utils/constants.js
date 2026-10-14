@@ -53,12 +53,14 @@ export const MODEL_PROTOCOL_PREFIX = {
     FORWARD: 'forward',
     GROK: 'grok',
     CHATGPT: 'chatgpt',
+    GEMINI_WEB: 'gemini-web',
 };
 
 // 提供商标识符常量
 export const MODEL_PROVIDER = {
     GEMINI_CLI: 'gemini-cli-oauth',
     ANTIGRAVITY: 'gemini-antigravity',
+    GEMINI_WEB: 'gemini-web',
     OPENAI_CUSTOM: 'openai-custom',
     ATLASCLOUD: 'atlascloud',
     QINIU: 'qiniu',
