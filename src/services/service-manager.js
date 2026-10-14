@@ -423,6 +423,24 @@ async function _resolveEffectiveRouting(config, requestedModel) {
             actualModelName = modelSuffix;
             logger.info(`[Routing] Prefix resolved: ${prefix}:${modelSuffix}`);
         }
+    } else if (requestedModel) {
+        // 1.1 若无前缀且当前提供商不支持该模型，在其它已配置提供商中智能查找匹配
+        try {
+            const { getProviderModels } = await import('../providers/provider-models.js');
+            const currentModels = getProviderModels(effectiveProvider);
+            if (!currentModels.includes(requestedModel)) {
+                const candidates = Object.keys(config.providerPools || {});
+                for (const p of candidates) {
+                    if (getProviderModels(p).includes(requestedModel)) {
+                        effectiveProvider = p;
+                        logger.info(`[Routing] Model '${requestedModel}' auto-routed to provider '${p}'`);
+                        break;
+                    }
+                }
+            }
+        } catch {
+            // ignore
+        }
     }
 
     // 2. 严格性检查：在 AUTO 模式下，如果到这里还没解析出具体提供商，则报错 (除非是列出模型场景)
@@ -625,6 +643,7 @@ export async function getProviderStatus(config, options = {}) {
         'forward-api': 'FORWARD_BASE_URL',
         'grok-web': 'GROK_COOKIE_TOKEN',
         'grok-cli-oauth': 'GROK_CLI_OAUTH_CREDS_FILE_PATH',
+        'gemini-web': 'uuid',
         'openai-codex-oauth': 'CODEX_OAUTH_CREDS_FILE_PATH'
     };
     let providerPoolsSlim = [];

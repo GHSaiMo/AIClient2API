@@ -197,6 +197,12 @@ async function gracefulShutdown(exitCode = 0) {
         await getTLSSidecar().stop();
     } catch { /* ignore */ }
 
+    // 停止 Gemini Web sidecar
+    try {
+        const { getGeminiWebSidecar } = await import('../utils/gemini-web-sidecar.js');
+        await getGeminiWebSidecar().stop();
+    } catch { /* ignore */ }
+
     if (serverInstance) {
         serverInstance.close(() => {
             logger.info('[Server] HTTP server closed');
