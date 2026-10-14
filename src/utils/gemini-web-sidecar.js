@@ -149,6 +149,19 @@ class GeminiWebSidecar {
                 env.GEMINI_AUTH_USER = String(options.config.authUser);
             }
 
+            const proxyUrl = process.env.PROXY_URL || 
+                             options.config?.PROXY_URL || 
+                             (process.platform === 'linux' ? 'socks5://192.168.50.9:7898' : '');
+            if (proxyUrl) {
+                env.PROXY_URL = proxyUrl;
+                env.HTTP_PROXY = proxyUrl;
+                env.HTTPS_PROXY = proxyUrl;
+                env.ALL_PROXY = proxyUrl;
+                env.http_proxy = proxyUrl;
+                env.https_proxy = proxyUrl;
+                env.all_proxy = proxyUrl;
+            }
+
             this.process = spawn(binaryPath, [], {
                 env,
                 cwd: path.dirname(binaryPath),
