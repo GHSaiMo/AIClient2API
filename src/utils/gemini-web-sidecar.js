@@ -32,7 +32,7 @@ class GeminiWebSidecar {
      */
     _findBinary() {
         const platform = process.platform;
-        const arch = process.arch;
+        const arch = process.arch === 'x64' ? 'amd64' : process.arch;
         const ext = platform === 'win32' ? '.exe' : '';
         const projectRoot = path.resolve(currentDir, '../..');
 
@@ -47,9 +47,11 @@ class GeminiWebSidecar {
         ];
 
         for (const p of candidates) {
-            if (fs.existsSync(p)) {
-                return p;
-            }
+            try {
+                if (fs.existsSync(p) && fs.statSync(p).isFile()) {
+                    return p;
+                }
+            } catch {}
         }
         return null;
     }
