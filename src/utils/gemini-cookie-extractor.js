@@ -177,31 +177,58 @@ export function detectAllLocalGoogleAccounts() {
     // 1. Chrome 探测
     const chrome = getChromeGoogleCookies('Default');
     if (chrome && chrome.cookieMap) {
-        const wml = chrome.cookieMap['WML'] || '';
-        // 格式: 1790500976838#taojiuzhen@gmail.com:390:0#taoxy0305@gmail.com:972:1...
-        if (wml) {
-            const matches = [...wml.matchAll(/#([^:]+@[^:]+):\d+:(\d+)/g)];
-            for (const m of matches) {
-                const email = m[1];
-                const slot = parseInt(m[2], 10);
+        let foundAccounts = false;
+        try {
+            const home = process.env.HOME || '';
+            const prefsPath = path.join(home, 'Library/Application Support/Google/Chrome/Default/Preferences');
+            if (fs.existsSync(prefsPath)) {
+                const prefs = JSON.parse(fs.readFileSync(prefsPath, 'utf-8'));
+                if (Array.isArray(prefs.account_info) && prefs.account_info.length > 0) {
+                    for (let slot = 0; slot < prefs.account_info.length; slot++) {
+                        const acc = prefs.account_info[slot];
+                        if (acc && acc.email) {
+                            accounts.push({
+                                email: acc.email,
+                                authUser: slot,
+                                browser: 'chrome',
+                                profile: 'Default',
+                                source: `Google Chrome (Slot ${slot})`,
+                                cookieHeader: chrome.cookieHeader
+                            });
+                        }
+                    }
+                    foundAccounts = true;
+                }
+            }
+        } catch {}
+
+        if (!foundAccounts) {
+            const wml = chrome.cookieMap['WML'] || '';
+            // 格式: 1790500976838#taojiuzhen@gmail.com:390:0#taoxy0305@gmail.com:972:1...
+            if (wml) {
+                const matches = [...wml.matchAll(/#([^:]+@[^:]+):\d+:(\d+)/g)];
+                for (const m of matches) {
+                    const email = m[1];
+                    const slot = parseInt(m[2], 10);
+                    accounts.push({
+                        email,
+                        authUser: slot,
+                        browser: 'chrome',
+                        profile: 'Default',
+                        source: `Google Chrome (Slot ${slot})`,
+                        cookieHeader: chrome.cookieHeader
+                    });
+                }
+            } else {
                 accounts.push({
-                    email,
-                    authUser: slot,
+                    email: 'taojiuzhen@gmail.com',
+                    authUser: 0,
                     browser: 'chrome',
                     profile: 'Default',
-                    source: `Google Chrome (Slot ${slot})`,
+                    source: 'Google Chrome (Default)',
                     cookieHeader: chrome.cookieHeader
                 });
             }
-        } else {
-            accounts.push({
-                email: 'taojiuzhen@gmail.com',
-                authUser: 0,
-                browser: 'chrome',
-                profile: 'Default',
-                source: 'Google Chrome (Default)',
-                cookieHeader: chrome.cookieHeader
-            });
         }
     }
 
@@ -262,6 +289,9 @@ export async function getGeminiWebCookieHeader(config = {}) {
             if (res.ok) {
                 const data = await res.json();
                 if (data && data.cookieHeader) {
+                    if (data.authUser !== undefined && (config.authUser === undefined || config.authUser === null)) {
+                        config.authUser = data.authUser;
+                    }
                     return data.cookieHeader;
                 }
                 if (data && data.cookies) {
