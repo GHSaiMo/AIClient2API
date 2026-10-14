@@ -27,4 +27,5 @@ gemini-web-sidecar/gemini-web-sidecar-linux-*
 gemini-web-sidecar/gemini-web-sidecar-darwin-*
 gemini-web-sidecar/.cookies/
 gemini-web-sidecar/*.txt
+.cookies/
 .local_mode

@@ -15,10 +15,10 @@ const MAX_RESTART_ATTEMPTS = 5;
 const RESTART_DELAY = 2000;
 
 class GeminiWebSidecar {
-    constructor() {
+    constructor(port = DEFAULT_PORT) {
         this.process = null;
-        this.port = DEFAULT_PORT;
-        this.baseUrl = null;
+        this.port = port;
+        this.baseUrl = `http://127.0.0.1:${port}`;
         this.ready = false;
         this.starting = false;
         this.startPromise = null;
@@ -96,13 +96,13 @@ class GeminiWebSidecar {
 
         this.starting = true;
         this.startPromise = (async () => {
-            this.port = options.port || parseInt(process.env.GEMINI_WEB_SIDECAR_PORT, 10) || DEFAULT_PORT;
+            this.port = options.port || this.port || parseInt(process.env.GEMINI_WEB_SIDECAR_PORT, 10) || DEFAULT_PORT;
             this.baseUrl = `http://127.0.0.1:${this.port}`;
 
             // 1. 检查是否已经有存活的实例
             const isAlreadyUp = await this.checkHealth(1500);
             if (isAlreadyUp) {
-                logger.info(`[GeminiWeb-Sidecar] Existing instance detected at ${this.baseUrl}`);
+                logger.info(`[GeminiWeb-Sidecar:${this.port}] Existing instance detected at ${this.baseUrl}`);
                 this.ready = true;
                 this.starting = false;
                 return true;
@@ -111,7 +111,7 @@ class GeminiWebSidecar {
             // 2. 查找二进制
             const binaryPath = options.binaryPath || this._findBinary();
             if (!binaryPath) {
-                logger.error('[GeminiWeb-Sidecar] Binary not found. Please compile it to gemini-web-sidecar/');
+                logger.error(`[GeminiWeb-Sidecar:${this.port}] Binary not found. Please compile it to gemini-web-sidecar/`);
                 this.starting = false;
                 return false;
             }
@@ -119,18 +119,18 @@ class GeminiWebSidecar {
             // 3. 准备 Cookie 凭据
             const cookieHeader = await getGeminiWebCookieHeader(options.config || {});
             if (!cookieHeader) {
-                logger.error('[GeminiWeb-Sidecar] Failed to obtain valid Google Gemini cookies.');
+                logger.error(`[GeminiWeb-Sidecar:${this.port}] Failed to obtain valid Google Gemini cookies.`);
                 this.starting = false;
                 return false;
             }
 
-            logger.info(`[GeminiWeb-Sidecar] Starting: ${binaryPath} on port ${this.port}`);
+            logger.info(`[GeminiWeb-Sidecar:${this.port}] Starting: ${binaryPath} on port ${this.port}`);
 
             if (process.platform !== 'win32') {
                 try {
                     fs.chmodSync(binaryPath, 0o755);
                 } catch (e) {
-                    logger.warn(`[GeminiWeb-Sidecar] Failed to chmod binary: ${e.message}`);
+                    logger.warn(`[GeminiWeb-Sidecar:${this.port}] Failed to chmod binary: ${e.message}`);
                 }
             }
 
@@ -143,6 +143,10 @@ class GeminiWebSidecar {
                 RATE_LIMIT_ENABLED: 'false'
             };
 
+            if (options.config?.authUser !== undefined && options.config?.authUser !== null) {
+                env.GEMINI_AUTH_USER = String(options.config.authUser);
+            }
+
             this.process = spawn(binaryPath, [], {
                 env,
                 cwd: path.dirname(binaryPath),
@@ -151,22 +155,22 @@ class GeminiWebSidecar {
 
             this.process.stdout.on('data', (data) => {
                 const msg = data.toString().trim();
-                if (msg) logger.info(`[GeminiWeb-Sidecar] ${msg}`);
+                if (msg) logger.info(`[GeminiWeb-Sidecar:${this.port}] ${msg}`);
             });
 
             this.process.stderr.on('data', (data) => {
                 const msg = data.toString().trim();
-                if (msg) logger.warn(`[GeminiWeb-Sidecar] ${msg}`);
+                if (msg) logger.warn(`[GeminiWeb-Sidecar:${this.port}] ${msg}`);
             });
 
             this.process.on('exit', (code, signal) => {
-                logger.warn(`[GeminiWeb-Sidecar] Process exited (code=${code}, signal=${signal})`);
+                logger.warn(`[GeminiWeb-Sidecar:${this.port}] Process exited (code=${code}, signal=${signal})`);
                 this.process = null;
                 this.ready = false;
 
                 if (!this.isShuttingDown && this.restartCount < MAX_RESTART_ATTEMPTS) {
                     this.restartCount++;
-                    logger.info(`[GeminiWeb-Sidecar] Restarting in ${RESTART_DELAY}ms (attempt ${this.restartCount}/${MAX_RESTART_ATTEMPTS})`);
+                    logger.info(`[GeminiWeb-Sidecar:${this.port}] Restarting in ${RESTART_DELAY}ms (attempt ${this.restartCount}/${MAX_RESTART_ATTEMPTS})`);
                     setTimeout(() => {
                         this.start(options);
                     }, RESTART_DELAY);
@@ -174,13 +178,13 @@ class GeminiWebSidecar {
             });
 
             // 4. 等待 Sidecar 初始化就绪
-            const maxWaitMs = 20000;
+            const maxWaitMs = 25000;
             const startTime = Date.now();
             while (Date.now() - startTime < maxWaitMs) {
                 if (!this.process) break;
                 const ok = await this.checkHealth(1000);
                 if (ok) {
-                    logger.info(`[GeminiWeb-Sidecar] Ready and healthy on ${this.baseUrl} (${Date.now() - startTime}ms)`);
+                    logger.info(`[GeminiWeb-Sidecar:${this.port}] Ready and healthy on ${this.baseUrl} (${Date.now() - startTime}ms)`);
                     this.ready = true;
                     this.starting = false;
                     this.restartCount = 0;
@@ -189,7 +193,7 @@ class GeminiWebSidecar {
                 await new Promise(r => setTimeout(r, 600));
             }
 
-            logger.error(`[GeminiWeb-Sidecar] Failed to become ready within ${maxWaitMs}ms`);
+            logger.error(`[GeminiWeb-Sidecar:${this.port}] Failed to become ready within ${maxWaitMs}ms`);
             this.starting = false;
             return false;
         })();
@@ -211,13 +215,13 @@ class GeminiWebSidecar {
     async stop() {
         this.isShuttingDown = true;
         if (this.process) {
-            logger.info('[GeminiWeb-Sidecar] Stopping process...');
+            logger.info(`[GeminiWeb-Sidecar:${this.port}] Stopping process...`);
             this.process.kill('SIGTERM');
 
             await new Promise((resolve) => {
                 const timer = setTimeout(() => {
                     if (this.process) {
-                        logger.warn('[GeminiWeb-Sidecar] Force killing with SIGKILL');
+                        logger.warn(`[GeminiWeb-Sidecar:${this.port}] Force killing with SIGKILL`);
                         this.process.kill('SIGKILL');
                     }
                     resolve();
@@ -240,12 +244,32 @@ class GeminiWebSidecar {
     }
 }
 
-// 单例实例
-let instance = null;
+// 多端口 Sidecar 实例映射表
+const sidecarInstances = new Map();
 
-export function getGeminiWebSidecar() {
-    if (!instance) {
-        instance = new GeminiWebSidecar();
+/**
+ * 获取指定端口的 Sidecar 管理实例 (默认为 DEFAULT_PORT 4981)
+ * @param {number|string} [port] 
+ * @returns {GeminiWebSidecar}
+ */
+export function getGeminiWebSidecar(port = DEFAULT_PORT) {
+    const numPort = parseInt(port || DEFAULT_PORT, 10);
+    if (!sidecarInstances.has(numPort)) {
+        sidecarInstances.set(numPort, new GeminiWebSidecar(numPort));
     }
-    return instance;
+    return sidecarInstances.get(numPort);
+}
+
+/**
+ * 停止所有已启动的 Sidecar 实例
+ */
+export async function stopAllGeminiWebSidecars() {
+    for (const [port, sidecar] of sidecarInstances.entries()) {
+        try {
+            await sidecar.stop();
+        } catch (e) {
+            logger.warn(`[GeminiWeb-Sidecar:${port}] Stop failed: ${e.message}`);
+        }
+    }
+    sidecarInstances.clear();
 }

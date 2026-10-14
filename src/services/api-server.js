@@ -199,8 +199,8 @@ async function gracefulShutdown(exitCode = 0) {
 
     // 停止 Gemini Web sidecar
     try {
-        const { getGeminiWebSidecar } = await import('../utils/gemini-web-sidecar.js');
-        await getGeminiWebSidecar().stop();
+        const { stopAllGeminiWebSidecars } = await import('../utils/gemini-web-sidecar.js');
+        await stopAllGeminiWebSidecars();
     } catch { /* ignore */ }
 
     if (serverInstance) {
