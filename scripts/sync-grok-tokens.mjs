@@ -1,50 +1,19 @@
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
-import { execSync, spawnSync } from 'child_process';
+import { execSync } from 'child_process';
 import { fileURLToPath } from 'url';
+
+import {
+  getChromeCookies,
+  getChromeProfile1Cookies,
+  getEgoBrowserCookies
+} from '../src/providers/grok/grok-token-refresher.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const ROOT = path.resolve(__dirname, '..');
 const POOLS_PATH = path.resolve(ROOT, 'configs/provider_pools.json');
-
-function queryCookiesWithPython(dbPath) {
-  if (!fs.existsSync(dbPath)) return [];
-  try {
-    const code = [
-      "import sqlite3, shutil, json",
-      "p = '" + dbPath + "'",
-      "tmp = '/tmp/cookie_query_' + str(abs(hash(p))) + '.db'",
-      "shutil.copy2(p, tmp)",
-      "conn = sqlite3.connect(tmp)",
-      "c = conn.cursor()",
-      "c.execute(\"SELECT name, hex(encrypted_value) FROM cookies WHERE host_key LIKE '%grok.com%' AND name IN ('sso', 'sso-rw', 'cf_clearance')\")",
-      "rows = c.fetchall()",
-      "conn.close()",
-      "print(json.dumps(rows))"
-    ].join("\n");
-    const out = execSync("python3", { input: code, encoding: 'utf8', timeout: 5000 });
-    return JSON.parse(out.trim() || '[]');
-  } catch {
-    return [];
-  }
-}
-
-function cleanDecryptedCookie(buf, key, iv) {
-  try {
-    if (buf.slice(0, 3).toString() === 'v10') buf = buf.slice(3);
-    const decipher = crypto.createDecipheriv('aes-128-cbc', key, iv);
-    let dec = Buffer.concat([decipher.update(buf), decipher.final()]);
-    // macOS Chromium Cookies 拥有 32 字节的前缀签名
-    if (dec.length > 32) {
-      return dec.slice(32).toString('utf8');
-    }
-    return dec.toString('utf8');
-  } catch {
-    return '';
-  }
-}
 
 function extractSessionId(token) {
   try {
@@ -58,103 +27,53 @@ function extractSessionId(token) {
   }
 }
 
-// 1. 解密 Google Chrome Cookies -> 优先 Default，兼容 Profile 目录
-async function getChromeCookies(preferredProfile = null) {
-  const chromeBase = path.resolve(process.env.HOME || '', 'Library/Application Support/Google/Chrome');
-  if (!fs.existsSync(chromeBase)) return null;
+async function extractAllLocalCookies() {
+  const [chromeCookies, chrome1, ego] = await Promise.all([
+    getChromeCookies().catch(() => null),
+    getChromeProfile1Cookies().catch(() => null),
+    getEgoBrowserCookies().catch(() => null),
+  ]);
 
-  const candidates = [];
-  if (preferredProfile) {
-    candidates.push(path.join(chromeBase, preferredProfile, 'Cookies'));
-  }
-  candidates.push(path.join(chromeBase, 'Default/Cookies'));
-  try {
-    const dirs = fs.readdirSync(chromeBase, { withFileTypes: true });
-    for (const d of dirs) {
-      if (d.isDirectory() && d.name.startsWith('Profile')) {
-        const p = path.join(chromeBase, d.name, 'Cookies');
-        if (!candidates.includes(p)) candidates.push(p);
-      }
-    }
-  } catch {
-    // ignore
+  const result = {};
+
+  // 1. Google Chrome Default (包含 taoxy0305@gmail.com)
+  if (chromeCookies?.sso) {
+    result['taoxy0305@gmail.com'] = {
+      email: 'taoxy0305@gmail.com',
+      sso: chromeCookies.sso,
+      cf_clearance: chromeCookies.cf_clearance || '',
+      session_id: extractSessionId(chromeCookies.sso),
+      source: 'Google Chrome'
+    };
   }
 
-  try {
-    const secOut = execSync('security find-generic-password -ga Chrome 2>&1').toString();
-    const password = secOut.match(/password: "(.*)"/)?.[1];
-    if (!password) return null;
-
-    const key = crypto.pbkdf2Sync(password, 'saltysalt', 1003, 16, 'sha1');
-    const iv = Buffer.alloc(16, ' ');
-
-    for (const dbPath of candidates) {
-      if (!fs.existsSync(dbPath)) continue;
-      const rows = queryCookiesWithPython(dbPath);
-      if (!rows.length) continue;
-
-      const result = {};
-      for (const [name, hexVal] of rows) {
-        const dec = cleanDecryptedCookie(Buffer.from(hexVal, 'hex'), key, iv);
-        if (dec) result[name] = dec;
-      }
-      if (result.sso) {
-        return result;
-      }
-    }
-    return null;
-  } catch (err) {
-    console.error('[Chrome] Extraction failed:', err.message);
-    return null;
+  // 2. Google Chrome Profile 1 (备用 profile，若与 Default 互斥)
+  if (chrome1?.sso && chrome1.sso !== chromeCookies?.sso) {
+    result['taojiuzhen@gmail.com'] = {
+      email: 'taojiuzhen@gmail.com',
+      sso: chrome1.sso,
+      cf_clearance: chrome1.cf_clearance || '',
+      session_id: extractSessionId(chrome1.sso),
+      source: 'Chrome Profile 1'
+    };
   }
-}
 
-async function getChromeProfile1Cookies() {
-  return getChromeCookies('Profile 1');
-}
-
-function getEgoBrowserCookies() {
-  const dbPath = path.resolve(process.env.HOME, 'Library/Application Support/Citro Labs/ego lite/Default/Cookies');
-  if (!fs.existsSync(dbPath)) return null;
-
-  try {
-    const secOut = execSync('security find-generic-password -ga "ego" 2>&1').toString();
-    const password = secOut.match(/password: "(.*)"/)?.[1];
-    if (!password) return null;
-
-    const key = crypto.pbkdf2Sync(password, 'saltysalt', 1003, 16, 'sha1');
-    const iv = Buffer.alloc(16, ' ');
-
-    const rows = queryCookiesWithPython(dbPath);
-    if (!rows.length) return null;
-
-    const result = {};
-    for (const [name, hexVal] of rows) {
-      const dec = cleanDecryptedCookie(Buffer.from(hexVal, 'hex'), key, iv);
-      if (dec) result[name] = dec;
-    }
-    return result;
-  } catch (err) {
-    console.error('[ego lite] Extraction failed:', err.message);
-    return null;
+  // 3. ego-browser / Ego lite (包含 taojiuzhenitunes@gmail.com)
+  if (ego?.sso) {
+    result['taojiuzhenitunes@gmail.com'] = {
+      email: 'taojiuzhenitunes@gmail.com',
+      sso: ego.sso,
+      cf_clearance: ego.cf_clearance || '',
+      session_id: extractSessionId(ego.sso),
+      source: 'Ego lite'
+    };
   }
+
+  return result;
 }
 
 async function main() {
-  console.log('=== 开始同步 Grok 浏览器登录态到 AIClient2API 账号池 ===\n');
-
-  const targets = [
-    {
-      source: 'Google Chrome',
-      email: 'taojiuzhenitunes@gmail.com',
-      fetcher: getChromeCookies
-    },
-    {
-      source: 'ego-browser',
-      email: 'taoxy0305@gmail.com',
-      fetcher: getEgoBrowserCookies
-    }
-  ];
+  console.log('=== 开始同步 Grok Web 浏览器登录态到 AIClient2API 账号池 ===\n');
 
   // 1. 如果在 Linux 环境（如飞牛 NAS）或配置了 MAC_COOKIE_BRIDGE_URL，优先从 Mac Cookie Bridge 批量拉取
   const bridgeBaseUrl = String(
@@ -162,7 +81,7 @@ async function main() {
     (process.platform === 'linux' ? 'http://192.168.50.9:7899' : '')
   ).trim().replace(/\/+$/, '');
 
-  let bridgeCookies = null;
+  let cookiesMap = null;
   if (bridgeBaseUrl) {
     try {
       console.log(`正在从 Mac Cookie Bridge (${bridgeBaseUrl}) 实时拉取最新登录态...`);
@@ -174,8 +93,8 @@ async function main() {
       if (res.ok) {
         const data = await res.json();
         if (data && data.ok && data.cookies) {
-          bridgeCookies = data.cookies;
-          console.log(`✓ 成功从 Mac 桥接获取到 ${Object.keys(bridgeCookies).length} 个账号的最新凭据\n`);
+          cookiesMap = data.cookies;
+          console.log(`✓ 成功从 Mac 桥接获取到 ${Object.keys(cookiesMap).length} 个账号的最新凭据\n`);
         }
       } else {
         console.warn(`! Mac 桥接响应异常: HTTP ${res.status}`);
@@ -185,57 +104,69 @@ async function main() {
     }
   }
 
-  // 读取现有 provider_pools.json
+  // 2. 本地 macOS 提取兜底或合并
+  if (process.platform === 'darwin') {
+    const localCookies = await extractAllLocalCookies();
+    cookiesMap = { ...(cookiesMap || {}), ...localCookies };
+  }
+
+  if (!cookiesMap || Object.keys(cookiesMap).length === 0) {
+    console.error('❌ 未从 Chrome、Ego lite 或 Mac 桥接获取到任何有效的 Grok 登录态！');
+    process.exit(1);
+  }
+
+  console.log(`已成功提取 ${Object.keys(cookiesMap).length} 个 Grok 账号:`);
+  for (const [email, info] of Object.entries(cookiesMap)) {
+    console.log(`  - ${email} (来源: ${info.source || '未知'}, Session: ${info.session_id})`);
+  }
+
+  // 3. 更新 provider_pools.json
   const pools = JSON.parse(fs.readFileSync(POOLS_PATH, 'utf8'));
   let grokList = pools['grok-web'] || [];
 
-  for (const t of targets) {
-    console.log(`正在检查 [${t.source}] (${t.email})...`);
-    let cookies = null;
-
-    if (bridgeCookies && bridgeCookies[t.email]) {
-      cookies = bridgeCookies[t.email];
-      console.log(`  -> 成功从 Mac 桥接获取凭据 (source: ${cookies.source || 'bridge'})`);
-    } else if (process.platform === 'darwin' && t.fetcher) {
-      cookies = await t.fetcher();
+  // 清除历史无效/占位默认账号（如 user@grok.com）
+  grokList = grokList.filter(p => {
+    if (p.email === 'user@grok.com') {
+      console.log(`\n🧹 移除历史默认占位节点: ${p.uuid} (email: user@grok.com)`);
+      return false;
     }
+    return true;
+  });
 
-    if (!cookies || !cookies.sso) {
-      console.log(`  -> 未提取到有效 SSO，跳过`);
-      continue;
-    }
+  for (const [email, info] of Object.entries(cookiesMap)) {
+    const ssoToken = info.sso;
+    const cfClearance = info.cf_clearance || '';
+    const sessionId = info.session_id || extractSessionId(ssoToken);
 
-    const ssoToken = cookies.sso;
-    const cfClearance = cookies.cf_clearance || '';
-    let sessionId = '';
-    try {
-      const payload = JSON.parse(Buffer.from(ssoToken.split('.')[1], 'base64').toString());
-      sessionId = payload.session_id;
-    } catch {}
-
-    console.log(`  -> 成功提取 SSO! Session: ${sessionId}`);
-
-    // 在已有池中查找匹配项（优先邮箱匹配，其次 Session ID 匹配）
-    let item = grokList.find(p => p.email === t.email || (sessionId && extractSessionId(p.GROK_COOKIE_TOKEN) === sessionId));
+    // 匹配已有节点（邮箱匹配或 Session ID 匹配）
+    let item = grokList.find(p =>
+      (p.email && p.email.toLowerCase() === email.toLowerCase()) ||
+      (sessionId && extractSessionId(p.GROK_COOKIE_TOKEN) === sessionId)
+    );
 
     if (item) {
-      console.log(`  -> 更新已有节点 [${item.customName || item.uuid}]`);
+      console.log(`\n🔄 更新已有 Grok 节点 [${item.uuid}] -> ${email}`);
       item.GROK_COOKIE_TOKEN = ssoToken;
       if (cfClearance) item.GROK_CF_CLEARANCE = cfClearance;
-      item.email = t.email;
-      item.customName = t.email;
+      item.email = email;
+      item.customName = `${email} (${info.source || 'Web'})`;
       item.isHealthy = true;
+      item.isDisabled = false;
+      item.needsRefresh = false;
       item.errorCount = 0;
       item.lastErrorMessage = null;
+      item.lastRefreshTime = Date.now();
       item.lastHealthCheckTime = new Date().toISOString();
     } else {
-      console.log(`  -> 新建节点: ${t.email}`);
+      console.log(`\n➕ 新增 Grok 节点 -> ${email}`);
       const newUuid = crypto.randomUUID();
       grokList.push({
-        GROK_COOKIE_TOKEN: ssoToken,
         uuid: newUuid,
-        email: t.email,
-        customName: t.email,
+        email: email,
+        customName: `${email} (${info.source || 'Web'})`,
+        GROK_COOKIE_TOKEN: ssoToken,
+        GROK_CF_CLEARANCE: cfClearance,
+        GROK_BASE_URL: 'https://grok.com',
         checkModelName: 'grok-4.1-mini',
         checkHealth: false,
         isHealthy: true,
@@ -246,26 +177,40 @@ async function main() {
         lastErrorTime: null,
         lastHealthCheckTime: new Date().toISOString(),
         lastErrorMessage: null,
-        GROK_BASE_URL: 'https://grok.com',
-        GROK_CF_CLEARANCE: cfClearance,
-        GROK_USER_AGENT: '',
         needsRefresh: false,
-        refreshCount: 0
+        refreshCount: 0,
+        _lastSelectionSeq: 0,
+        lastRefreshTime: Date.now()
       });
     }
   }
 
-  // 整理 grokList：移除历史杂乱无效的废弃未命名节点
-  pools['grok-web'] = grokList.filter(p => {
-    // 保留有对应 email 或是合法当前 token 的节点
-    return p.email && p.GROK_COOKIE_TOKEN && !p.GROK_COOKIE_TOKEN.includes('\\u0014');
+  pools['grok-web'] = grokList;
+  fs.writeFileSync(POOLS_PATH, JSON.stringify(pools, null, 2) + '\n', 'utf8');
+
+  console.log(`\n✓ 本地 configs/provider_pools.json 更新成功！当前 Grok Web 账号池:`);
+  pools['grok-web'].forEach((p, idx) => {
+    console.log(`  [${idx + 1}] 邮箱: ${p.email} | 节点名: ${p.customName} | 状态: ${p.isHealthy ? '健康' : '异常'} | UUID: ${p.uuid}`);
   });
 
-  fs.writeFileSync(POOLS_PATH, JSON.stringify(pools, null, 2), 'utf8');
-  console.log(`\n✓ 同步完成！当前已生效的 Grok 账号池列表:`);
-  pools['grok-web'].forEach((p, idx) => {
-    console.log(`  [${idx + 1}] 账号: ${p.email} | 节点名: ${p.customName} | UUID: ${p.uuid}`);
-  });
+  // 4. 同步至飞牛 NAS 生产环境 (192.168.50.39)
+  if (process.platform === 'darwin') {
+    console.log('\n--- 同步至 NAS 生产环境 (192.168.50.39) ---');
+    try {
+      console.log('[NAS Sync] 正在推送 configs/provider_pools.json 到 NAS ...');
+      execSync(`scp configs/provider_pools.json nas:/vol1/1000/apps/AIClient2API/configs/provider_pools.json`, { stdio: 'inherit', cwd: ROOT });
+
+      console.log('[NAS Sync] 重启 NAS aiclient2api 服务 ...');
+      execSync(`ssh nas "echo jz0305 | sudo -S systemctl restart aiclient2api"`, { stdio: 'inherit', cwd: ROOT });
+
+      console.log('✓ NAS 生产服务同步并重启成功！');
+    } catch (err) {
+      console.error('[NAS Sync 失败]', err.message);
+    }
+  }
 }
 
-main().catch(console.error);
+main().catch(err => {
+  console.error('[Fatal Error]', err);
+  process.exit(1);
+});
