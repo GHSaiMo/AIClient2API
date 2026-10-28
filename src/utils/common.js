@@ -370,7 +370,14 @@ export function getRateLimitCooldownRecoveryTime(error, config = {}, now = Date.
 export function isQuotaExhaustedError(error) {
     if (!error) return false;
     const status = Number(getErrorStatusCode(error));
-    if (status === 402) return true;
+    if (status === 402 || error.status === 402 || error.statusCode === 402 || error.code === 402) return true;
+    if (error.isQuotaExhausted === true) return true;
+
+    const errCode = String(error.err_code || error.code || '').toLowerCase();
+    if (errCode === 'usage_pool_exhausted' || errCode === 'quota_exceeded' || errCode === 'insufficient_quota') {
+        return true;
+    }
+
     const msg = String(error.message || '').toLowerCase();
     
     let dataStr = '';
@@ -385,13 +392,23 @@ export function isQuotaExhaustedError(error) {
         }
     }
 
-    return msg.includes('spending-limit') ||
-           msg.includes('monthly_request_count') ||
-           msg.includes('payment required') ||
-           dataStr.includes('spending-limit') ||
-           dataStr.includes('monthly_request_count') ||
-           dataStr.includes('payment_required') ||
-           dataStr.includes('usage_limit_reached');
+    const quotaKeywords = [
+        'spending-limit',
+        'monthly_request_count',
+        'payment required',
+        'payment_required',
+        'usage_limit_reached',
+        'usage_pool_exhausted',
+        'usage limit exceeded',
+        'usage limit',
+        'media generation credits',
+        'used up your media generation',
+        'insufficient_quota',
+        'quota exceeded',
+        'out of credits',
+    ];
+
+    return quotaKeywords.some(kw => msg.includes(kw) || dataStr.includes(kw));
 }
 
 /**

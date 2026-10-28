@@ -7,6 +7,8 @@ import {
     getRequestBody,
     getRateLimitCooldownRecoveryTime,
     getQuotaCooldownRecoveryTime,
+    isQuotaExhaustedError,
+    isRateLimitError,
     calculateRetryDelay,
     getProtocolPrefix,
     MODEL_PROTOCOL_PREFIX
@@ -259,13 +261,30 @@ async function handleImageGenerationRequest(req, res, currentConfig, providerPoo
         if (data.length === 0) {
             // 检查是否有拒绝消息
             const rejection = extractRejectionMessage(responses, finalProviderProtocol);
-            if (rejection) {
-                res.writeHead(400, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ error: { message: `Image generation rejected: ${rejection}`, type: 'invalid_request_error' } }));
-            } else {
-                res.writeHead(500, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ error: { message: 'Image generation failed: no image in response', type: 'server_error' } }));
+            const isQuotaOrLimit = isQuotaExhaustedError({ message: rejection }) ||
+                isRateLimitError({ message: rejection }) ||
+                responses.some(r => r?.hasQuotaExhausted || (r?.message && isQuotaExhaustedError(new Error(r.message))));
+
+            const isPolicyRejection = isDefinitiveContentPolicyRejection(rejection);
+
+            // 如果并非明确的内容合规拒绝，或者由于额度耗尽导致，抛出异常进入号池换号重试逻辑
+            if (isQuotaOrLimit || !isPolicyRejection) {
+                const failMessage = isQuotaOrLimit
+                    ? `Image generation quota exhausted: ${rejection || 'media credits used up'}`
+                    : (rejection ? `Image generation failed: ${rejection}` : 'Image generation failed: no image in response');
+                const err = new Error(failMessage);
+                if (isQuotaOrLimit) {
+                    err.status = 402;
+                    err.statusCode = 402;
+                    err.code = 402;
+                    err.isQuotaExhausted = true;
+                }
+                err.shouldSwitchCredential = true;
+                throw err;
             }
+
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: { message: `Image generation rejected: ${rejection}`, type: 'invalid_request_error' } }));
             return;
         }
 
@@ -391,6 +410,37 @@ async function handleImageGenerationRequest(req, res, currentConfig, providerPoo
 }
 
 /**
+ * 判断文本是否属于明确的内容合规/安全策略拒绝（例如违规、涉黄、暴恐等）
+ * 排除 Grok 卡片输出标签和配额/额度错误
+ */
+function isDefinitiveContentPolicyRejection(text) {
+    if (!text || typeof text !== 'string') return false;
+    const lower = text.toLowerCase();
+    if (lower.includes('<grok:render') || lower.includes('generated_image_card')) {
+        return false;
+    }
+    if (lower.includes('credit') || lower.includes('quota') || lower.includes('usage limit') || lower.includes('too many requests')) {
+        return false;
+    }
+    const policyKeywords = [
+        'safety policy',
+        'content policy',
+        'content guidelines',
+        'violates our',
+        'violate our',
+        'against our policy',
+        'safety guidelines',
+        'nsfw',
+        'inappropriate',
+        'cannot generate images of',
+        'unable to generate images of',
+        'i cannot create images',
+        'i am unable to create images',
+    ];
+    return policyKeywords.some(kw => lower.includes(kw));
+}
+
+/**
  * Extract assistant rejection text from different provider responses.
  * Returns the text if a policy/safety rejection message is found, otherwise null.
  */
@@ -409,8 +459,17 @@ function extractRejectionMessage(responses, providerProtocol) {
         
         // Grok style
         if (providerProtocol === MODEL_PROTOCOL_PREFIX.GROK) {
-            if (response.message) return response.message;
-            if (response.modelResponse?.message) return response.modelResponse.message;
+            if (response.lastQuotaErrorMessage) return response.lastQuotaErrorMessage;
+            const msg = response.message || response.modelResponse?.message || '';
+            if (msg.includes('[Grok Error]')) {
+                const match = msg.match(/\[Grok Error\]\s*([^\n]+)/);
+                if (match) return match[1];
+            }
+            if (msg.includes('<grok:render') || msg.includes('generated_image_card')) {
+                // Grok 输出了生图卡片，但底层媒体未产出图片，非合规拒绝
+                return null;
+            }
+            if (msg) return msg;
         }
         
         // Gemini style
@@ -648,13 +707,29 @@ async function handleImageEditsRequest(req, res, currentConfig, providerPoolMana
         if (data.length === 0) {
             // 检查是否有拒绝消息
             const rejection = extractRejectionMessage(responses, finalProviderProtocol);
-            if (rejection) {
-                res.writeHead(400, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ error: { message: `Image editing rejected: ${rejection}`, type: 'invalid_request_error' } }));
-            } else {
-                res.writeHead(500, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ error: { message: 'Image editing failed: no image in response', type: 'server_error' } }));
+            const isQuotaOrLimit = isQuotaExhaustedError({ message: rejection }) ||
+                isRateLimitError({ message: rejection }) ||
+                responses.some(r => r?.hasQuotaExhausted || (r?.message && isQuotaExhaustedError(new Error(r.message))));
+
+            const isPolicyRejection = isDefinitiveContentPolicyRejection(rejection);
+
+            if (isQuotaOrLimit || !isPolicyRejection) {
+                const failMessage = isQuotaOrLimit
+                    ? `Image editing quota exhausted: ${rejection || 'media credits used up'}`
+                    : (rejection ? `Image editing failed: ${rejection}` : 'Image editing failed: no image in response');
+                const err = new Error(failMessage);
+                if (isQuotaOrLimit) {
+                    err.status = 402;
+                    err.statusCode = 402;
+                    err.code = 402;
+                    err.isQuotaExhausted = true;
+                }
+                err.shouldSwitchCredential = true;
+                throw err;
             }
+
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: { message: `Image editing rejected: ${rejection}`, type: 'invalid_request_error' } }));
             return;
         }
 

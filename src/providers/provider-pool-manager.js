@@ -661,7 +661,8 @@ export class ProviderPoolManager {
         // 2. 预热/新鲜度判断与错误抑制
         const errorCount = config.errorCount || 0;
         const lastErrorTime = config.lastErrorTime ? new Date(config.lastErrorTime).getTime() : 0;
-        const hasRecentError = errorCount > 0 || (lastErrorTime && (now - lastErrorTime < 60000));
+        const errorCooldownMs = 300000; // 5分钟错误惩罚衰减期，避免偶发单次历史错误永久饥饿可用节点
+        const hasRecentError = errorCount > 0 && (!lastErrorTime || (now - lastErrorTime < errorCooldownMs));
 
         const lastHealthCheckTime = config.lastHealthCheckTime ? new Date(config.lastHealthCheckTime).getTime() : 0;
         // 如果节点最近发生过错误，禁止享受 isFresh 负偏置优先权
