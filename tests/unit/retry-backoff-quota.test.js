@@ -33,6 +33,16 @@ describe('Retry Backoff, Quota Cooldown and Error Logging Suite', () => {
             expect(isQuotaExhaustedError(error)).toBe(true);
         });
 
+        test('should identify Grok usage_pool_exhausted error', () => {
+            const error = { err_code: 'usage_pool_exhausted', message: 'Usage limit exceeded' };
+            expect(isQuotaExhaustedError(error)).toBe(true);
+        });
+
+        test('should identify Grok media generation credits exhausted error', () => {
+            const error = new Error("You've used up your media generation credits.");
+            expect(isQuotaExhaustedError(error)).toBe(true);
+        });
+
         test('should return false for regular errors (e.g. 500, network error)', () => {
             expect(isQuotaExhaustedError({ status: 500, message: 'Internal Server Error' })).toBe(false);
             expect(isQuotaExhaustedError({ code: 'ECONNRESET', message: 'Connection reset' })).toBe(false);

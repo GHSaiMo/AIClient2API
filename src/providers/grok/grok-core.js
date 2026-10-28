@@ -3,7 +3,7 @@ import logger from '../../utils/logger.js';
 import * as http from 'http';
 import * as https from 'https';
 import { v4 as uuidv4 } from 'uuid';
-import { MODEL_PROTOCOL_PREFIX, isRetryableNetworkError, getRetryAfterMs, normalizeProviderErrorMessage, getNormalizedErrorResponseText } from '../../utils/common.js';
+import { MODEL_PROTOCOL_PREFIX, isRetryableNetworkError, getRetryAfterMs, normalizeProviderErrorMessage, getNormalizedErrorResponseText, isQuotaExhaustedError, isRateLimitError } from '../../utils/common.js';
 import { configureUndiciTLSSidecar, isTLSSidecarEnabledForProvider } from '../../utils/proxy-utils.js';
 import { MODEL_PROVIDER } from '../../utils/common.js';
 import { ConverterFactory } from '../../converters/ConverterFactory.js';
@@ -115,6 +115,20 @@ export class GrokApiService {
             error.isRateLimit = true;
         }
 
+        const isQuota = originalErrorMessage.includes('usage_pool_exhausted') ||
+            originalErrorMessage.includes('Usage limit exceeded') ||
+            originalErrorMessage.includes('media generation credits') ||
+            originalErrorMessage.toLowerCase().includes('used up your media generation') ||
+            originalErrorMessage.toLowerCase().includes('out of credits');
+        if (isQuota) {
+            status = 402;
+            error.status = 402;
+            error.statusCode = 402;
+            error.code = 402;
+            error.isQuotaExhausted = true;
+            error.shouldSwitchCredential = true;
+        }
+
         if (status) {
             await normalizeProviderErrorMessage(error, { status, context });
         }
@@ -129,7 +143,7 @@ export class GrokApiService {
         if (isAuthInvalid) {
             error.isDefinitiveAuthFailure = true;
             error.shouldSwitchCredential = true;
-        } else if (status === 401 || status === 403 || status === 429 || status === 502) {
+        } else if (status === 401 || status === 402 || status === 403 || status === 429 || status === 502) {
             error.shouldSwitchCredential = true;
         } else if (isNetworkError) {
             // Network jitter or request timeout should not immediately degrade account health.
@@ -872,6 +886,10 @@ export class GrokApiService {
                             if (err.message && !collected.message.includes(err.message)) {
                                 logger.warn(`[Grok Stream Error] ${err.message}`);
                                 collected.message += (collected.message ? "\n" : "") + `[Grok Error] ${err.message}`;
+                                if (isQuotaExhaustedError(new Error(err.message))) {
+                                    collected.hasQuotaExhausted = true;
+                                    collected.lastQuotaErrorMessage = err.message;
+                                }
                             }
                         }
                     }
@@ -1075,6 +1093,11 @@ export class GrokApiService {
                         return this._mergeCollectedResults(results);
                     }
                 } catch (wsError) {
+                    await this.classifyApiError(wsError, 'ws');
+                    if (wsError.isQuotaExhausted || isQuotaExhaustedError(wsError)) {
+                        logger.warn(`[Grok] Initial WS generation failed due to quota exhaustion; escalating to switch credentials: ${wsError.message}`);
+                        throw wsError;
+                    }
                     logger.warn(`[Grok] Initial WS generation failed, falling back to app_chat: ${wsError.message}`);
                     // 失败后继续向下走传统的 app_chat 逻辑
                 }
@@ -1111,6 +1134,16 @@ export class GrokApiService {
                 }
             }
             throw error;
+        }
+
+        if (collected && collected.hasQuotaExhausted && (!collected.cardAttachments || collected.cardAttachments.length === 0) && (!collected.generatedImageUrls || collected.generatedImageUrls.length === 0)) {
+            const quotaErr = new Error(collected.lastQuotaErrorMessage || 'Grok media generation quota exhausted');
+            quotaErr.status = 402;
+            quotaErr.statusCode = 402;
+            quotaErr.code = 402;
+            quotaErr.isQuotaExhausted = true;
+            quotaErr.shouldSwitchCredential = true;
+            throw quotaErr;
         }
 
         logger.info(`[Grok] Finalizing collection. model: ${model}, respId: ${collected.responseId}, videoPostId: ${collected.postId}`);
@@ -1229,6 +1262,10 @@ export class GrokApiService {
             if (item.type === 'error') {
                 const errorMsg = item.err_msg || item.error || 'WebSocket generation failed';
                 const isRateLimit = item.err_code === 'rate_limit_exceeded' || String(errorMsg).toLowerCase().includes('rate limit');
+                const isQuotaExhausted = item.err_code === 'usage_pool_exhausted' ||
+                    String(errorMsg).toLowerCase().includes('usage limit') ||
+                    String(errorMsg).toLowerCase().includes('credits') ||
+                    String(errorMsg).toLowerCase().includes('quota');
                 
                 // 救回逻辑：如果发生错误且没有 100% 的图，但有中间图，则使用中间图
                 if (imagesCollected === 0 && latestImages.size > 0) {
@@ -1249,6 +1286,13 @@ export class GrokApiService {
                     err.statusCode = 429;
                     err.code = 429;
                     err.isRateLimit = true;
+                    err.shouldSwitchCredential = true;
+                } else if (isQuotaExhausted) {
+                    err.status = 402;
+                    err.statusCode = 402;
+                    err.code = 402;
+                    err.err_code = item.err_code || 'usage_pool_exhausted';
+                    err.isQuotaExhausted = true;
                     err.shouldSwitchCredential = true;
                 }
                 throw err;
@@ -1322,6 +1366,10 @@ export class GrokApiService {
             if (item.type === 'error') {
                 const errorMsg = item.err_msg || item.error || 'WebSocket generation failed';
                 const isRateLimit = item.err_code === 'rate_limit_exceeded' || String(errorMsg).toLowerCase().includes('rate limit');
+                const isQuotaExhausted = item.err_code === 'usage_pool_exhausted' ||
+                    String(errorMsg).toLowerCase().includes('usage limit') ||
+                    String(errorMsg).toLowerCase().includes('credits') ||
+                    String(errorMsg).toLowerCase().includes('quota');
                 if (imagesYielded > 0) {
                     logger.warn(`[Grok WS] Error after yielding ${imagesYielded} images: ${errorMsg}. Ending stream gracefully.`);
                     yield {
@@ -1340,6 +1388,13 @@ export class GrokApiService {
                     err.statusCode = 429;
                     err.code = 429;
                     err.isRateLimit = true;
+                    err.shouldSwitchCredential = true;
+                } else if (isQuotaExhausted) {
+                    err.status = 402;
+                    err.statusCode = 402;
+                    err.code = 402;
+                    err.err_code = item.err_code || 'usage_pool_exhausted';
+                    err.isQuotaExhausted = true;
                     err.shouldSwitchCredential = true;
                 }
                 throw err;
