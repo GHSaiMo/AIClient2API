@@ -213,6 +213,12 @@ export const PROVIDER_MODELS = {
         'gpt-5-3',
         'gpt-5-mini',
         'auto'
+    ],
+    'yuanbao-web': [
+        'yuanbao-hunyuan',
+        'yuanbao-deepseek-r1',
+        'yuanbao-deepseek-v3',
+        'yuanbao'
     ]
 };
 

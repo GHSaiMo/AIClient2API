@@ -54,6 +54,7 @@ export const MODEL_PROTOCOL_PREFIX = {
     GROK: 'grok',
     CHATGPT: 'chatgpt',
     GEMINI_WEB: 'gemini-web',
+    YUANBAO: 'yuanbao',
 };
 
 // 提供商标识符常量
@@ -75,6 +76,7 @@ export const MODEL_PROVIDER = {
     GROK_WEB: 'grok-web',
     GROK_CLI: 'grok-cli-oauth',
     CHATGPT_WEB: 'chatgpt-web',
+    YUANBAO_WEB: 'yuanbao-web',
     AUTO: 'auto',
 };
 
