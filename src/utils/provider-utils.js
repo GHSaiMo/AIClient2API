@@ -111,6 +111,17 @@ export const PROVIDER_MAPPINGS = [
         displayName: 'Gemini Web',
         needsProjectId: false,
         urlKeys: ['GEMINI_WEB_BASE_URL']
+    },
+    {
+        // 腾讯元宝 Web 配置
+        dirName: 'yuanbao',
+        patterns: ['configs/yuanbao/', '/yuanbao/', '/.yuanbao/'],
+        providerType: 'yuanbao-web',
+        credPathKey: 'YUANBAO_TOKEN',
+        defaultCheckModel: 'yuanbao-hunyuan',
+        displayName: 'Tencent Yuanbao Web',
+        needsProjectId: false,
+        urlKeys: ['YUANBAO_BASE_URL', 'YUANBAO_RUNNER_URL']
     }
 ];
 

@@ -12,6 +12,7 @@ import { GrokApiService } from './grok/grok-core.js';
 import { GrokCliApiService } from './grok/grok-cli-core.js';
 import { ChatGPTWebService } from './chatgpt/chatgpt-web-core.js';
 import { GeminiWebCore } from './gemini/gemini-web-core.js';
+import { YuanbaoWebService } from './yuanbao/yuanbao-core.js';
 import { MODEL_PROVIDER } from '../utils/constants.js';
 import logger from '../utils/logger.js';
 
@@ -831,6 +832,38 @@ class GeminiWebApiServiceAdapter extends ApiServiceAdapter {
     }
 }
 
+// 腾讯元宝 Web API 服务适配器
+class YuanbaoWebApiServiceAdapter extends ApiServiceAdapter {
+    constructor(config) {
+        super();
+        this.yuanbaoWebService = new YuanbaoWebService(config);
+    }
+
+    async generateContent(model, requestBody) {
+        return this.yuanbaoWebService.generateContent(model, requestBody);
+    }
+
+    async *generateContentStream(model, requestBody) {
+        yield* this.yuanbaoWebService.generateContentStream(model, requestBody);
+    }
+
+    async listModels() {
+        return this.yuanbaoWebService.listModels();
+    }
+
+    async refreshToken() {
+        return this.yuanbaoWebService.refreshToken();
+    }
+
+    async forceRefreshToken() {
+        return this.yuanbaoWebService.forceRefreshToken();
+    }
+
+    isExpiryDateNear() {
+        return this.yuanbaoWebService.isExpiryDateNear();
+    }
+}
+
 // 注册所有内置适配器
 registerAdapter(MODEL_PROVIDER.QINIU, OpenAIApiServiceAdapter);
 registerAdapter(MODEL_PROVIDER.FENNO, OpenAIApiServiceAdapter);
@@ -840,6 +873,7 @@ registerAdapter(MODEL_PROVIDER.OPENAI_CUSTOM_RESPONSES, OpenAIResponsesApiServic
 registerAdapter(MODEL_PROVIDER.CLAUDE_CUSTOM, ClaudeApiServiceAdapter);
 registerAdapter(MODEL_PROVIDER.ANTIGRAVITY, AntigravityApiServiceAdapter);
 registerAdapter(MODEL_PROVIDER.GEMINI_WEB, GeminiWebApiServiceAdapter);
+registerAdapter(MODEL_PROVIDER.YUANBAO_WEB, YuanbaoWebApiServiceAdapter);
 registerAdapter(MODEL_PROVIDER.KIRO_API, KiroApiServiceAdapter);
 registerAdapter(MODEL_PROVIDER.CODEX_API, CodexApiServiceAdapter);
 registerAdapter(MODEL_PROVIDER.GROK_CLI, GrokCliApiServiceAdapter);

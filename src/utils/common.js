@@ -641,6 +641,10 @@ export function getProtocolPrefix(provider) {
     if (provider === 'gemini-web' || provider.startsWith('gemini-web-')) {
         return MODEL_PROTOCOL_PREFIX.OPENAI;
     }
+    // Tencent Yuanbao Web (talks OpenAI format locally to runner)
+    if (provider === 'yuanbao-web' || provider.startsWith('yuanbao-web-') || provider === 'yuanbao') {
+        return MODEL_PROTOCOL_PREFIX.OPENAI;
+    }
 
     const hyphenIndex = provider.indexOf('-');
     if (hyphenIndex !== -1) {
