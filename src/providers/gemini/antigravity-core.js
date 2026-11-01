@@ -42,14 +42,150 @@ const DEFAULT_THINKING_MIN = 1024;
 const DEFAULT_THINKING_MAX = 100000;
 const ANTIGRAVITY_EMPTY_TEXT_PLACEHOLDER = '.';
 
-// 流式请求超时相关常量（仅作用于 Antigravity 流式链路）
+// 动态自适应超时相关常量
+export const ANTIGRAVITY_TIMEOUT_BASE_MS = 60000;
+export const ANTIGRAVITY_TIMEOUT_MIN_MS = 60000;
+export const ANTIGRAVITY_TIMEOUT_MAX_MS = 300000;
+
+// 流式与非流式请求超时相关常量（作用于 Antigravity 核心链路）
 // 背景：走 TLS sidecar 时 proxy-utils 会删除 httpAgent/httpsAgent，
-// 构造函数里配置的 agent timeout 随之失效，streamApi 自身又未设置 timeout，
-// 导致上游/代理静默挂住连接时请求永久等待（并发插槽也不会释放）。
-// 首字节与空闲分开计时：thinking 模型首字节可能较慢，但长时间无新数据即视为连接已死。
-const ANTIGRAVITY_STREAM_FIRST_BYTE_TIMEOUT_MS = 180000;
-const ANTIGRAVITY_STREAM_IDLE_TIMEOUT_MS = 300000;
-const ANTIGRAVITY_UNARY_TIMEOUT_MS = 60000;
+// 构造函数里配置的 agent timeout 随之失效，必须使用 AbortController 看门狗进行超时熔断。
+// 首字节与空闲分开计时：普通短任务 60s 快速熔断防假死，重任务通过动态自适应系统平滑放宽；
+// 空闲看门狗收紧至 60s，防首字到达后上游或 TCP 静默挂起。
+export const ANTIGRAVITY_STREAM_FIRST_BYTE_TIMEOUT_MS = 60000;
+export const ANTIGRAVITY_STREAM_IDLE_TIMEOUT_MS = 60000;
+export const ANTIGRAVITY_UNARY_TIMEOUT_MS = 60000;
+
+/**
+ * 估算 payload 中的 Token 数、多模态附件数与思考模式
+ * @param {Object} body - Antigravity payload (包含 model 与 request)
+ * @returns {{ estimatedTokens: number, mediaCount: number, hasThinking: boolean }}
+ */
+export function estimatePayloadTokensAndMedia(body) {
+    let textLength = 0;
+    let mediaCount = 0;
+    let hasThinking = false;
+
+    if (!body || typeof body !== 'object') {
+        return { estimatedTokens: 0, mediaCount: 0, hasThinking: false };
+    }
+
+    // 1. 模型名称特征检测
+    const model = body.model || '';
+    if (typeof model === 'string') {
+        if (/(-thinking|-pro|claude.*thinking)/i.test(model)) {
+            hasThinking = true;
+        }
+    }
+
+    const req = body.request || body;
+
+    // 2. systemInstruction
+    if (req.systemInstruction?.parts && Array.isArray(req.systemInstruction.parts)) {
+        for (const part of req.systemInstruction.parts) {
+            if (part?.text) textLength += part.text.length;
+        }
+    }
+
+    // 3. contents
+    if (Array.isArray(req.contents)) {
+        for (const item of req.contents) {
+            if (Array.isArray(item?.parts)) {
+                for (const part of item.parts) {
+                    if (part?.text) {
+                        textLength += part.text.length;
+                    }
+                    if (part?.inlineData || part?.fileData || part?.image || part?.document) {
+                        mediaCount++;
+                    }
+                    if (part?.functionCall) {
+                        try {
+                            textLength += JSON.stringify(part.functionCall).length;
+                        } catch (_) {}
+                    }
+                    if (part?.functionResponse) {
+                        try {
+                            textLength += JSON.stringify(part.functionResponse).length;
+                        } catch (_) {}
+                    }
+                }
+            } else if (typeof item?.text === 'string') {
+                textLength += item.text.length;
+            }
+        }
+    }
+
+    // 4. tools
+    if (Array.isArray(req.tools)) {
+        try {
+            textLength += JSON.stringify(req.tools).length;
+        } catch (_) {}
+    }
+
+    // 5. generationConfig / thinkingConfig
+    const thinkingConfig = req.generationConfig?.thinkingConfig;
+    if (thinkingConfig) {
+        if (thinkingConfig.thinkingBudget != null && Number(thinkingConfig.thinkingBudget) > 0) {
+            hasThinking = true;
+        }
+        if (thinkingConfig.thinkingLevel && thinkingConfig.thinkingLevel !== 'low' && thinkingConfig.thinkingLevel !== 'minimal') {
+            hasThinking = true;
+        }
+    }
+
+    // 文本按约 3.8 字符/token 估算（中英混排与代码安全近似）
+    const estimatedTokens = Math.max(0, Math.ceil(textLength / 3.8));
+
+    return { estimatedTokens, mediaCount, hasThinking };
+}
+
+/**
+ * 动态自适应超时计算（对齐 Hermes 阶梯：<15k->60s, 15k-50k->90s, 50k-100k->150s, >=100k->240s）
+ * @param {Object} body - 请求 payload
+ * @param {Object} options - 超时配置
+ * @returns {{ timeoutMs: number, details: Object }}
+ */
+export function computeDynamicTimeout(body, options = {}) {
+    const baseTimeoutMs = options.baseTimeoutMs ?? ANTIGRAVITY_TIMEOUT_BASE_MS;
+    const minTimeoutMs = options.minTimeoutMs ?? ANTIGRAVITY_TIMEOUT_MIN_MS;
+    const maxTimeoutMs = options.maxTimeoutMs ?? ANTIGRAVITY_TIMEOUT_MAX_MS;
+
+    const { estimatedTokens, mediaCount, hasThinking } = estimatePayloadTokensAndMedia(body);
+
+    let contextBonusMs = 0;
+    if (estimatedTokens >= 100000) {
+        contextBonusMs = 180000; // 60s + 180s = 240s
+    } else if (estimatedTokens >= 50000) {
+        contextBonusMs = 90000;  // 60s + 90s = 150s
+    } else if (estimatedTokens >= 15000) {
+        contextBonusMs = 30000;  // 60s + 30s = 90s
+    }
+
+    // 多模态每个部件补偿 10s，最多 60s
+    const mediaBonusMs = Math.min(mediaCount * 10000, 60000);
+
+    let calculatedMs = baseTimeoutMs + contextBonusMs + mediaBonusMs;
+
+    // 思考模型保底不低于 120s
+    if (hasThinking && calculatedMs < 120000) {
+        calculatedMs = 120000;
+    }
+
+    // 边界截断 clamp(calculatedMs, minTimeoutMs, maxTimeoutMs)
+    const finalMs = Math.min(Math.max(calculatedMs, minTimeoutMs), maxTimeoutMs);
+
+    return {
+        timeoutMs: finalMs,
+        details: {
+            estimatedTokens,
+            mediaCount,
+            hasThinking,
+            contextBonusMs,
+            mediaBonusMs,
+            finalMs
+        }
+    };
+}
 
 // 上游偶尔以非 SSE 的 JSON 数组返回整个响应，需缓存原始行才能回退解析。
 // 超过该行数认为不是「一次性 JSON 响应」，放弃缓存以免长流吃内存。
@@ -1531,8 +1667,24 @@ export class AntigravityApiService {
 
             this._applySidecar(requestOptions);
 
-            const unaryTimeoutMs = this.config.ANTIGRAVITY_UNARY_TIMEOUT_MS
-                ?? ANTIGRAVITY_UNARY_TIMEOUT_MS;
+            // 动态自适应超时：针对内容生成方法动态扩缩容，心跳/鉴权等轻量方法保持基础超时
+            let unaryTimeoutMs;
+            let unaryDynamicDetails = null;
+            if (this.config.ANTIGRAVITY_DYNAMIC_TIMEOUT_ENABLED === false) {
+                unaryTimeoutMs = this.config.ANTIGRAVITY_UNARY_TIMEOUT_MS ?? ANTIGRAVITY_UNARY_TIMEOUT_MS;
+            } else if (method === 'generateContent') {
+                const dynamic = computeDynamicTimeout(body, {
+                    baseTimeoutMs: this.config.ANTIGRAVITY_UNARY_TIMEOUT_MS ?? ANTIGRAVITY_TIMEOUT_BASE_MS,
+                    minTimeoutMs: this.config.ANTIGRAVITY_TIMEOUT_MIN_MS ?? ANTIGRAVITY_TIMEOUT_MIN_MS,
+                    maxTimeoutMs: this.config.ANTIGRAVITY_TIMEOUT_MAX_MS ?? ANTIGRAVITY_TIMEOUT_MAX_MS
+                });
+                unaryTimeoutMs = dynamic.timeoutMs;
+                unaryDynamicDetails = dynamic.details;
+                logger.info(`[Antigravity Timeout Guard] callApi dynamic timeout: ${unaryTimeoutMs}ms (Tokens: ~${unaryDynamicDetails.estimatedTokens}, Media: ${unaryDynamicDetails.mediaCount}, Thinking: ${unaryDynamicDetails.hasThinking})`);
+            } else {
+                unaryTimeoutMs = this.config.ANTIGRAVITY_UNARY_TIMEOUT_MS ?? ANTIGRAVITY_UNARY_TIMEOUT_MS;
+            }
+
             let unaryTimer = null;
             let unaryTimedOut = false;
             if (unaryTimeoutMs > 0) {
@@ -1549,7 +1701,8 @@ export class AntigravityApiService {
                 res = await this.authClient.request(requestOptions);
             } catch (error) {
                 if (unaryTimedOut) {
-                    const timeoutError = new Error(`[Antigravity] Unary request timeout after ${unaryTimeoutMs}ms.`);
+                    const tokenInfo = unaryDynamicDetails ? ` (estimatedTokens: ~${unaryDynamicDetails.estimatedTokens}, media: ${unaryDynamicDetails.mediaCount})` : '';
+                    const timeoutError = new Error(`[Antigravity] Unary request timeout after ${unaryTimeoutMs}ms for method ${method}${tokenInfo}.`);
                     timeoutError.code = 'ETIMEDOUT';
                     throw timeoutError;
                 }
@@ -1668,8 +1821,24 @@ export class AntigravityApiService {
             // Sidecar 配置可能同步抛错，必须在创建计时器前完成，避免遗留定时器。
             this._applySidecar(requestOptions);
 
-            const firstByteTimeoutMs = this.config.ANTIGRAVITY_STREAM_FIRST_BYTE_TIMEOUT_MS
-                ?? ANTIGRAVITY_STREAM_FIRST_BYTE_TIMEOUT_MS;
+            // 动态首字节（TTFT）看门狗超时：针对流式内容生成动态扩缩容，其余方法保持基础超时
+            let firstByteTimeoutMs;
+            let streamDynamicDetails = null;
+            if (this.config.ANTIGRAVITY_DYNAMIC_TIMEOUT_ENABLED === false) {
+                firstByteTimeoutMs = this.config.ANTIGRAVITY_STREAM_FIRST_BYTE_TIMEOUT_MS ?? ANTIGRAVITY_STREAM_FIRST_BYTE_TIMEOUT_MS;
+            } else if (method === 'streamGenerateContent') {
+                const dynamic = computeDynamicTimeout(body, {
+                    baseTimeoutMs: this.config.ANTIGRAVITY_STREAM_FIRST_BYTE_TIMEOUT_MS ?? ANTIGRAVITY_TIMEOUT_BASE_MS,
+                    minTimeoutMs: this.config.ANTIGRAVITY_TIMEOUT_MIN_MS ?? ANTIGRAVITY_TIMEOUT_MIN_MS,
+                    maxTimeoutMs: this.config.ANTIGRAVITY_TIMEOUT_MAX_MS ?? ANTIGRAVITY_TIMEOUT_MAX_MS
+                });
+                firstByteTimeoutMs = dynamic.timeoutMs;
+                streamDynamicDetails = dynamic.details;
+                logger.info(`[Antigravity Timeout Guard] streamApi TTFT dynamic timeout: ${firstByteTimeoutMs}ms (Tokens: ~${streamDynamicDetails.estimatedTokens}, Media: ${streamDynamicDetails.mediaCount}, Thinking: ${streamDynamicDetails.hasThinking})`);
+            } else {
+                firstByteTimeoutMs = this.config.ANTIGRAVITY_STREAM_FIRST_BYTE_TIMEOUT_MS ?? ANTIGRAVITY_STREAM_FIRST_BYTE_TIMEOUT_MS;
+            }
+
             let firstByteTimer = null;
             let firstByteTimedOut = false;
             if (firstByteTimeoutMs > 0) {
@@ -1686,7 +1855,8 @@ export class AntigravityApiService {
                 res = await this.authClient.request(requestOptions);
             } catch (error) {
                 if (firstByteTimedOut) {
-                    const timeoutError = new Error(`[Antigravity] Stream first byte timeout after ${firstByteTimeoutMs}ms.`);
+                    const tokenInfo = streamDynamicDetails ? ` (estimatedTokens: ~${streamDynamicDetails.estimatedTokens}, media: ${streamDynamicDetails.mediaCount})` : '';
+                    const timeoutError = new Error(`[Antigravity] Stream first byte timeout after ${firstByteTimeoutMs}ms for method ${method}${tokenInfo}.`);
                     timeoutError.code = 'ETIMEDOUT';
                     throw timeoutError;
                 }
