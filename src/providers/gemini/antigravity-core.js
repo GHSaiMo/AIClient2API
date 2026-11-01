@@ -49,6 +49,7 @@ const ANTIGRAVITY_EMPTY_TEXT_PLACEHOLDER = '.';
 // 首字节与空闲分开计时：thinking 模型首字节可能较慢，但长时间无新数据即视为连接已死。
 const ANTIGRAVITY_STREAM_FIRST_BYTE_TIMEOUT_MS = 180000;
 const ANTIGRAVITY_STREAM_IDLE_TIMEOUT_MS = 300000;
+const ANTIGRAVITY_UNARY_TIMEOUT_MS = 60000;
 
 // 上游偶尔以非 SSE 的 JSON 数组返回整个响应，需缓存原始行才能回退解析。
 // 超过该行数认为不是「一次性 JSON 响应」，放弃缓存以免长流吃内存。
@@ -1529,7 +1530,33 @@ export class AntigravityApiService {
             };
 
             this._applySidecar(requestOptions);
-            const res = await this.authClient.request(requestOptions);
+
+            const unaryTimeoutMs = this.config.ANTIGRAVITY_UNARY_TIMEOUT_MS
+                ?? ANTIGRAVITY_UNARY_TIMEOUT_MS;
+            let unaryTimer = null;
+            let unaryTimedOut = false;
+            if (unaryTimeoutMs > 0) {
+                const unaryController = new AbortController();
+                requestOptions.signal = unaryController.signal;
+                unaryTimer = setTimeout(() => {
+                    unaryTimedOut = true;
+                    unaryController.abort();
+                }, unaryTimeoutMs);
+            }
+
+            let res;
+            try {
+                res = await this.authClient.request(requestOptions);
+            } catch (error) {
+                if (unaryTimedOut) {
+                    const timeoutError = new Error(`[Antigravity] Unary request timeout after ${unaryTimeoutMs}ms.`);
+                    timeoutError.code = 'ETIMEDOUT';
+                    throw timeoutError;
+                }
+                throw error;
+            } finally {
+                if (unaryTimer) clearTimeout(unaryTimer);
+            }
             return res.data;
         } catch (error) {
             const status = error.response?.status;
