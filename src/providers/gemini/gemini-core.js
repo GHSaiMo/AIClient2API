@@ -14,6 +14,7 @@ import { getProxyConfigForProvider, getGoogleAuthProxyConfig, isTLSSidecarEnable
 import { getProviderPoolManager } from '../../services/service-manager.js';
 import { MODEL_PROVIDER } from '../../utils/common.js';
 import { createGaxiosFetch } from '../../utils/gaxios-fetch-adapter.js';
+import { computeDynamicTimeout } from '../../utils/dynamic-timeout.js';
 
 // --- Constants ---
 const AUTH_REDIRECT_PORT = 8085;
@@ -579,7 +580,37 @@ export class GeminiApiService {
                 body: JSON.stringify(body),
             };
             this._applySidecar(requestOptions);
-            const res = await this.authClient.request(requestOptions);
+
+            let unaryTimer = null;
+            let unaryTimedOut = false;
+            let unaryTimeoutMs = 60000;
+            if (this.config.DYNAMIC_TIMEOUT_ENABLED !== false && method === 'generateContent') {
+                const dynamic = computeDynamicTimeout(body);
+                unaryTimeoutMs = dynamic.timeoutMs;
+                logger.info(`[Gemini Timeout Guard] callApi dynamic timeout: ${unaryTimeoutMs}ms (Tokens: ~${dynamic.details.estimatedTokens}, Media: ${dynamic.details.mediaCount}, Thinking: ${dynamic.details.hasThinking})`);
+            }
+            if (unaryTimeoutMs > 0) {
+                const controller = new AbortController();
+                requestOptions.signal = controller.signal;
+                unaryTimer = setTimeout(() => {
+                    unaryTimedOut = true;
+                    controller.abort();
+                }, unaryTimeoutMs);
+            }
+
+            let res;
+            try {
+                res = await this.authClient.request(requestOptions);
+            } catch (error) {
+                if (unaryTimedOut) {
+                    const timeoutError = new Error(`[Gemini] Unary request timeout after ${unaryTimeoutMs}ms for method ${method}.`);
+                    timeoutError.code = 'ETIMEDOUT';
+                    throw timeoutError;
+                }
+                throw error;
+            } finally {
+                if (unaryTimer) clearTimeout(unaryTimer);
+            }
             return res.data;
         } catch (error) {
             const status = error.response?.status;
@@ -667,7 +698,38 @@ export class GeminiApiService {
                 body: JSON.stringify(body),
             };
             this._applySidecar(requestOptions);
-            const res = await this.authClient.request(requestOptions);
+
+            let firstByteTimer = null;
+            let firstByteTimedOut = false;
+            let firstByteTimeoutMs = 60000;
+            if (this.config.DYNAMIC_TIMEOUT_ENABLED !== false && method === 'streamGenerateContent') {
+                const dynamic = computeDynamicTimeout(body);
+                firstByteTimeoutMs = dynamic.timeoutMs;
+                logger.info(`[Gemini Timeout Guard] streamApi TTFT dynamic timeout: ${firstByteTimeoutMs}ms (Tokens: ~${dynamic.details.estimatedTokens}, Media: ${dynamic.details.mediaCount}, Thinking: ${dynamic.details.hasThinking})`);
+            }
+            if (firstByteTimeoutMs > 0) {
+                const controller = new AbortController();
+                requestOptions.signal = controller.signal;
+                firstByteTimer = setTimeout(() => {
+                    firstByteTimedOut = true;
+                    controller.abort();
+                }, firstByteTimeoutMs);
+            }
+
+            let res;
+            try {
+                res = await this.authClient.request(requestOptions);
+            } catch (error) {
+                if (firstByteTimedOut) {
+                    const timeoutError = new Error(`[Gemini] Stream first byte timeout after ${firstByteTimeoutMs}ms for method ${method}.`);
+                    timeoutError.code = 'ETIMEDOUT';
+                    throw timeoutError;
+                }
+                throw error;
+            } finally {
+                if (firstByteTimer) clearTimeout(firstByteTimer);
+            }
+
             if (res.status !== 200) {
                 let errorBody = '';
                 for await (const chunk of res.data) errorBody += chunk.toString();
@@ -747,17 +809,35 @@ export class GeminiApiService {
     }
 
     async * parseSSEStream(stream) {
+        const idleTimeoutMs = 60000;
+        let idleTimer = null;
+        const resetIdleTimer = () => {
+            if (idleTimer) clearTimeout(idleTimer);
+            idleTimer = setTimeout(() => {
+                logger.error(`[Gemini Stream] Idle timeout after ${idleTimeoutMs}ms without data.`);
+                try { stream.destroy(new Error('Gemini stream idle timeout')); } catch (_) {}
+            }, idleTimeoutMs);
+        };
+        resetIdleTimer();
+        if (typeof stream?.on === 'function') {
+            stream.on('data', resetIdleTimer);
+        }
+
         const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
         let buffer = [];
-        for await (const line of rl) {
-            if (line.startsWith("data: ")) buffer.push(line.slice(6));
-            else if (line === "" && buffer.length > 0) {
-                try { yield JSON.parse(buffer.join('\n')); } catch (e) { logger.error("[Stream] Failed to parse JSON chunk:", buffer.join('\n')); }
-                buffer = [];
+        try {
+            for await (const line of rl) {
+                if (line.startsWith("data: ")) buffer.push(line.slice(6));
+                else if (line === "" && buffer.length > 0) {
+                    try { yield JSON.parse(buffer.join('\n')); } catch (e) { logger.error("[Stream] Failed to parse JSON chunk:", buffer.join('\n')); }
+                    buffer = [];
+                }
             }
-        }
-        if (buffer.length > 0) {
-            try { yield JSON.parse(buffer.join('\n')); } catch (e) { logger.error("[Stream] Failed to parse final JSON chunk:", buffer.join('\n')); }
+            if (buffer.length > 0) {
+                try { yield JSON.parse(buffer.join('\n')); } catch (e) { logger.error("[Stream] Failed to parse final JSON chunk:", buffer.join('\n')); }
+            }
+        } finally {
+            if (idleTimer) clearTimeout(idleTimer);
         }
     }
 

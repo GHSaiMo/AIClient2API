@@ -22,6 +22,7 @@ import { getProviderPoolManager } from '../../services/service-manager.js';
 import { sanitizeJsonSchema } from '../../utils/schema-sanitizer.js';
 import { processToolsWithLongDescriptions } from '../../utils/tool-doc-offloader.js';
 import { injectTruncationRecovery, saveToolTruncation, saveContentTruncation } from './kiro-truncation-recovery.js';
+import { applyDynamicTimeout, DYNAMIC_STREAM_IDLE_TIMEOUT_MS } from '../../utils/dynamic-timeout.js';
 
 const KIRO_THINKING = {
     MIN_BUDGET_TOKENS: 1024,
@@ -2262,6 +2263,7 @@ async saveCredentialsToFile(filePath, newData) {
 
         let stream = null;
         let releaseThrottle = () => {};
+        let idleTimer = null;
         // catch 需要根据该状态判断能否安全地从头重试，因此必须与 try/catch 同级。
         // 一旦产出过内容，流中途断线就不能重发（会导致内容重复/错位）。
         let hasYieldedContent = false;
@@ -2274,10 +2276,31 @@ async saveCredentialsToFile(filePath, newData) {
                 responseType: 'stream'
             };
             this._applySidecar(reqOptions);
+            applyDynamicTimeout(reqOptions, requestData, {
+                baseTimeoutMs: this.config.DYNAMIC_TIMEOUT_BASE_MS,
+                minTimeoutMs: this.config.DYNAMIC_TIMEOUT_MIN_MS,
+                maxTimeoutMs: this.config.DYNAMIC_TIMEOUT_MAX_MS,
+                logPrefix: '[Kiro Timeout Guard]'
+            });
             releaseThrottle = await acquireKiroRequestSlot(this.config);
             const response = await this.client.request(reqOptions);
 
             stream = response.data;
+            const idleTimeoutMs = this.config.STREAM_IDLE_TIMEOUT_MS || DYNAMIC_STREAM_IDLE_TIMEOUT_MS;
+            const resetIdleTimer = () => {
+                if (idleTimer) clearTimeout(idleTimer);
+                idleTimer = setTimeout(() => {
+                    logger.error(`[Kiro Stream] Idle timeout after ${idleTimeoutMs}ms without data.`);
+                    if (stream && typeof stream.destroy === 'function') {
+                        stream.destroy(new Error(`Kiro stream idle timeout after ${idleTimeoutMs}ms`));
+                    }
+                }, idleTimeoutMs);
+            };
+            resetIdleTimer();
+            if (typeof stream?.on === 'function') {
+                stream.on('data', resetIdleTimer);
+            }
+
             let sseBuffer = '';
             let lastContentEvent = null;
 
@@ -2440,6 +2463,7 @@ async saveCredentialsToFile(filePath, newData) {
             logger.error(`[Kiro] Stream API call failed (Status: ${status}, Code: ${errorCode}):`,  error.message);
             throw error;
         } finally {
+            if (idleTimer) clearTimeout(idleTimer);
             releaseThrottle();
             // 确保流被关闭，释放资源
             if (stream && typeof stream.destroy === 'function') {

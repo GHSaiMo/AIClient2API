@@ -7,6 +7,7 @@ import { fetch, Agent as UndiciAgent } from 'undici';
 import { Readable } from 'stream';
 import logger from './logger.js';
 import { NETWORK } from './constants.js';
+import { computeDynamicTimeout, DYNAMIC_STREAM_IDLE_TIMEOUT_MS } from './dynamic-timeout.js';
 
 /**
  * 统一 HTTP 错误类，完全兼容原有 Axios 错误结构
@@ -241,7 +242,15 @@ export class UndiciHttpClient {
         }
 
         const mergedHeaders = this._mergeHeaders(headers);
-        const signal = this._resolveSignal(customSignal, timeout);
+        let reqTimeout = timeout;
+        if (reqTimeout === undefined && options.dynamicTimeout === true) {
+            const rawBody = explicitBody !== null ? explicitBody : data;
+            if (rawBody && typeof rawBody === 'object') {
+                const dynamic = computeDynamicTimeout(rawBody);
+                reqTimeout = dynamic.timeoutMs;
+            }
+        }
+        const signal = this._resolveSignal(customSignal, reqTimeout);
 
         let reqBody = explicitBody !== null ? explicitBody : data;
         let isFormData = false;
@@ -426,7 +435,18 @@ export class UndiciHttpClient {
             mergedHeaders['Content-Type'] = 'application/json';
         }
 
-        const signal = this._resolveSignal(customSignal, timeout);
+        let effectiveTimeout = options.timeout;
+        if (effectiveTimeout === undefined) {
+            const rawBody = explicitBody !== null ? explicitBody : data;
+            if (rawBody && typeof rawBody === 'object' && options.dynamicTimeout !== false) {
+                const dynamic = computeDynamicTimeout(rawBody);
+                effectiveTimeout = dynamic.timeoutMs;
+            } else {
+                effectiveTimeout = 300000;
+            }
+        }
+
+        const signal = this._resolveSignal(customSignal, effectiveTimeout);
         let reqBody = explicitBody !== null ? explicitBody : data;
         if (reqBody !== null && typeof reqBody !== 'string' && !(reqBody instanceof ArrayBuffer) && !ArrayBuffer.isView(reqBody)) {
             reqBody = JSON.stringify(reqBody);
@@ -510,15 +530,44 @@ export class UndiciHttpClient {
             body: response.body,
             headers: resHeaders,
             status: response.status,
-            async *lines() {
+            async *lines(customIdleTimeout = options.idleTimeout) {
                 if (!response.body) return;
+                const idleTimeoutMs = customIdleTimeout !== undefined ? customIdleTimeout : DYNAMIC_STREAM_IDLE_TIMEOUT_MS;
                 const reader = response.body.getReader();
                 const decoder = new TextDecoder('utf-8');
                 let buffer = '';
 
+                let idleTimer = null;
+                const clearIdle = () => {
+                    if (idleTimer) {
+                        clearTimeout(idleTimer);
+                        idleTimer = null;
+                    }
+                };
+
+                const readNext = () => {
+                    if (!idleTimeoutMs || idleTimeoutMs <= 0) {
+                        return reader.read();
+                    }
+                    clearIdle();
+                    return new Promise((resolve, reject) => {
+                        idleTimer = setTimeout(() => {
+                            const err = new Error(`Stream idle timeout after ${idleTimeoutMs}ms without data`);
+                            err.code = 'ETIMEDOUT';
+                            try { reader.cancel(err); } catch (_) {}
+                            reject(err);
+                        }, idleTimeoutMs);
+
+                        reader.read().then(
+                            (res) => { clearIdle(); resolve(res); },
+                            (err) => { clearIdle(); reject(err); }
+                        );
+                    });
+                };
+
                 try {
                     while (true) {
-                        const { done, value } = await reader.read();
+                        const { done, value } = await readNext();
                         if (done) break;
 
                         buffer += decoder.decode(value, { stream: true });
@@ -536,6 +585,7 @@ export class UndiciHttpClient {
                         yield buffer;
                     }
                 } finally {
+                    clearIdle();
                     try {
                         await reader.cancel();
                     } catch {

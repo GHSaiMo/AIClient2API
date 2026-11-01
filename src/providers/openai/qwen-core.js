@@ -13,6 +13,7 @@ import { handleQwenOAuth } from '../../auth/oauth-handlers.js';
 import { configureUndiciProxy, configureUndiciTLSSidecar, getUndiciDispatcherForProvider } from '../../utils/proxy-utils.js';
 import { isRetryableNetworkError, MODEL_PROVIDER, formatExpiryLog, getRetryAfterMs } from '../../utils/common.js';
 import { getProviderPoolManager } from '../../services/service-manager.js';
+import { applyDynamicTimeout } from '../../utils/dynamic-timeout.js';
 
 // --- Constants ---
 const QWEN_DIR = '.qwen';
@@ -693,10 +694,10 @@ export class QwenApiService {
                 method: 'post',
                 url: targetUrl,
                 data: processedBody,
-                headers,
-                timeout: 300000,
+                headers
             };
             this._applySidecar(reqOptions);
+            applyDynamicTimeout(reqOptions, processedBody, { logPrefix: `[Qwen Timeout Guard] ${isStream ? 'stream' : 'unary'}` });
             
             if (isStream) {
                 const streamRes = await this.client.streamRequest(reqOptions.url, reqOptions);
