@@ -37,6 +37,18 @@ export const NETWORK = {
     DEFAULT_TIMEOUT: 120000
 };
 
+// 动态自适应超时常量
+export const DYNAMIC_TIMEOUT = {
+    // 基础超时：60秒
+    BASE_MS: 60000,
+    // 最小允许超时：30秒
+    MIN_MS: 30000,
+    // 最大允许超时：300秒（5分钟）
+    MAX_MS: 300000,
+    // 流式数据空闲看门狗超时：60秒
+    IDLE_MS: 60000
+};
+
 // 请求重试相关常量
 export const RETRY = {
     // 最大重试次数

@@ -2,6 +2,7 @@ import { UndiciHttpClient } from '../../utils/undici-client.js';
 import logger from '../../utils/logger.js';
 import { configureUndiciTLSSidecar } from '../../utils/proxy-utils.js';
 import { isRetryableNetworkError, MODEL_PROVIDER, getRetryAfterMs } from '../../utils/common.js';
+import { applyDynamicTimeout } from '../../utils/dynamic-timeout.js';
 
 /**
  * Claude API Core Service Class.
@@ -66,6 +67,7 @@ export class ClaudeApiService {
                 data: body
             };
             this._applySidecar(reqOptions);
+            applyDynamicTimeout(reqOptions, body, { logPrefix: '[Claude Timeout Guard] callApi' });
             const response = await this.client.request(reqOptions);
             return response.data;
         } catch (error) {
@@ -141,6 +143,7 @@ export class ClaudeApiService {
                 }
             };
             this._applySidecar(reqOptions);
+            applyDynamicTimeout(reqOptions, body, { logPrefix: '[Claude Timeout Guard] stream' });
 
             for await (const line of this.client.stream(reqOptions.url, reqOptions.data, reqOptions)) {
                 const trimmed = line.trim();

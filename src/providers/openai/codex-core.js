@@ -12,6 +12,7 @@ import {MODEL_PROVIDER, formatExpiryLog, normalizeProviderErrorMessage} from '..
 import {getProxyConfigForProvider} from '../../utils/proxy-utils.js';
 import {getProviderModels} from '../provider-models.js';
 import {normalizeCodexInstructions} from './codex-request-utils.js';
+import { applyDynamicTimeout } from '../../utils/dynamic-timeout.js';
 
 const baseModels = getProviderModels(MODEL_PROVIDER.CODEX_API);
 const fastModels = baseModels.map(m => `${m}-fast`);
@@ -306,19 +307,15 @@ export class CodexApiService {
         const headers = this.buildHeaders(body.prompt_cache_key, true);
 
         try {
-            const config = {
-                headers,
-                responseType: 'text', // 确保以文本形式接收 SSE 流
-                timeout: 300000 // 5 分钟超时，适应慢速模型
-            };
-
             const reqOptions = {
                 method: 'post',
                 url,
                 data: body,
-                ...config
+                headers,
+                responseType: 'text' // 确保以文本形式接收 SSE 流
             };
             this._applySidecar(reqOptions);
+            applyDynamicTimeout(reqOptions, body, { logPrefix: '[Codex Timeout Guard] callApi' });
 
             const response = await this.client.request(reqOptions);
 
@@ -387,10 +384,10 @@ export class CodexApiService {
                 method: 'post',
                 url,
                 data: body,
-                headers,
-                timeout: 300000 // 5 分钟超时
+                headers
             };
             this._applySidecar(reqOptions);
+            applyDynamicTimeout(reqOptions, body, { logPrefix: '[Codex Timeout Guard] stream' });
 
             const streamRes = await this.client.streamRequest(reqOptions.url, reqOptions);
 

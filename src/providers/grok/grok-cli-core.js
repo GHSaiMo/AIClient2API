@@ -11,6 +11,7 @@ import { MODEL_PROVIDER, formatExpiryLog, getRetryAfterMs, normalizeProviderErro
 import { getProviderModels } from '../provider-models.js';
 import { grokReasoningCache } from './grok-reasoning-cache.js';
 import { sanitizeGrokTools, filterInternalXSearchOutput } from './grok-tool-sanitizer.js';
+import { applyDynamicTimeout } from '../../utils/dynamic-timeout.js';
 
 const XAI_DEFAULT_BASE_URL = 'https://api.x.ai/v1';
 const XAI_DEFAULT_TOKEN_ENDPOINT = 'https://auth.x.ai/oauth/token';
@@ -1398,10 +1399,10 @@ export class GrokCliApiService {
                 url,
                 data: body,
                 headers: this.buildHeaders(true, body.prompt_cache_key),
-                responseType: 'text',
-                timeout: 300000
+                responseType: 'text'
             };
             this._applySidecar(reqOptions);
+            applyDynamicTimeout(reqOptions, body, { logPrefix: '[Grok CLI Timeout Guard] non-stream' });
 
             const response = await this.client.request(reqOptions);
             return this.parseNonStreamResponse(response.data);
@@ -1441,10 +1442,10 @@ export class GrokCliApiService {
                 url,
                 data: body,
                 headers: this.buildHeaders(true, body.prompt_cache_key),
-                responseType: 'stream',
-                timeout: 300000
+                responseType: 'stream'
             };
             this._applySidecar(reqOptions);
+            applyDynamicTimeout(reqOptions, body, { logPrefix: '[Grok CLI Timeout Guard] stream' });
 
             const response = await this.client.request(reqOptions);
             yield* this.parseSSEStream(response.data);

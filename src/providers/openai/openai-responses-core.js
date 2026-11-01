@@ -2,6 +2,7 @@ import { UndiciHttpClient } from '../../utils/undici-client.js';
 import logger from '../../utils/logger.js';
 import { configureUndiciTLSSidecar } from '../../utils/proxy-utils.js';
 import { MODEL_PROVIDER, getRetryAfterMs, isRetryableNetworkError } from '../../utils/common.js';
+import { applyDynamicTimeout } from '../../utils/dynamic-timeout.js';
 
 // OpenAI Responses API specification service for interacting with third-party models
 export class OpenAIResponsesApiService {
@@ -43,6 +44,7 @@ export class OpenAIResponsesApiService {
                 data: body
             };
             this._applySidecar(reqOptions);
+            applyDynamicTimeout(reqOptions, body, { logPrefix: '[OpenAI Responses Timeout Guard] callApi' });
             const response = await this.client.request(reqOptions);
             return response.data;
         } catch (error) {
@@ -108,6 +110,7 @@ export class OpenAIResponsesApiService {
                 }
             };
             this._applySidecar(reqOptions);
+            applyDynamicTimeout(reqOptions, body, { logPrefix: '[OpenAI Responses Timeout Guard] stream' });
 
             for await (const line of this.client.stream(reqOptions.url, reqOptions.data, reqOptions)) {
                 const trimmed = line.trim();
