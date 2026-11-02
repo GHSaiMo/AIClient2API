@@ -391,6 +391,12 @@ export class GrokApiService {
                 this.cfClearance = refreshed.cf_clearance;
                 this.config.GROK_CF_CLEARANCE = refreshed.cf_clearance;
             }
+            if (refreshed.email && (!this.config.email || this.config.email === 'user@grok.com' || this.config.email.startsWith('user@'))) {
+                this.config.email = refreshed.email;
+                if (!this.config.customName || this.config.customName.includes('user@grok.com')) {
+                    this.config.customName = `${refreshed.email} (${refreshed.source || 'Web'})`;
+                }
+            }
 
             // 同步回号池管理器与持久化配置
             const poolManager = getProviderPoolManager();
@@ -401,6 +407,12 @@ export class GrokApiService {
                     poolItem.config.GROK_COOKIE_TOKEN = refreshed.sso;
                     if (refreshed.cf_clearance) {
                         poolItem.config.GROK_CF_CLEARANCE = refreshed.cf_clearance;
+                    }
+                    if (refreshed.email && (!poolItem.config.email || poolItem.config.email === 'user@grok.com' || poolItem.config.email.startsWith('user@'))) {
+                        poolItem.config.email = refreshed.email;
+                        if (!poolItem.config.customName || poolItem.config.customName.includes('user@grok.com')) {
+                            poolItem.config.customName = `${refreshed.email} (${refreshed.source || 'Web'})`;
+                        }
                     }
                     poolItem.config.isHealthy = true;
                     poolItem.config.needsRefresh = false;

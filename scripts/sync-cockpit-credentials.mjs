@@ -344,9 +344,22 @@ async function main() {
   console.log(`  - claude-kiro-oauth: total ${pools['claude-kiro-oauth'].length} accounts (updated: ${kiroUpdatedCount}, created: ${kiroCreatedCount})`);
 
   // ==========================================
-  // 3. Sync to NAS Production & Restart
+  // 3. Process Grok Web Tokens
   // ==========================================
-  console.log('\n--- 3. Syncing to NAS Production (192.168.50.39) ---');
+  console.log('\n--- 3. Syncing Grok Web Browser Tokens ---');
+  try {
+    const grokSyncScript = path.join(__dirname, 'sync-grok-tokens.mjs');
+    if (fs.existsSync(grokSyncScript)) {
+      execSync(`node "${grokSyncScript}" --skip-nas-sync`, { stdio: 'inherit', cwd: ROOT });
+    }
+  } catch (err) {
+    console.warn('[Grok Sync Warning] Grok token sync warning:', err.message);
+  }
+
+  // ==========================================
+  // 4. Sync to NAS Production & Restart
+  // ==========================================
+  console.log('\n--- 4. Syncing to NAS Production (192.168.50.39) ---');
   try {
     console.log('[NAS Sync] Syncing configs/antigravity/ ...');
     execSync(`rsync -avz configs/antigravity/ nas:/vol1/1000/apps/AIClient2API/configs/antigravity/`, { stdio: 'inherit', cwd: ROOT });

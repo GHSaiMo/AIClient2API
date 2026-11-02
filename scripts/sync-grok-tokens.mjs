@@ -194,16 +194,22 @@ async function main() {
   });
 
   // 4. 同步至飞牛 NAS 生产环境 (192.168.50.39)
-  if (process.platform === 'darwin') {
+  const skipNasSync = process.argv.includes('--skip-nas-sync');
+  const skipNasRestart = process.argv.includes('--skip-nas-restart');
+
+  if (process.platform === 'darwin' && !skipNasSync) {
     console.log('\n--- 同步至 NAS 生产环境 (192.168.50.39) ---');
     try {
       console.log('[NAS Sync] 正在推送 configs/provider_pools.json 到 NAS ...');
       execSync(`scp configs/provider_pools.json nas:/vol1/1000/apps/AIClient2API/configs/provider_pools.json`, { stdio: 'inherit', cwd: ROOT });
 
-      console.log('[NAS Sync] 重启 NAS aiclient2api 服务 ...');
-      execSync(`ssh nas "echo jz0305 | sudo -S systemctl restart aiclient2api"`, { stdio: 'inherit', cwd: ROOT });
-
-      console.log('✓ NAS 生产服务同步并重启成功！');
+      if (!skipNasRestart) {
+        console.log('[NAS Sync] 重启 NAS aiclient2api 服务 ...');
+        execSync(`ssh nas "echo jz0305 | sudo -S systemctl restart aiclient2api"`, { stdio: 'inherit', cwd: ROOT });
+        console.log('✓ NAS 生产服务同步并重启成功！');
+      } else {
+        console.log('[NAS Sync] 跳过 NAS 服务重启（后续流水线处理）');
+      }
     } catch (err) {
       console.error('[NAS Sync 失败]', err.message);
     }
