@@ -186,7 +186,12 @@ export async function getEgoBrowserCookies(preferredProfile = null) {
  * @returns {Promise<{ sso: string, cf_clearance?: string } | null>}
  */
 export async function refreshGrokToken(config = {}) {
-    const email = (config.email || config.customName || '').toLowerCase().trim();
+    let email = (config.email || config.customName || '').toLowerCase().trim();
+    // 识别并规避默认占位邮箱或无效邮箱（如 user@grok.com）
+    const isPlaceholderEmail = !email || email === 'user@grok.com' || email.startsWith('user@') || email.includes('example.com');
+    if (isPlaceholderEmail) {
+        email = '';
+    }
     logger.info(`[GrokRefresher] Attempting to refresh Grok credentials for email/id: ${email || config.uuid}`);
 
     let cookies = null;
@@ -212,8 +217,9 @@ export async function refreshGrokToken(config = {}) {
 
             if (res.ok) {
                 let data = await res.json();
-                if ((!data || !data.ok) && !email) {
-                    logger.info(`[GrokRefresher] Attempting fallback to any available cookie...`);
+                // 若指定邮箱未查到或响应不合法，自动兜底拉取所有可用 Cookie
+                if (!data || !data.ok) {
+                    logger.info(`[GrokRefresher] Specific query for '${email || 'default'}' not fulfilled on bridge, attempting fallback to available cookies...`);
                     try {
                         const fallbackRes = await fetch(`${bridgeBaseUrl}/api/grok-cookies`);
                         if (fallbackRes.ok) {
@@ -225,13 +231,33 @@ export async function refreshGrokToken(config = {}) {
                 }
                 if (data && data.ok) {
                     if (data.sso) {
-                        cookies = { sso: data.sso, cf_clearance: data.cf_clearance || '' };
+                        cookies = {
+                            sso: data.sso,
+                            cf_clearance: data.cf_clearance || '',
+                            email: data.email,
+                            source: data.source
+                        };
                     } else if (data.cookies && email && data.cookies[email]) {
-                        cookies = { sso: data.cookies[email].sso, cf_clearance: data.cookies[email].cf_clearance || '' };
-                    } else if (data.cookies && !email) {
-                        const first = Object.values(data.cookies)[0];
-                        if (first?.sso) {
-                            cookies = { sso: first.sso, cf_clearance: first.cf_clearance || '' };
+                        cookies = {
+                            sso: data.cookies[email].sso,
+                            cf_clearance: data.cookies[email].cf_clearance || '',
+                            email: data.cookies[email].email || email,
+                            source: data.cookies[email].source
+                        };
+                    } else if (data.cookies) {
+                        // 优先模糊匹配，其次兜底选取第一个有效账号
+                        const matchedEntry = Object.entries(data.cookies).find(([k]) =>
+                            email && (k.toLowerCase().includes(email.toLowerCase()) || email.toLowerCase().includes(k.toLowerCase()))
+                        );
+                        const fallbackTarget = matchedEntry ? matchedEntry[1] : Object.values(data.cookies)[0];
+                        if (fallbackTarget?.sso) {
+                            logger.info(`[GrokRefresher] Fallback matched available cookie from: ${fallbackTarget.email || fallbackTarget.source || 'default'}`);
+                            cookies = {
+                                sso: fallbackTarget.sso,
+                                cf_clearance: fallbackTarget.cf_clearance || '',
+                                email: fallbackTarget.email,
+                                source: fallbackTarget.source
+                            };
                         }
                     }
                 }
@@ -256,10 +282,12 @@ export async function refreshGrokToken(config = {}) {
     }
 
     if (cookies && cookies.sso) {
-        logger.info(`[GrokRefresher] Successfully refreshed Grok SSO for ${email || config.uuid}`);
+        logger.info(`[GrokRefresher] Successfully refreshed Grok SSO for ${cookies.email || email || config.uuid}`);
         return {
             sso: cookies.sso,
-            cf_clearance: cookies.cf_clearance || ''
+            cf_clearance: cookies.cf_clearance || '',
+            email: cookies.email,
+            source: cookies.source
         };
     }
 
