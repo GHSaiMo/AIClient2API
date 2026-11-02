@@ -1,8 +1,8 @@
-# Kiroween 2026 黑客松参赛与 Kiro 14账号全矩阵登记档案 (大满贯)
+# Kiroween 2026 黑客松参赛与 Kiro 15账号全矩阵登记档案 (大满贯)
 
-> **最终登记时间**：2026-11-02 23:36 (UTC+8)  
+> **最终登记时间**：2026-11-03 00:35 (UTC+8)  
 > **所属项目**：AIClient2API (`/Users/hal9000/Projects/AIClient2API`)  
-> **关联目标**：储备 AWS Kiro 平台 4,000 × 14 = **56,000 Credits**（总价值约 **$2,240 USD** / 约合 **¥16,200+ RMB**）正价大模型算力，用于支持 AIClient2API 的上游 Provider 代理与逆向协议调度（Claude 3.5 Sonnet / Claude 3 Opus / GPT-5 等）。
+> **关联目标**：储备 AWS Kiro 平台 4,000 × 15 = **60,000 Credits**（总价值约 **$2,400 USD** / 约合 **¥17,400+ RMB**）正价大模型算力，用于支持 AIClient2API 的上游 Provider 代理与逆向协议调度（Claude 3.5 Sonnet / Claude 3 Opus / GPT-5 等）。
 
 ---
 
@@ -13,7 +13,7 @@
 | **活动全称** | Kiroween 2026 Hackathon (AWS Kiro 万圣节年度黑客松) |
 | **奖金池** | $100,000 USD |
 | **参赛津贴** | **4,000 Kiro Credits / 账号**（相当于官方加购价 **$160 / 账号**，折合各 2 个月 Pro+ 额度） |
-| **累计申领额度** | **56,000 Kiro Credits**（14 账号独立报名，总价值约 **$2,240**） |
+| **累计申领额度** | **60,000 Kiro Credits**（15 账号独立报名，总价值约 **$2,400**） |
 | **支持模型** | Claude 全家桶（Claude 3.5 Sonnet, Claude 3 Opus）、GPT-5 正价原生不缩水 |
 | **申请截止** | **2026 年 12 月 2 日 04:00 (北京时间)** |
 | **额度到账周期** | 提交申请后 48 个工作小时内（约 2 个工作日） |
@@ -44,6 +44,7 @@
 | **12** | `taojiuzhenitunes@jiuge.space` | `taojiuzhenitunes932` | [devpost.com/taojiuzhenitunes932](https://devpost.com/taojiuzhenitunes932) | GitHub OAuth | `d-9067c98495.e4e84408-6061-70f0-cd67-e517362ace1d` | `Category: Resurrection` | ✅ 您的回复已记录 |
 | **13** | `taoxinyun0305@jiuge.space` | `taoxinyun0305734` | [devpost.com/taoxinyun0305734](https://devpost.com/taoxinyun0305734) | GitHub OAuth | `d-9067c98495.84d83488-5051-70f6-f993-d650d8c3a153` | `Category: Frankenstein` | ✅ 您的回复已记录 |
 | **14** | `hal9000jiuge@jiuge.space` | `hal9000jiuge271` | [devpost.com/hal9000jiuge271](https://devpost.com/hal9000jiuge271) | GitHub OAuth | `d-9067c98495.e4388478-d0c1-70f8-b705-2211fbaf1661` | `Category: Frankenstein` | ✅ 您的回复已记录 |
+| **15** | `jdb74w5k6z@jiuge.space` | `jdb74w5k6z` | [devpost.com/jdb74w5k6z](https://devpost.com/jdb74w5k6z) | GitHub OAuth | `d-9067c98495.e4f8a488-6091-7033-b967-ad6e7a42c11d` | `Category: Skeleton Crew` | ✅ 您的回复已记录 |
 
 ---
 
@@ -167,11 +168,20 @@
 * **申报项目描述**：`Planning to build an AI-powered agentic developer toolkit reviving legacy CLI tools using Kiro's spec-driven development.`
 * **审核通知邮箱**：`hal9000jiuge@jiuge.space`（Cloudflare Catch-All 汇聚至 `taojiuzhen@gmail.com`）
 
+### 3.15 账号 15 (`jdb74w5k6z@jiuge.space` / 原 `jdb74w5k6z@privaterelay.appleid.com` GitHub 授权)
+* **Devpost 身份**：`jdb74w5k6z`（单人参赛，地区 United States）
+* **Devpost 主页**：[devpost.com/jdb74w5k6z](https://devpost.com/jdb74w5k6z)
+* **Kiro 登录方式**：GitHub 授权登录
+* **Kiro User ID**：`d-9067c98495.e4f8a488-6091-7033-b967-ad6e7a42c11d`
+* **申报赛道**：`Category: Skeleton Crew`
+* **申报项目描述**：`Planning to build a high-performance modular microservice skeleton for distributed autonomous AI agents using Kiro's spec-driven development.`
+* **审核通知邮箱**：`jdb74w5k6z@jiuge.space`（Cloudflare Catch-All 汇聚至 `taojiuzhen@gmail.com`）
+
 ---
 
 ## 4. 与 AIClient2API 项目的集成指引
 
-当所有津贴到账后，合计将拥有 **56,000 Credits**（14 个账号各 4,000，总价值约 **$2,240 USD**），可作为 AIClient2API 的高质量 14 节点轮询池：
+当所有津贴到账后，合计将拥有 **60,000 Credits**（15 个账号各 4,000，总价值约 **$2,400 USD**），可作为 AIClient2API 的高质量 15 节点轮询池：
 
 1. **凭证提取与本地轮询**：
    * 将各账号 Session Cookie / JWT 鉴权 Token 分别保存于 `AIClient2API/.cookies/` 目录：
@@ -189,6 +199,7 @@
      * `kiro_12_hal9000jiuzai_google.json`
      * `kiro_13_zhangrunyu1210_google.json`
      * `kiro_14_hal9000jiuge_github.json`
+     * `kiro_15_jdb74w5k6z_apple_github.json`
    * 通过多账号负载均衡器实现请求轮询与故障转移（Failover）。
 2. **Provider 适配层路由**：
    * `kiro/claude-3-5-sonnet` -> AWS 原生 Claude 3.5 Sonnet
