@@ -19,6 +19,7 @@ api-potluck-keys.json
 api-potluck-data.json
 model-usage-stats.json
 src/plugins-user/
+docs/*.json
 
 /.codegraph/
 tls-sidecar/tls-sidecar-linux-*
