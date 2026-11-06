@@ -108,11 +108,13 @@
 
 ### 3.8 账号 08 (`acct-dbcd6a@example.com`)
 * **Devpost 身份**：`zhangrunyu1210`（单人参赛，地区 United States）
+* **Devpost 姓名**：`Runyu Zhang`（已对齐统一）
 * **Kiro 登录方式**：Google 授权登录
 * **Kiro User ID**：`d-9067c98495.3418b428-9091-7000-524a-aa2ba99847cc`
 * **申报赛道**：`Category: Frankenstein`
 * **申报项目描述**：`Planning to build a multi-agent orchestration bridge combining legacy terminal tooling and autonomous reasoning agents with Kiro's spec-driven development.`
 * **审核通知邮箱**：`acct-dbcd6a@example.com`
+* **申领状态**：✅ `您的回复已记录。`（11-06 统一修复 Devpost 姓名与表单一致性后二次重提成功）
 
 ### 3.9 账号 09 (`acct-39569d@example.com` / 原 `acct-ad1110@example.com` GitHub 授权)
 * **Devpost 身份**：`jiugegemini`（单人参赛，地区 United States）
