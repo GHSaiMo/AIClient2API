@@ -163,12 +163,14 @@
 
 ### 3.14 账号 14 (`hal9000jiuge@jiuge.space` / 原 `hal9000jiuge@gmail.com` GitHub 授权)
 * **Devpost 身份**：`hal9000jiuge271`（单人参赛，地区 United States）
+* **Devpost 姓名**：`Jiuge Hal`（严格对齐）
 * **Devpost 主页**：[devpost.com/hal9000jiuge271](https://devpost.com/hal9000jiuge271)
 * **Kiro 登录方式**：GitHub 授权登录
 * **Kiro User ID**：`d-9067c98495.e4388478-d0c1-70f8-b705-2211fbaf1661`
 * **申报赛道**：`Category: Frankenstein`
-* **申报项目描述**：`Planning to build an AI-powered agentic developer toolkit reviving legacy CLI tools using Kiro's spec-driven development.`
+* **申报项目描述**：`Category: Frankenstein. Building an autonomous database incident autopsy pipeline that stitches together vintage BerkeleyDB diagnostics with real-time vector embeddings and Kiro's spec-driven agent hooks to automatically reproduce, isolate, and remediate distributed memory leaks.`（已于 11-06 替换为独家定制无碰撞文案）
 * **审核通知邮箱**：`hal9000jiuge@jiuge.space`（Cloudflare Catch-All 汇聚至 `taojiuzhen@gmail.com`）
+* **申报状态**：✅ `您的回复已记录。`（11-06 独家项目描述二次重提成功）
 
 ### 3.15 账号 15 (`jdb74w5k6z@jiuge.space` / 原 `jdb74w5k6z@privaterelay.appleid.com` GitHub 授权)
 * **Devpost 身份**：`jdb74w5k6z`（单人参赛，地区 United States）
