@@ -73,8 +73,8 @@ curl http://127.0.0.1:3005/
 > - **各供应商基准节点规模**：
 >   - `claude-kiro-oauth`: 16 个全健康节点
 >   - `openai-codex-oauth`: 5 个全健康节点
->   - `grok-cli-oauth`: 3 个全健康节点
->   - `grok-web`: 2 个全健康节点
+>   - `grok-cli-oauth`: 2 个健康节点 (1 个禁用)
+>   - `grok-web`: 1 个健康节点 (1 个禁用)
 >   - `gemini-web`: 1 个全健康节点 (gemini-4-argon)
 >   - `yuanbao-web`: 1 个全健康节点 (yuanbao-hunyuan)
 >   - `gemini-antigravity`: 彻底停用 (isDisabled: true)
