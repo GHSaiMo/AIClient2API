@@ -58,3 +58,24 @@
 # 检查服务健康状态
 curl http://127.0.0.1:3005/
 ```
+
+## 3. 黄金基准凭据池规范与回滚约定
+
+> [!IMPORTANT]
+> **基准凭据池黄金版本**（2026-11-08 归档）：
+> - 用户已完成全量失效凭据的移除与清洗，并将当前版本定为**唯一准则基准**。
+> - 归档路径：`configs/baselines/provider_pools.baseline.json`（双端同步）。
+> - **回滚准则**：后续无论发生任何配置错乱、自动关联异常或重置需求，**必须严格以此基准凭据池为准进行回滚恢复**，严禁使用旧的历史备份冲刷覆盖。
+> - **一键回滚/恢复命令**：
+>   ```bash
+>   node scripts/restore-baseline-pools.mjs
+>   ```
+> - **各供应商基准节点规模**：
+>   - `claude-kiro-oauth`: 16 个全健康节点
+>   - `openai-codex-oauth`: 5 个全健康节点
+>   - `grok-cli-oauth`: 3 个全健康节点
+>   - `grok-web`: 2 个全健康节点
+>   - `gemini-web`: 1 个全健康节点 (gemini-4-argon)
+>   - `yuanbao-web`: 1 个全健康节点 (yuanbao-hunyuan)
+>   - `gemini-antigravity`: 彻底停用 (isDisabled: true)
+

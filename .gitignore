@@ -6,6 +6,8 @@ logs.txt
 CLAUDE.md
 config.json
 provider_pools.json
+configs/baselines/
+*.baseline.json
 custom_models.json
 plugins.json
 fetch_system_prompt.txt
