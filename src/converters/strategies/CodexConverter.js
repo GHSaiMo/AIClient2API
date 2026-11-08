@@ -719,7 +719,7 @@ export class CodexConverter extends BaseConverter {
             id: response.id || `chatcmpl-${Date.now()}`,
             object: 'chat.completion',
             created: unixTimestamp,
-            model: response.model || model,
+            model: model || response.model,
             choices: [{
                 index: 0,
                 message: {
@@ -883,7 +883,7 @@ export class CodexConverter extends BaseConverter {
             id: response.id || `resp_${uuidv4().replace(/-/g, '')}`,
             object: "response",
             created_at: unixTimestamp,
-            model: response.model || model,
+            model: model || response.model,
             status: "completed",
             output: output,
             incomplete_details: response.incomplete_details || null,
@@ -1076,7 +1076,7 @@ export class CodexConverter extends BaseConverter {
             // 更新状态中的 responseID
             state.responseID = chunk.response.id;
             state.createdAt = chunk.response.created_at || state.createdAt;
-            state.model = chunk.response.model || state.model;
+            state.model = state.model || chunk.response.model;
             // 重置 functionCallIndex，确保每个新请求从 0 开始
             state.functionCallIndex = 0;
             state.isFirstChunk = true;

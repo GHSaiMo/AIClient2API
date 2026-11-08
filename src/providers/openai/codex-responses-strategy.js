@@ -15,12 +15,13 @@ class CodexResponsesAPIStrategy extends ProviderStrategy {
     }
 
     extractResponseText(response) {
-        if (!response.output) {
+        const output = response?.response?.output || response?.output;
+        if (!output || !Array.isArray(output)) {
             return '';
         }
 
         // In Responses API, output is an array of items
-        for (const item of response.output) {
+        for (const item of output) {
             if (item.type === 'message' && item.content && item.content.length > 0) {
                 for (const content of item.content) {
                     if (content.type === 'output_text' && content.text) {

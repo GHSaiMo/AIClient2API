@@ -1576,18 +1576,21 @@ export async function handleUnaryRequest(res, service, model, requestBody, fromP
         ].includes(String(candidateFinishReason).toUpperCase());
 
         // 3. 检查是否有实质内容（文本、工具调用、或思考过程）
+        const codexOutput = nativeResponse?.response?.output || nativeResponse?.output || [];
         const hasContent = Boolean(responseText && responseText.trim().length > 0);
         const hasTools = Boolean(
             primaryCandidate?.content?.parts?.some(p => p.functionCall) ||
             nativeResponse?.functionCalls ||
             nativeResponse?.tool_calls ||
             nativeResponse?.choices?.[0]?.message?.tool_calls?.length > 0 ||
-            (Array.isArray(nativeResponse?.content) && nativeResponse.content.some(c => c.type === 'tool_use'))
+            (Array.isArray(nativeResponse?.content) && nativeResponse.content.some(c => c.type === 'tool_use')) ||
+            (Array.isArray(codexOutput) && codexOutput.some(item => item.type === 'function_call'))
         );
         const hasReasoning = Boolean(
             primaryCandidate?.content?.parts?.some(p => p.thought || (p.text && p.thought === true)) ||
             nativeResponse?.choices?.[0]?.message?.reasoning_content ||
-            (Array.isArray(nativeResponse?.content) && nativeResponse.content.some(c => c.type === 'thinking'))
+            (Array.isArray(nativeResponse?.content) && nativeResponse.content.some(c => c.type === 'thinking')) ||
+            (Array.isArray(codexOutput) && codexOutput.some(item => item.type === 'reasoning'))
         );
 
         if (!hasContent && !hasTools && !hasReasoning) {

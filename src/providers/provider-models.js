@@ -97,9 +97,6 @@ export const PROVIDER_MODELS = {
     'claude-kiro-oauth': [
         'gpt-5.6-sol',
         'gpt-5.6-terra',
-        'gpt-6-luna',
-        'gpt-6-sol',
-        'gpt-6-astra',
         'gpt-5.6-luna',
         'claude-haiku-4-5',
         'claude-haiku-4-5-20251001',
@@ -154,6 +151,11 @@ export const PROVIDER_MODELS = {
         'minimax-m2.5',
     ],
     'openai-codex-oauth': [
+        'gpt-6-luna',
+        'gpt-6-sol',
+        'gpt-6-astra',
+        'gpt-6.1-sol',
+        'gpt-6.1-terra',
         'gpt-5.3-codex-spark',
         'gpt-5.4',
         'gpt-5.4-mini',
