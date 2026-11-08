@@ -28,9 +28,18 @@ let providerPoolManager = null;
  * @returns {Promise<Object>} 更新后的 providerPools 对象
  */
 export async function autoLinkProviderConfigs(config, options = {}) {
-    // 确保 providerPools 对象存在
-    if (!config.providerPools) {
-        config.providerPools = {};
+    // 确保 providerPools 对象存在，优先加载已有磁盘配置，防止冲掉非目录类的 Web 供应商 (如 grok-web, gemini-web, yuanbao-web)
+    if (!config.providerPools || Object.keys(config.providerPools).length === 0) {
+        const filePath = config.PROVIDER_POOLS_FILE_PATH || 'configs/provider_pools.json';
+        if (fs.existsSync(filePath)) {
+            try {
+                config.providerPools = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+            } catch {
+                config.providerPools = config.providerPools || {};
+            }
+        } else {
+            config.providerPools = config.providerPools || {};
+        }
     }
     
     let totalNewProviders = 0;
