@@ -151,6 +151,7 @@ export const PROVIDER_MODELS = {
         'minimax-m2.5',
     ],
     'openai-codex-oauth': [
+        'gpt-5.6-luna',
         'gpt-6-luna',
         'gpt-6-sol',
         'gpt-6-astra',
@@ -162,7 +163,6 @@ export const PROVIDER_MODELS = {
         'gpt-5.5',
         'gpt-5.6-sol',
         'gpt-5.6-terra',
-        'gpt-5.6-luna',
         'gpt-image-2',
     ],
     'grok-cli-oauth': [

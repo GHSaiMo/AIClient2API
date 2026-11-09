@@ -283,7 +283,7 @@ export class CodexApiService {
             if (this.config.MODEL_FALLBACK_ENABLED === false) {
                 throw new Error(`[Codex] 模型不存在: ${model}`);
             }
-            const defaultModel = CODEX_MODELS[0] || 'gpt-6-luna';
+            const defaultModel = CODEX_MODELS[0] || 'gpt-5.6-luna';
             logger.warn(`[Codex] Model '${model}' not found in supported list. Falling back to default: '${defaultModel}'`);
             selectedModel = defaultModel;
         }
@@ -356,7 +356,7 @@ export class CodexApiService {
             if (this.config.MODEL_FALLBACK_ENABLED === false) {
                 throw new Error(`[Codex] 模型不存在: ${model}`);
             }
-            const defaultModel = CODEX_MODELS[0] || 'gpt-6-luna';
+            const defaultModel = CODEX_MODELS[0] || 'gpt-5.6-luna';
             logger.warn(`[Codex] Model '${model}' not found in supported list. Falling back to default: '${defaultModel}'`);
             selectedModel = defaultModel;
         }

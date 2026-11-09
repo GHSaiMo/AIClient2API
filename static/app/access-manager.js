@@ -16,7 +16,7 @@ const recommendedModelMap = {
     'fenno': 'gpt-5.5',
     'openai-qwen-oauth': 'qwen3-coder-plus',
     'openai-iflow': 'qwen3-max',
-    'openai-codex-oauth': 'gpt-6-luna',
+    'openai-codex-oauth': 'gpt-5.6-luna',
     'openaiResponses-custom': 'gpt-5.5',
     'grok-web': 'grok-imagine-image-2.0',
     'grok-cli-oauth': 'grok-4.6',

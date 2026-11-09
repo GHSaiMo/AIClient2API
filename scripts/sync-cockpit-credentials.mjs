@@ -488,7 +488,7 @@ async function main() {
           pools['openai-codex-oauth'].push({
             CODEX_OAUTH_CREDS_FILE_PATH: relativePath,
             uuid: crypto.randomUUID(),
-            checkModelName: 'gpt-6-luna',
+            checkModelName: 'gpt-5.6-luna',
             checkHealth: false,
             isHealthy: true,
             isDisabled: false,
