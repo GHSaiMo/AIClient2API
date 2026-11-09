@@ -32,3 +32,4 @@ gemini-web-sidecar/.cookies/
 gemini-web-sidecar/*.txt
 .cookies/
 .local_mode
+configs/pwd
