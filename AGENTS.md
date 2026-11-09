@@ -82,5 +82,6 @@ curl http://127.0.0.1:3005/
 >   - `gemini-web`: 1 个全健康节点 (gemini-4-argon)
 >   - `yuanbao-web`: 1 个全健康节点 (yuanbao-hunyuan)
 >   - `gemini-antigravity`: 彻底停用 (isDisabled: true)
+> - **入库副本**：完整基准含凭据保持 git 忽略；脱敏版位于 `configs/baseline-redacted/provider_pools.baseline.redacted.json`（`node scripts/export-redacted-baseline.mjs` 生成，仅供结构/状态参考，不可直接用于恢复）。
 > - **定向增量原则**：后续若添加新账号，仅更新对应供应商配置与基准，禁止非受邀全量冲刷。
 
