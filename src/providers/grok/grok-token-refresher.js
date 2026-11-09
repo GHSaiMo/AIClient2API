@@ -3,6 +3,7 @@ import path from 'path';
 import crypto from 'crypto';
 import { execSync, spawnSync } from 'child_process';
 import logger from '../../utils/logger.js';
+import { getLocalIdentities } from '../../utils/local-identities.js';
 
 function queryCookiesWithPython(dbPath) {
     if (!fs.existsSync(dbPath)) return [];
@@ -43,7 +44,7 @@ function cleanDecryptedCookie(buf, key, iv) {
 }
 
 /**
- * 1. 从 Google Chrome 读取 Cookies (针对 acct-935ea9@example.com 及 Chrome 登录账户)
+ * 1. 从 Google Chrome 读取 Cookies (针对 Chrome 登录账户)
  * 优先检查 preferredProfile / Default，并扫描其他 Profile 目录
  */
 export async function getChromeCookies(preferredProfile = null) {
@@ -271,9 +272,9 @@ export async function refreshGrokToken(config = {}) {
 
     // 2. 如果桥接未成功获取，且当前处于 macOS 本地，则尝试本地 Keychain 解密兜底
     if (!cookies && process.platform === 'darwin') {
-        if (email.includes('acct-935ea9@example.com') || email.includes('acct-be1f04@example.com')) {
+        if (email.includes(getLocalIdentities().grokEgo) || email.includes(getLocalIdentities().chromeProfile1)) {
             cookies = await getEgoBrowserCookies();
-        } else if (email.includes('acct-554d5c@example.com')) {
+        } else if (email.includes(getLocalIdentities().grokChromeDefault)) {
             cookies = await getChromeCookies();
         } else {
             // 未匹配到特定邮箱，按顺序尝试提取

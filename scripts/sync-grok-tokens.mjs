@@ -9,6 +9,7 @@ import {
   getChromeProfile1Cookies,
   getEgoBrowserCookies
 } from '../src/providers/grok/grok-token-refresher.js';
+import { getLocalIdentities } from '../src/utils/local-identities.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -36,10 +37,10 @@ async function extractAllLocalCookies() {
 
   const result = {};
 
-  // 1. Google Chrome Default (包含 acct-554d5c@example.com)
+  // 1. Google Chrome Default (包含 对应账号)
   if (chromeCookies?.sso) {
-    result['acct-554d5c@example.com'] = {
-      email: 'acct-554d5c@example.com',
+    result[getLocalIdentities().grokChromeDefault] = {
+      email: getLocalIdentities().grokChromeDefault,
       sso: chromeCookies.sso,
       cf_clearance: chromeCookies.cf_clearance || '',
       session_id: extractSessionId(chromeCookies.sso),
@@ -49,8 +50,8 @@ async function extractAllLocalCookies() {
 
   // 2. Google Chrome Profile 1 (备用 profile，若与 Default 互斥)
   if (chrome1?.sso && chrome1.sso !== chromeCookies?.sso) {
-    result['acct-be1f04@example.com'] = {
-      email: 'acct-be1f04@example.com',
+    result[getLocalIdentities().chromeProfile1] = {
+      email: getLocalIdentities().chromeProfile1,
       sso: chrome1.sso,
       cf_clearance: chrome1.cf_clearance || '',
       session_id: extractSessionId(chrome1.sso),
@@ -58,10 +59,10 @@ async function extractAllLocalCookies() {
     };
   }
 
-  // 3. ego-browser / Ego lite (包含 acct-935ea9@example.com)
+  // 3. ego-browser / Ego lite (包含 对应账号)
   if (ego?.sso) {
-    result['acct-935ea9@example.com'] = {
-      email: 'acct-935ea9@example.com',
+    result[getLocalIdentities().grokEgo] = {
+      email: getLocalIdentities().grokEgo,
       sso: ego.sso,
       cf_clearance: ego.cf_clearance || '',
       session_id: extractSessionId(ego.sso),

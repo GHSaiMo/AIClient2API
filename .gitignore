@@ -33,3 +33,4 @@ gemini-web-sidecar/*.txt
 .cookies/
 .local_mode
 configs/pwd
+configs/local-identities.json

@@ -1,0 +1,6 @@
+{
+  "grokChromeDefault": "chrome-default@example.com",
+  "chromeProfile1": "chrome-profile1@example.com",
+  "grokEgo": "ego@example.com",
+  "geminiEgoFallback": "gemini-ego@example.com"
+}

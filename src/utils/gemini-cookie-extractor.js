@@ -3,6 +3,7 @@ import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import logger from './logger.js';
+import { getLocalIdentities } from './local-identities.js';
 
 /**
  * 解密 macOS Chromium Cookie 字段 (v10 格式)
@@ -152,7 +153,7 @@ export function getEgoGoogleCookies(profile = 'Profile 4') {
         const res = extractFromSqlite(egoCookiesPath, key, iv);
         if (!res) return null;
 
-        const email = res.cookieMap['GAUSR'] || 'acct-e706eb@example.com';
+        const email = res.cookieMap['GAUSR'] || getLocalIdentities().geminiEgoFallback;
 
         return {
             email,
@@ -204,7 +205,7 @@ export function detectAllLocalGoogleAccounts() {
 
         if (!foundAccounts) {
             const wml = chrome.cookieMap['WML'] || '';
-            // 格式: 1790500976838#acct-be1f04@example.com:390:0#acct-554d5c@example.com:972:1...
+            // 格式: 1790500976838#a@example.com:390:0#b@example.com:972:1...
             if (wml) {
                 const matches = [...wml.matchAll(/#([^:]+@[^:]+):\d+:(\d+)/g)];
                 for (const m of matches) {
@@ -221,7 +222,7 @@ export function detectAllLocalGoogleAccounts() {
                 }
             } else {
                 accounts.push({
-                    email: 'acct-be1f04@example.com',
+                    email: getLocalIdentities().chromeProfile1,
                     authUser: 0,
                     browser: 'chrome',
                     profile: 'Default',
@@ -236,7 +237,7 @@ export function detectAllLocalGoogleAccounts() {
     const ego = getEgoGoogleCookies('Profile 4');
     if (ego && ego.cookieHeader) {
         accounts.push({
-            email: ego.email || 'acct-e706eb@example.com',
+            email: ego.email || getLocalIdentities().geminiEgoFallback,
             authUser: null,
             browser: 'ego',
             profile: 'Profile 4',
