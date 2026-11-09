@@ -688,7 +688,9 @@ export class GrokApiService {
         const shouldEnableImage = (modelLower.includes('imagine') || modelLower.includes('edit')) && !modelLower.includes('video') || 
                                  requestBody.enableImageGeneration === true;
 
-        const imageGenerationCount = Math.min(parseInt(requestBody.n || requestBody.imageGenerationCount || (shouldEnableImage ? 2 : 0)), 2);
+        const requestedN = parseInt(requestBody.n || requestBody.imageGenerationCount || (shouldEnableImage ? 1 : 0));
+        const imageGenerationCount = Math.min(Math.max(1, requestedN), 2);
+        const enableSideBySide = requestBody.enableSideBySide ?? requestBody.enable_side_by_side ?? (requestedN > 1);
         const returnImageBytes = requestBody.response_format === 'b64_json' || requestBody.responseFormat === 'b64_json';
 
         const finalToolOverrides = {
@@ -714,7 +716,7 @@ export class GrokApiService {
             "imageGenerationCount": imageGenerationCount,
             "forceConcise": false,
             "toolOverrides": finalToolOverrides,
-            "enableSideBySide": true,
+            "enableSideBySide": enableSideBySide,
             "responseMetadata": responseMetadata,
             "sendFinalMetadata": true,
             "request_metadata": {},
@@ -1084,10 +1086,12 @@ export class GrokApiService {
         // 识别优先使用 WS 的模型 (包括 2.0 / Pro 以及标准 Imagine 模型，排除视频、纯编辑和精简版)
         const isWSPreferred = isImagine && !modelLower.includes('video') && !modelLower.includes('edit') && !modelLower.includes('lite') && !modelLower.includes('fast');
         
+        let wsAttempted = false;
         let collected;
         try {
-            // 如果是优先 WS 的模型，尝试直接走 WS 逻辑
-            if (isWSPreferred) {
+            // 如果是优先 WS 的模型且未显式跳过，尝试直接走 WS 逻辑
+            if (isWSPreferred && !requestBody._skipWs) {
+                wsAttempted = true;
                 try {
                     if (n <= 2) {
                         return await this._generateAndCollectWS(model, requestBody);
@@ -1110,14 +1114,16 @@ export class GrokApiService {
                         logger.warn(`[Grok] Initial WS generation failed due to quota exhaustion; escalating to switch credentials: ${wsError.message}`);
                         throw wsError;
                     }
-                    logger.warn(`[Grok] Initial WS generation failed, falling back to app_chat: ${wsError.message}`);
-                    // 失败后继续向下走传统的 app_chat 逻辑
+                    logger.warn(`[Grok] Initial WS generation failed, falling back to app_chat once: ${wsError.message}`);
+                    // 标记 _skipWs: true 传给后续的 app_chat，防止在流内部及失败时重复进入 WS
                 }
             }
 
+            const chatRequestBody = wsAttempted ? { ...requestBody, _skipWs: true } : requestBody;
+
             if (n <= 2 || !isImagine) {
                 // 单次请求处理
-                collected = await this._generateAndCollect(model, requestBody);
+                collected = await this._generateAndCollect(model, chatRequestBody);
             } else {
                 // 处理 n > 2 的情况，分批并发请求
                 logger.info(`[Grok] Multi-image request detected (n=${n}), splitting into multiple tasks`);
@@ -1127,7 +1133,7 @@ export class GrokApiService {
                 
                 for (let i = 0; i < callsNeeded; i++) {
                     const count = Math.min(perCall, n - i * perCall);
-                    const subRequestBody = { ...requestBody, n: count };
+                    const subRequestBody = { ...chatRequestBody, n: count };
                     tasks.push(this._generateAndCollect(model, subRequestBody));
                 }
                 
@@ -1135,8 +1141,8 @@ export class GrokApiService {
                 collected = this._mergeCollectedResults(results);
             }
         } catch (error) {
-            // 只有图片生成才支持 WebSocket Fallback，排除视频模型
-            if (isImagine && !modelLower.includes('video')) {
+            // 只有此前从未尝试过 WS 的图片请求，才在 app_chat 失败后尝试一次 ws_imagine 兜底（彻底切断 WS 循环）
+            if (isImagine && !modelLower.includes('video') && !wsAttempted && !requestBody._skipWs) {
                 logger.warn(`[Grok] app_chat image generation failed, trying ws_imagine fallback: ${error.message}`);
                 try {
                     return await this._generateAndCollectWS(model, requestBody);
@@ -1215,11 +1221,12 @@ export class GrokApiService {
         const aspectRatio = requestBody.aspect_ratio || requestBody.aspectRatio || "1:1";
         const enableNsfw = requestBody.nsfw !== false;
         const isPro = isGrokProModel(model) || requestBody.pro === true || requestBody.enable_pro === true;
+        const enableSideBySide = requestBody.enable_side_by_side ?? requestBody.enableSideBySide ?? (n > 1);
         
-        logger.info(`[Grok WS] Starting image generation for: ${prompt.substring(0, 50)}... (pro=${isPro}, n=${n})`);
+        logger.info(`[Grok WS] Starting image generation for: ${prompt.substring(0, 50)}... (pro=${isPro}, n=${n}, sideBySide=${enableSideBySide})`);
         
         const wsService = new ImagineWebSocketService(this.config);
-        const stream = wsService.stream(this.token, prompt, aspectRatio, n, enableNsfw, isPro);
+        const stream = wsService.stream(this.token, prompt, aspectRatio, n, enableNsfw, isPro, { enableSideBySide });
         
         const collected = { 
             message: "", 
@@ -1239,9 +1246,10 @@ export class GrokApiService {
         const addImgToCollected = async (item) => {
             const imageUrl = item.url || ((item.blob && !item.blob.startsWith('data:')) ? `data:image/png;base64,${item.blob}` : item.blob);
             
-            // 处理 imagine-public 图片：创建媒体发布（Post）以获取持久化链接
+            // 处理 imagine-public 图片：仅在显式声明需要分享链接时才创建媒体发布（Post），避免污染主页及多余等待
             let shareLink = null;
-            if (imageUrl.includes('imagine-public.x.ai')) {
+            const shouldCreatePost = requestBody.createShareLink === true || requestBody.shareLink === true;
+            if (shouldCreatePost && imageUrl.includes('imagine-public.x.ai')) {
                 const postId = await this.createPost('IMAGE', imageUrl, prompt);
                 if (postId) {
                     shareLink = await this.createVideoShareLink(postId);
@@ -1360,11 +1368,12 @@ export class GrokApiService {
         const aspectRatio = requestBody.aspect_ratio || requestBody.aspectRatio || "1:1";
         const enableNsfw = requestBody.nsfw !== false;
         const isPro = isGrokProModel(model) || requestBody.pro === true || requestBody.enable_pro === true;
+        const enableSideBySide = requestBody.enable_side_by_side ?? requestBody.enableSideBySide ?? (n > 1);
 
-        logger.info(`[Grok WS Stream] Starting stream image generation for: ${prompt.substring(0, 50)}... (pro=${isPro}, n=${n})`);
+        logger.info(`[Grok WS Stream] Starting stream image generation for: ${prompt.substring(0, 50)}... (pro=${isPro}, n=${n}, sideBySide=${enableSideBySide})`);
 
         const wsService = new ImagineWebSocketService(this.config);
-        const stream = wsService.stream(this.token, prompt, aspectRatio, n, enableNsfw, isPro);
+        const stream = wsService.stream(this.token, prompt, aspectRatio, n, enableNsfw, isPro, { enableSideBySide });
         
         const responseId = `ws-${uuidv4()}`;
 
@@ -1435,9 +1444,10 @@ export class GrokApiService {
                     // 优先从 url 字段获取链接，如果不存在则使用 blob 降级
                     const imageUrl = item.url || ((item.blob && !item.blob.startsWith('data:')) ? `data:image/png;base64,${item.blob}` : item.blob);
                     
-                    // 处理 imagine-public 图片：创建媒体发布（Post）以获取持久化链接
+                    // 处理 imagine-public 图片：仅在显式声明需要分享链接时才创建媒体发布（Post），避免污染主页及多余等待
                     let shareLink = null;
-                    if (imageUrl.includes('imagine-public.x.ai')) {
+                    const shouldCreatePost = requestBody.createShareLink === true || requestBody.shareLink === true;
+                    if (shouldCreatePost && imageUrl.includes('imagine-public.x.ai')) {
                         const postId = await this.createPost('IMAGE', imageUrl, prompt);
                         if (postId) {
                             shareLink = await this.createVideoShareLink(postId);
@@ -1525,13 +1535,14 @@ export class GrokApiService {
         // 提前提取图片和消息，确保上传逻辑能获取到图片
         this._extractMessagesAndFiles(requestBody, modelLower.includes('video'));
 
-        // 如果是优先 WS 的模型，直接走 WS 流逻辑
-        if (isWSPreferred && retryCount === 0) {
+        // 如果是优先 WS 的模型且未显式跳过，直接走 WS 流逻辑
+        if (isWSPreferred && retryCount === 0 && !requestBody._skipWs) {
             try {
                 yield* this._generateContentStreamWS(model, requestBody);
                 return;
             } catch (wsError) {
-                logger.warn(`[Grok] Initial WS stream failed, falling back to app_chat: ${wsError.message}`);
+                logger.warn(`[Grok] Initial WS stream failed, falling back to app_chat once: ${wsError.message}`);
+                requestBody._skipWs = true;
                 // 失败后继续向下执行传统的 app_chat 逻辑
             }
         }
@@ -1683,9 +1694,9 @@ export class GrokApiService {
             const { status, errorCode, errorMessage, isNetworkError } = await this.classifyApiError(error, 'stream');
             const canRetryInRequest = !hasYieldedData && retryCount < maxRetries;
 
-            // 只有图片生成且未发送过数据时才尝试 WebSocket Fallback (明确排除视频)
+            // 只有此前从未尝试过 WS 的图片生成请求，才在 app_chat 失败后尝试一次 ws_imagine 兜底（严格单向，杜绝循环）
             const isImagineImage = (modelLower.includes('imagine') || modelLower.includes('edit')) && !modelLower.includes('video');
-            if (isImagineImage && !hasYieldedData && retryCount === 0) {
+            if (isImagineImage && !hasYieldedData && retryCount === 0 && !requestBody._skipWs) {
                 logger.warn(`[Grok] app_chat stream failed, trying ws_imagine fallback: ${error.message}`);
                 try {
                     yield* this._generateContentStreamWS(model, requestBody);

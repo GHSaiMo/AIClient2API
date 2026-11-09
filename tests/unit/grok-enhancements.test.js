@@ -264,6 +264,66 @@ describe('Phase 2: Grok Reasoning Replay & Tool Governance Suite', () => {
 
             streamSpy.mockRestore();
         });
+
+        it('should not call createPost for imagine-public images unless createShareLink is true', async () => {
+            const service = new GrokApiService({ GROK_COOKIE_TOKEN: 'test_token' });
+            async function* mockStream() {
+                yield { type: 'image', id: 'img-pub', url: 'https://imagine-public.x.ai/image-123.jpg', percentage_complete: 100, stage: 'final' };
+            }
+
+            const { ImagineWebSocketService } = await import('../../src/providers/grok/ws-imagine.js');
+            const streamSpy = jest.spyOn(ImagineWebSocketService.prototype, 'stream').mockImplementation(() => mockStream());
+            const createPostSpy = jest.spyOn(service, 'createPost').mockResolvedValue('post-123');
+
+            const result = await service._generateAndCollectWS('grok-imagine-image-2.0', { n: 1, message: 'prompt' });
+            expect(result.cardAttachments.length).toBe(1);
+            expect(createPostSpy).not.toHaveBeenCalled();
+
+            streamSpy.mockRestore();
+            createPostSpy.mockRestore();
+        });
+
+        it('should call createPost for imagine-public images when createShareLink is explicitly requested', async () => {
+            const service = new GrokApiService({ GROK_COOKIE_TOKEN: 'test_token' });
+            async function* mockStream() {
+                yield { type: 'image', id: 'img-pub', url: 'https://imagine-public.x.ai/image-123.jpg', percentage_complete: 100, stage: 'final' };
+            }
+
+            const { ImagineWebSocketService } = await import('../../src/providers/grok/ws-imagine.js');
+            const streamSpy = jest.spyOn(ImagineWebSocketService.prototype, 'stream').mockImplementation(() => mockStream());
+            const createPostSpy = jest.spyOn(service, 'createPost').mockResolvedValue('post-123');
+            const shareLinkSpy = jest.spyOn(service, 'createVideoShareLink').mockResolvedValue('https://grok.com/share/post-123');
+
+            const result = await service._generateAndCollectWS('grok-imagine-image-2.0', { n: 1, message: 'prompt', createShareLink: true });
+            expect(result.cardAttachments.length).toBe(1);
+            expect(createPostSpy).toHaveBeenCalledWith('IMAGE', 'https://imagine-public.x.ai/image-123.jpg', 'prompt');
+
+            streamSpy.mockRestore();
+            createPostSpy.mockRestore();
+            shareLinkSpy.mockRestore();
+        });
+
+        it('should pass enableSideBySide according to n or explicit parameter', async () => {
+            const service = new GrokApiService({ GROK_COOKIE_TOKEN: 'test_token' });
+            let passedOptions = [];
+            async function* mockStream() {
+                yield { type: 'image', id: 'img-1', url: 'https://assets.grok.com/img1.jpg', percentage_complete: 100, stage: 'final' };
+            }
+
+            const { ImagineWebSocketService } = await import('../../src/providers/grok/ws-imagine.js');
+            const streamSpy = jest.spyOn(ImagineWebSocketService.prototype, 'stream').mockImplementation((token, prompt, aspect, n, nsfw, pro, opts) => {
+                passedOptions.push(opts);
+                return mockStream();
+            });
+
+            await service._generateAndCollectWS('grok-imagine-image-2.0', { n: 1, message: 'prompt 1' });
+            expect(passedOptions[0].enableSideBySide).toBe(false);
+
+            await service._generateAndCollectWS('grok-imagine-image-2.0', { n: 2, message: 'prompt 2' });
+            expect(passedOptions[1].enableSideBySide).toBe(true);
+
+            streamSpy.mockRestore();
+        });
     });
 
     describe('4. Circular Structure Error & Auth Failure Classification Suite', () => {

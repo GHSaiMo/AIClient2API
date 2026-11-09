@@ -24,9 +24,11 @@ export class ImagineWebSocketService {
      * @param {number} n - Number of images
      * @param {boolean} enableNsfw - Enable NSFW filter
      * @param {boolean} enablePro - Enable Pro (2.0) mode
+     * @param {object} options - Optional generation flags (e.g. enableSideBySide)
      * @returns {AsyncGenerator<object>}
      */
-    async *stream(token, prompt, aspectRatio = '1:1', n = 1, enableNsfw = true, enablePro = false) {
+    async *stream(token, prompt, aspectRatio = '1:1', n = 1, enableNsfw = true, enablePro = false, options = {}) {
+        const enableSideBySide = options?.enableSideBySide ?? options?.enable_side_by_side ?? (n > 1);
         let proxyConfig = getProxyConfigForProvider(this.config, this.config?.MODEL_PROVIDER || MODEL_PROVIDER.GROK_WEB);
         if (!proxyConfig && (this.config?.PROXY_URL || this.config?.TLS_SIDECAR_PROXY_URL)) {
             const fallbackUrl = this.config?.PROXY_URL || this.config?.TLS_SIDECAR_PROXY_URL;
@@ -50,7 +52,7 @@ export class ImagineWebSocketService {
             'User-Agent': this.config.GROK_USER_AGENT || 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36',
         };
 
-        logger.debug(`[Grok WS] Connecting to ${this.wsUrl} for prompt: ${prompt.substring(0, 50)}... (pro=${enablePro})`);
+        logger.debug(`[Grok WS] Connecting to ${this.wsUrl} for prompt: ${prompt.substring(0, 50)}... (pro=${enablePro}, n=${n}, sideBySide=${enableSideBySide})`);
 
         const wsOptions = {
             headers,
@@ -73,8 +75,36 @@ export class ImagineWebSocketService {
         let done = false;
         let resolveNext = null;
 
+        const IDLE_TIMEOUT_MS = Number(this.config.GROK_WS_IDLE_TIMEOUT_MS) || 45000;
+        let idleTimer = null;
+
+        const clearIdleTimer = () => {
+            if (idleTimer) {
+                clearTimeout(idleTimer);
+                idleTimer = null;
+            }
+        };
+
+        const resetIdleTimer = () => {
+            clearIdleTimer();
+            if (!done) {
+                idleTimer = setTimeout(() => {
+                    logger.warn(`[Grok WS] Idle timeout (${IDLE_TIMEOUT_MS}ms) reached without incoming data`);
+                    queue.push({ type: 'error', error: `Grok WS idle timeout: no response for ${IDLE_TIMEOUT_MS / 1000}s` });
+                    done = true;
+                    if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+                        try { ws.close(); } catch {}
+                    }
+                    if (resolveNext) {
+                        resolveNext();
+                        resolveNext = null;
+                    }
+                }, IDLE_TIMEOUT_MS);
+            }
+        };
+
         ws.on('open', () => {
-            logger.debug(`[Grok WS] Connected. Sending reset and imagine request (pro=${enablePro}).`);
+            logger.debug(`[Grok WS] Connected. Sending reset and imagine request (pro=${enablePro}, sideBySide=${enableSideBySide}).`);
             
             // 遵循协议：首先发送重置消息
             const resetPayload = {
@@ -106,7 +136,7 @@ export class ImagineWebSocketService {
                                     "is_kids_mode": false,
                                     "enable_nsfw": enableNsfw,
                                     "skip_upsampler": false,
-                                    "enable_side_by_side": true,
+                                    "enable_side_by_side": enableSideBySide,
                                     "is_initial": false,
                                     "aspect_ratio": aspectRatio,
                                     "enable_pro": !!enablePro,
@@ -117,10 +147,12 @@ export class ImagineWebSocketService {
                     }
                 };
                 ws.send(JSON.stringify(payload));
+                resetIdleTimer();
             }, 50);
         });
 
         ws.on('message', (data) => {
+            resetIdleTimer();
             try {
                 const msg = JSON.parse(data.toString());
                 queue.push(msg);
@@ -134,6 +166,7 @@ export class ImagineWebSocketService {
         });
 
         ws.on('close', (code, reason) => {
+            clearIdleTimer();
             logger.debug(`[Grok WS] Connection closed: ${code} ${reason}`);
             done = true;
             if (resolveNext) {
@@ -143,6 +176,7 @@ export class ImagineWebSocketService {
         });
 
         ws.on('error', (err) => {
+            clearIdleTimer();
             logger.error(`[Grok WS] WebSocket error: ${err.message}`);
             queue.push({ type: 'error', error: err.message });
             done = true;
@@ -162,6 +196,7 @@ export class ImagineWebSocketService {
                 }
             }
         } finally {
+            clearIdleTimer();
             if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
                 ws.close();
             }
