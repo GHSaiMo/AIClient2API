@@ -12,11 +12,14 @@ const COCKPIT_DIR = '/Users/hal9000/.antigravity_cockpit';
 const KEY_PATH = path.join(COCKPIT_DIR, 'secure-account-storage.key');
 const ACCOUNTS_DIR = path.join(COCKPIT_DIR, 'accounts');
 const KIRO_DIR = path.join(COCKPIT_DIR, 'kiro_accounts');
+const CODEX_DIR = path.join(COCKPIT_DIR, 'codex_accounts');
 
 const LOCAL_CONFIGS_DIR = path.resolve(ROOT, 'configs');
 const LOCAL_ANTI_DIR = path.join(LOCAL_CONFIGS_DIR, 'antigravity');
 const LOCAL_KIRO_DIR = path.join(LOCAL_CONFIGS_DIR, 'kiro');
+const LOCAL_CODEX_DIR = path.join(LOCAL_CONFIGS_DIR, 'codex');
 const LOCAL_POOLS_PATH = path.join(LOCAL_CONFIGS_DIR, 'provider_pools.json');
+const BASELINE_POOLS_PATH = path.join(LOCAL_CONFIGS_DIR, 'baselines', 'provider_pools.baseline.json');
 
 if (!fs.existsSync(KEY_PATH)) {
   console.error(`[Error] Cockpit secure storage key not found at ${KEY_PATH}`);
@@ -48,15 +51,28 @@ function extractEmailFromIdToken(idToken) {
   }
 }
 
+function parseJwt(token) {
+  if (!token || typeof token !== 'string') return null;
+  const parts = token.split('.');
+  if (parts.length !== 3) return null;
+  try {
+    return JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+  } catch {
+    return null;
+  }
+}
+
 async function main() {
   console.log('=== Syncing Cockpit Credentials to AIClient2API ===');
 
   if (!fs.existsSync(LOCAL_ANTI_DIR)) fs.mkdirSync(LOCAL_ANTI_DIR, { recursive: true });
   if (!fs.existsSync(LOCAL_KIRO_DIR)) fs.mkdirSync(LOCAL_KIRO_DIR, { recursive: true });
+  if (!fs.existsSync(LOCAL_CODEX_DIR)) fs.mkdirSync(LOCAL_CODEX_DIR, { recursive: true });
 
   const pools = JSON.parse(fs.readFileSync(LOCAL_POOLS_PATH, 'utf8'));
   if (!pools['gemini-antigravity']) pools['gemini-antigravity'] = [];
   if (!pools['claude-kiro-oauth']) pools['claude-kiro-oauth'] = [];
+  if (!pools['openai-codex-oauth']) pools['openai-codex-oauth'] = [];
 
   // ==========================================
   // 1. Process Antigravity Accounts
@@ -337,16 +353,152 @@ async function main() {
     }
   }
 
+  // ==========================================
+  // 3. Process Codex Accounts
+  // ==========================================
+  console.log('\n--- 3. Processing Codex Credentials ---');
+  let codexUpdatedCount = 0;
+  let codexCreatedCount = 0;
+
+  if (fs.existsSync(CODEX_DIR)) {
+    const codexFiles = fs.readdirSync(CODEX_DIR).filter(f => f.endsWith('.json') && !f.endsWith('.bak'));
+    const cockpitCodexAccounts = [];
+    for (const f of codexFiles) {
+      try {
+        const raw = JSON.parse(fs.readFileSync(path.join(CODEX_DIR, f), 'utf8'));
+        const acc = decrypt(raw);
+        if (acc.disabled) {
+          console.log(`[Codex] Account ${acc.email || acc.id} is disabled in cockpit, skipping.`);
+          continue;
+        }
+        const tokens = acc.tokens || acc.token || {};
+        if (!tokens.access_token) {
+          console.log(`[Codex] Account ${acc.email || acc.id} has no access token, skipping.`);
+          continue;
+        }
+        cockpitCodexAccounts.push({ ...acc, tokens });
+      } catch (e) {
+        console.warn(`[Codex] Failed to decrypt ${f}:`, e.message);
+      }
+    }
+
+    const localCodexFiles = fs.readdirSync(LOCAL_CODEX_DIR).filter(f => f.endsWith('.json'));
+    const localCodexMap = new Map();
+    for (const f of localCodexFiles) {
+      const filePath = path.join(LOCAL_CODEX_DIR, f);
+      try {
+        const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+        const email = (data.email || '').toLowerCase();
+        if (email) {
+          localCodexMap.set(email, { file: f, path: filePath, data });
+        }
+      } catch (e) {
+        console.warn(`[Codex] Could not read local file ${f}:`, e.message);
+      }
+    }
+
+    let codexTimestampBase = Date.now();
+
+    for (const acc of cockpitCodexAccounts) {
+      const email = (acc.email || (acc.tokens && acc.tokens.email) || '').toLowerCase();
+      if (!email) continue;
+
+      let targetFileName;
+      let targetFilePath;
+      const existing = localCodexMap.get(email);
+
+      if (existing) {
+        targetFileName = existing.file;
+        targetFilePath = existing.path;
+        codexUpdatedCount++;
+        console.log(`[Codex] Updating credentials for ${email} in ${targetFileName}`);
+      } else {
+        codexTimestampBase += 10;
+        targetFileName = `${codexTimestampBase}_codex-${email}_oauth_creds.json`;
+        targetFilePath = path.join(LOCAL_CODEX_DIR, targetFileName);
+        codexCreatedCount++;
+        console.log(`[Codex] Creating new credentials for ${email} in ${targetFileName}`);
+      }
+
+      const accessClaims = parseJwt(acc.tokens.access_token);
+      const expired = accessClaims?.exp
+        ? new Date(accessClaims.exp * 1000).toISOString()
+        : new Date(Date.now() + 10 * 86400 * 1000).toISOString();
+      const lastRefresh = acc.token_updated_at
+        ? new Date(acc.token_updated_at * 1000).toISOString()
+        : new Date().toISOString();
+
+      const credsContent = {
+        id_token: acc.tokens.id_token || '',
+        access_token: acc.tokens.access_token || '',
+        refresh_token: acc.tokens.refresh_token || '',
+        account_id: acc.account_id || acc.tokens.account_id,
+        last_refresh: lastRefresh,
+        email: email,
+        name: email,
+        type: 'codex',
+        expired: expired,
+        access_token_only: !acc.tokens.refresh_token
+      };
+
+      fs.writeFileSync(targetFilePath, JSON.stringify(credsContent, null, 2) + '\n', { mode: 0o600 });
+
+      const relativePath = `./configs/codex/${targetFileName}`;
+      let poolEntry = pools['openai-codex-oauth'].find(item =>
+        item.CODEX_OAUTH_CREDS_FILE_PATH === relativePath ||
+        (item.email && item.email.toLowerCase() === email)
+      );
+
+      if (poolEntry) {
+        poolEntry.CODEX_OAUTH_CREDS_FILE_PATH = relativePath;
+        poolEntry.email = email;
+        poolEntry.isHealthy = true;
+        poolEntry.isDisabled = false;
+        poolEntry.needsRefresh = false;
+        poolEntry.errorCount = 0;
+        poolEntry.lastErrorMessage = null;
+      } else {
+        pools['openai-codex-oauth'].push({
+          CODEX_OAUTH_CREDS_FILE_PATH: relativePath,
+          uuid: crypto.randomUUID(),
+          checkModelName: 'gpt-6-luna',
+          checkHealth: false,
+          isHealthy: true,
+          isDisabled: false,
+          lastUsed: null,
+          usageCount: 0,
+          errorCount: 0,
+          lastErrorTime: null,
+          lastHealthCheckTime: null,
+          lastHealthCheckModel: null,
+          lastErrorMessage: null,
+          email: email,
+          needsRefresh: false,
+          refreshCount: 0,
+          customName: null,
+          _lastSelectionSeq: 0
+        });
+      }
+    }
+  }
+
   // Save provider_pools.json locally
   fs.writeFileSync(LOCAL_POOLS_PATH, JSON.stringify(pools, null, 2) + '\n', 'utf8');
+  if (fs.existsSync(BASELINE_POOLS_PATH)) {
+    const baseline = JSON.parse(fs.readFileSync(BASELINE_POOLS_PATH, 'utf8'));
+    baseline['openai-codex-oauth'] = pools['openai-codex-oauth'];
+    fs.writeFileSync(BASELINE_POOLS_PATH, JSON.stringify(baseline, null, 2) + '\n', 'utf8');
+  }
+
   console.log(`\n[Local Pools] Successfully updated configs/provider_pools.json`);
   console.log(`  - gemini-antigravity: total ${pools['gemini-antigravity'].length} accounts (updated: ${antiUpdatedCount}, created: ${antiCreatedCount})`);
   console.log(`  - claude-kiro-oauth: total ${pools['claude-kiro-oauth'].length} accounts (updated: ${kiroUpdatedCount}, created: ${kiroCreatedCount})`);
+  console.log(`  - openai-codex-oauth: total ${pools['openai-codex-oauth'].length} accounts (updated: ${codexUpdatedCount}, created: ${codexCreatedCount})`);
 
   // ==========================================
-  // 3. Process Grok Web Tokens
+  // 4. Process Grok Web Tokens
   // ==========================================
-  console.log('\n--- 3. Syncing Grok Web Browser Tokens ---');
+  console.log('\n--- 4. Syncing Grok Web Browser Tokens ---');
   try {
     const grokSyncScript = path.join(__dirname, 'sync-grok-tokens.mjs');
     if (fs.existsSync(grokSyncScript)) {
@@ -357,15 +509,21 @@ async function main() {
   }
 
   // ==========================================
-  // 4. Sync to NAS Production & Restart
+  // 5. Sync to NAS Production & Restart
   // ==========================================
-  console.log('\n--- 4. Syncing to NAS Production (192.168.50.39) ---');
+  console.log('\n--- 5. Syncing to NAS Production (192.168.50.39) ---');
   try {
     console.log('[NAS Sync] Syncing configs/antigravity/ ...');
     execSync(`rsync -avz configs/antigravity/ nas:/vol1/1000/apps/AIClient2API/configs/antigravity/`, { stdio: 'inherit', cwd: ROOT });
 
     console.log('[NAS Sync] Syncing configs/kiro/ ...');
     execSync(`rsync -avz configs/kiro/ nas:/vol1/1000/apps/AIClient2API/configs/kiro/`, { stdio: 'inherit', cwd: ROOT });
+
+    console.log('[NAS Sync] Syncing configs/codex/ ...');
+    execSync(`rsync -avz configs/codex/ nas:/vol1/1000/apps/AIClient2API/configs/codex/`, { stdio: 'inherit', cwd: ROOT });
+
+    console.log('[NAS Sync] Syncing configs/baselines/ ...');
+    execSync(`rsync -avz configs/baselines/ nas:/vol1/1000/apps/AIClient2API/configs/baselines/`, { stdio: 'inherit', cwd: ROOT });
 
     console.log('[NAS Sync] Syncing configs/provider_pools.json ...');
     execSync(`scp configs/provider_pools.json nas:/vol1/1000/apps/AIClient2API/configs/provider_pools.json`, { stdio: 'inherit', cwd: ROOT });
