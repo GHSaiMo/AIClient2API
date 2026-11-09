@@ -132,9 +132,9 @@ async function handleImageGenerationRequest(req, res, currentConfig, providerPoo
     const IMAGE_GEN_MAX_N = 4;
     const VALID_RESPONSE_FORMATS = new Set(['b64_json', 'url']);
 
+    const CONFIG = retryContext?.CONFIG ?? currentConfig;
     const maxRetries = retryContext?.maxRetries ?? (CONFIG.IMAGE_GEN_MAX_RETRIES !== undefined ? Math.max(0, parseInt(CONFIG.IMAGE_GEN_MAX_RETRIES)) : 1);
     const currentRetry = retryContext?.currentRetry ?? 0;
-    const CONFIG = retryContext?.CONFIG ?? currentConfig;
     let slotProviderType = null;
     let slotUuid = null;
     let prevExcludeUuids = Array.isArray(retryContext?.excludeUuids) ? retryContext.excludeUuids : [];

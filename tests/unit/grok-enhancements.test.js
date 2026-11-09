@@ -390,6 +390,27 @@ describe('Phase 2: Grok Reasoning Replay & Tool Governance Suite', () => {
             expect(recoveryTime).toBeInstanceOf(Date);
             expect(recoveryTime.getTime()).toBeGreaterThan(Date.now());
         });
+
+        it('handleImageGenerationRequest should initialize CONFIG and maxRetries without TDZ ReferenceError', async () => {
+            const { handleAPIRequests } = await import('../../src/services/api-manager.js');
+            const mockReq = {
+                on: (event, handler) => {
+                    if (event === 'data') handler(Buffer.from(JSON.stringify({ model: 'grok-imagine-image-2.0' })));
+                    if (event === 'end') handler();
+                }
+            };
+            let statusCode = 0;
+            let responseData = '';
+            const mockRes = {
+                writeHead: (code, headers) => { statusCode = code; },
+                end: (data) => { responseData = data; }
+            };
+
+            const handled = await handleAPIRequests('POST', '/v1/images/generations', mockReq, mockRes, { IMAGE_GEN_MAX_RETRIES: '1', REQUEST_BODY_MAX_BYTES: 1024 * 1024 }, null, null, '');
+            expect(handled).toBe(true);
+            expect(statusCode).toBe(400);
+            expect(responseData).toContain('prompt is required');
+        });
     });
 });
 
