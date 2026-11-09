@@ -42,6 +42,10 @@
      `ssh nas "cd /vol1/1000/apps/AIClient2API && git add . && git commit -m '...' && git push origin main"`
    - 随后在 Mac 本地目录拉取同步：
      `cd /Users/hal9000/Projects/AIClient2API && git pull origin main`
+6. **模块化定向同步准则 (严禁全量自作主张同步)**：
+   - **严格按需同步**：只有用户明确要求同步哪个模块的账号（如“同步 Codex 账号”、“导入 Kiro”），才仅对该指定模块执行同步。**严禁自作主张触发全量同步，严禁顺带冲刷同步未指定模块的账号池**（如未被要求的 Antigravity、Grok、Kiro 等）。
+   - **保护固定/停用状态**：部分模块有明确的基准限制（例如 `gemini-antigravity` 已彻底停用 `isDisabled: true`、`grok-web`/`grok-cli` 特定节点已按黄金基准冻结禁用），绝对禁止私自新增或恢复启用。
+   - **执行命令必须带参限制范围**：调用凭据同步工具时必须显式指定目标模块（如 `node scripts/sync-cockpit-credentials.mjs --codex`），禁止无参数或使用 `--all` 导致隐式全量冲刷。
 
 ## 2. 常用开发与测试命令
 
@@ -72,10 +76,11 @@ curl http://127.0.0.1:3005/
 >   ```
 > - **各供应商基准节点规模**：
 >   - `claude-kiro-oauth`: 16 个全健康节点
->   - `openai-codex-oauth`: 5 个全健康节点
+>   - `openai-codex-oauth`: 7 个全健康节点
 >   - `grok-cli-oauth`: 2 个健康节点 (1 个禁用)
 >   - `grok-web`: 1 个健康节点 (1 个禁用)
 >   - `gemini-web`: 1 个全健康节点 (gemini-4-argon)
 >   - `yuanbao-web`: 1 个全健康节点 (yuanbao-hunyuan)
 >   - `gemini-antigravity`: 彻底停用 (isDisabled: true)
+> - **定向增量原则**：后续若添加新账号，仅更新对应供应商配置与基准，禁止非受邀全量冲刷。
 
