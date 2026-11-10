@@ -74,17 +74,16 @@ const aiMonitorPlugin = {
             const traceRequestId = _monitorRequestId;
 
             setImmediate(() => {
-                const hasConversion = fromProvider !== toProvider || (
-                    originalRequestBody !== processedRequestBody &&
-                    JSON.stringify(originalRequestBody) !== JSON.stringify(processedRequestBody)
-                );
+                const hasConversion = fromProvider !== toProvider || originalRequestBody !== processedRequestBody;
                 logger.info(`[AI Monitor][${traceRequestId}] >>> Req Protocol: ${fromProvider}${hasConversion ? ' -> ' + toProvider : ''} | Model: ${model}`);
                 
-                if (hasConversion) {
-                    logger.info(`[AI Monitor][${traceRequestId}] [Req Original]: ${JSON.stringify(originalRequestBody)}`);
-                    logger.info(`[AI Monitor][${traceRequestId}] [Req Processed]: ${JSON.stringify(processedRequestBody)}`);
-                } else {
-                    logger.info(`[AI Monitor][${traceRequestId}] [Req]: ${JSON.stringify(originalRequestBody)}`);
+                if (logger.shouldLog('debug')) {
+                    if (hasConversion) {
+                        logger.debug(`[AI Monitor][${traceRequestId}] [Req Original]: ${JSON.stringify(originalRequestBody)}`);
+                        logger.debug(`[AI Monitor][${traceRequestId}] [Req Processed]: ${JSON.stringify(processedRequestBody)}`);
+                    } else {
+                        logger.debug(`[AI Monitor][${traceRequestId}] [Req]: ${JSON.stringify(originalRequestBody)}`);
+                    }
                 }
             });
 
@@ -93,18 +92,18 @@ const aiMonitorPlugin = {
                 setTimeout(() => {
                     const cache = aiMonitorPlugin.streamCache.get(traceRequestId);
                     if (cache) {
-                        const hasConversion = cache.toProvider !== cache.fromProvider || (
-                            JSON.stringify(cache.nativeChunks) !== JSON.stringify(cache.convertedChunks)
-                        );
+                        const hasConversion = cache.toProvider !== cache.fromProvider;
                         const isTruncated = (cache.nativeCount || 0) > cache.nativeChunks.length;
                         const truncSuffix = isTruncated ? ` (Sampled ${cache.nativeChunks.length}/${cache.nativeCount} chunks)` : '';
                         logger.info(`[AI Monitor][${traceRequestId}] <<< Stream Response Aggregated: ${hasConversion ? cache.toProvider + ' -> ' : ''}${cache.fromProvider}${truncSuffix}`);
                         
-                        if (hasConversion) {
-                            logger.info(`[AI Monitor][${traceRequestId}] [Res Native Full]: ${JSON.stringify(cache.nativeChunks)}`);
-                            logger.info(`[AI Monitor][${traceRequestId}] [Res Converted Full]: ${JSON.stringify(cache.convertedChunks)}`);
-                        } else {
-                            logger.info(`[AI Monitor][${traceRequestId}] [Res Full]: ${JSON.stringify(cache.nativeChunks)}`);
+                        if (logger.shouldLog('debug')) {
+                            if (hasConversion) {
+                                logger.debug(`[AI Monitor][${traceRequestId}] [Res Native Full]: ${JSON.stringify(cache.nativeChunks)}`);
+                                logger.debug(`[AI Monitor][${traceRequestId}] [Res Converted Full]: ${JSON.stringify(cache.convertedChunks)}`);
+                            } else {
+                                logger.debug(`[AI Monitor][${traceRequestId}] [Res Full]: ${JSON.stringify(cache.nativeChunks)}`);
+                            }
                         }
                         
                         aiMonitorPlugin.streamCache.delete(traceRequestId);
@@ -119,17 +118,16 @@ const aiMonitorPlugin = {
         async onUnaryResponse({ nativeResponse, clientResponse, fromProvider, toProvider, requestId }) {
             setImmediate(() => {
                 const reqId = requestId || 'N/A';
-                const hasConversion = fromProvider !== toProvider || (
-                    nativeResponse !== clientResponse &&
-                    JSON.stringify(nativeResponse) !== JSON.stringify(clientResponse)
-                );
+                const hasConversion = fromProvider !== toProvider || nativeResponse !== clientResponse;
                 logger.info(`[AI Monitor][${reqId}] <<< Res Protocol: ${hasConversion ? toProvider + ' -> ' : ''}${fromProvider} (Unary)`);
                 
-                if (hasConversion) {
-                    logger.info(`[AI Monitor][${reqId}] [Res Native]: ${JSON.stringify(nativeResponse)}`);
-                    logger.info(`[AI Monitor][${reqId}] [Res Converted]: ${JSON.stringify(clientResponse)}`);
-                } else {
-                    logger.info(`[AI Monitor][${reqId}] [Res]: ${JSON.stringify(nativeResponse)}`);
+                if (logger.shouldLog('debug')) {
+                    if (hasConversion) {
+                        logger.debug(`[AI Monitor][${reqId}] [Res Native]: ${JSON.stringify(nativeResponse)}`);
+                        logger.debug(`[AI Monitor][${reqId}] [Res Converted]: ${JSON.stringify(clientResponse)}`);
+                    } else {
+                        logger.debug(`[AI Monitor][${reqId}] [Res]: ${JSON.stringify(nativeResponse)}`);
+                    }
                 }
             });
         },

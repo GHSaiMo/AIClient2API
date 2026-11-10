@@ -37,6 +37,24 @@ import logger from '../../utils/logger.js';
 import { handlePotluckApiRoutes, handlePotluckUserApiRoutes } from './api-routes.js';
 
 const pendingUsage = new Map();
+const PENDING_USAGE_TTL_MS = 15 * 60 * 1000;
+let pendingUsageCleanupTimer = null;
+
+function ensurePendingUsageCleanup() {
+    if (!pendingUsageCleanupTimer) {
+        pendingUsageCleanupTimer = setInterval(() => {
+            const cutoff = Date.now() - PENDING_USAGE_TTL_MS;
+            for (const [reqId, usage] of pendingUsage.entries()) {
+                if (usage._createdAt && usage._createdAt < cutoff) {
+                    pendingUsage.delete(reqId);
+                }
+            }
+        }, 5 * 60 * 1000);
+        if (pendingUsageCleanupTimer.unref) {
+            pendingUsageCleanupTimer.unref();
+        }
+    }
+}
 
 function toNumber(value) {
     const num = Number(value);
@@ -253,18 +271,22 @@ const apiPotluckPlugin = {
     hooks: {
         async onUnaryResponse({ requestId, nativeResponse, clientResponse }) {
             if (!requestId) return;
-            pendingUsage.set(requestId, mergeUsage(
-                pendingUsage.get(requestId) || { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
-                extractUsage(nativeResponse, clientResponse)
-            ));
+            ensurePendingUsageCleanup();
+            const existing = pendingUsage.get(requestId) || { promptTokens: 0, completionTokens: 0, totalTokens: 0, _createdAt: Date.now() };
+            pendingUsage.set(requestId, {
+                ...mergeUsage(existing, extractUsage(nativeResponse, clientResponse)),
+                _createdAt: existing._createdAt || Date.now()
+            });
         },
 
         async onStreamChunk({ requestId, nativeChunk, chunkToSend }) {
             if (!requestId) return;
-            pendingUsage.set(requestId, mergeUsage(
-                pendingUsage.get(requestId) || { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
-                extractUsage(nativeChunk, chunkToSend)
-            ));
+            ensurePendingUsageCleanup();
+            const existing = pendingUsage.get(requestId) || { promptTokens: 0, completionTokens: 0, totalTokens: 0, _createdAt: Date.now() };
+            pendingUsage.set(requestId, {
+                ...mergeUsage(existing, extractUsage(nativeChunk, chunkToSend)),
+                _createdAt: existing._createdAt || Date.now()
+            });
         },
 
         /**

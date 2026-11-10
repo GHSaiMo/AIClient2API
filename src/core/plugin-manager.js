@@ -545,6 +545,31 @@ class PluginManager {
     }
 
     /**
+     * 高性能流式分块钩子分发通道 (Fast-path dispatch for high-frequency stream chunks)
+     * 绕过普通钩子的 setTimeout 超时保护与微任务堆叠，直接同步分发
+     * @param {Object} payload 
+     */
+    executeFastStreamChunkHook(payload) {
+        const plugins = this.getEnabledPlugins();
+        for (let i = 0; i < plugins.length; i++) {
+            const plugin = plugins[i];
+            const hook = plugin.hooks?.onStreamChunk;
+            if (typeof hook === 'function') {
+                try {
+                    const res = hook(payload);
+                    if (res && typeof res.catch === 'function') {
+                        res.catch(err => {
+                            logger.warn(`[PluginManager] onStreamChunk async error in "${plugin.name}":`, err?.message || err);
+                        });
+                    }
+                } catch (err) {
+                    logger.warn(`[PluginManager] onStreamChunk error in "${plugin.name}":`, err?.message || err);
+                }
+            }
+        }
+    }
+
+    /**
      * 执行钩子函数
      * @param {string} hookName - 钩子名称
      * @param  {...any} args - 钩子参数

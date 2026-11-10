@@ -1153,22 +1153,21 @@ export async function handleStreamRequest(res, service, model, requestBody, from
                 ? convertData(nativeChunk, 'streamChunk', toProvider, fromProvider, model, streamRequestId)
                 : nativeChunk;
 
-            // 监控钩子：流式响应分块
+            // 监控钩子：流式响应分块（走快速通道直接分发，杜绝每 chunk 创建定时器与 Promise 链）
             const hookRequestId = getPluginHookRequestId(CONFIG);
             if (hookRequestId) {
                 try {
                     const pluginManager = getPluginManager();
-                    const hookPayload = {
-                        nativeChunk,
-                        chunkToSend,
-                        fromProvider,
-                        toProvider,
-                        model,
-                        requestId: hookRequestId
-                    };
-                    streamHookChain = streamHookChain
-                        .then(() => pluginManager.executeHook('onStreamChunk', hookPayload))
-                        .catch(() => {});
+                    if (pluginManager) {
+                        pluginManager.executeFastStreamChunkHook({
+                            nativeChunk,
+                            chunkToSend,
+                            fromProvider,
+                            toProvider,
+                            model,
+                            requestId: hookRequestId
+                        });
+                    }
                 } catch (e) {}
             }
 
@@ -1521,6 +1520,14 @@ export async function handleStreamRequest(res, service, model, requestBody, from
         
         // 确保所有流式钩子已执行完毕
         await streamHookChain;
+
+        // 及时释放流式状态，防止异常断连导致内存残留
+        try {
+            const { streamStateManager } = await import('../providers/openai/openai-responses-core.mjs');
+            if (typeof streamRequestId !== 'undefined') {
+                streamStateManager.cleanup(streamRequestId);
+            }
+        } catch (_) {}
 
         // 只在首次请求时记录日志（避免重试时重复记录）
         if (!isRetry) {

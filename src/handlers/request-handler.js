@@ -38,9 +38,8 @@ export function createRequestHandler(config, providerPoolManager) {
 
         return requestContext.run({ requestId }, async () => {
             return logger.runWithContext(requestId, async () => {
-                // Deep copy the config for each request to allow dynamic modification
-                const currentConfig = deepmerge({}, config);
-                currentConfig._monitorRequestId = requestId;
+                // 高性能隔离配置：使用顶层浅拷贝替代耗时的全量递归 deepmerge，消除每请求的 GC 垃圾堆积
+                const currentConfig = { ...config, _monitorRequestId: requestId };
                 
                 // 计算当前请求的基础 URL
                 const protocol = req.socket.encrypted || req.headers['x-forwarded-proto'] === 'https' ? 'https' : 'http';

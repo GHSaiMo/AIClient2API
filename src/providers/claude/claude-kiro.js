@@ -12,6 +12,8 @@ import { getProviderModels } from '../provider-models.js';
 import { 
     countTextTokens as countTextTokensUtil, 
     estimateInputTokens as estimateInputTokensUtil, 
+    fastEstimateTokens,
+    fastEstimateInputTokens,
     countTokensAnthropic as countTokensUtil,
     processContent as processContentUtil,
     getContentText as getContentTextUtil
@@ -1105,9 +1107,12 @@ async saveCredentialsToFile(filePath, newData) {
 
     /**
      * Count tokens for a given text using Claude's official tokenizer
-     * Static version for use without instance
+     * Static version for use without instance (large text fast path)
      */
     static countTextTokens(text) {
+        if (typeof text === 'string' && text.length > 500) {
+            return fastEstimateTokens(text);
+        }
         return countTextTokensUtil(text);
     }
 
@@ -1121,10 +1126,10 @@ async saveCredentialsToFile(filePath, newData) {
 
     /**
      * Calculate input tokens from request body
-     * Static version for use without instance
+     * Static version for use without instance (TTFT fast path)
      */
     static estimateInputTokens(requestBody) {
-        return estimateInputTokensUtil(requestBody);
+        return fastEstimateInputTokens(requestBody);
     }
 
     /**

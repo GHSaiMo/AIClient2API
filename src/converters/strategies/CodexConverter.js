@@ -23,6 +23,31 @@ export class CodexConverter extends BaseConverter {
         super('codex');
         this.streamParams = new Map(); // 用于存储流式状态，key 为响应 ID 或临时标识
         this.requestStates = new Map(); // 用于存储请求特定的状态（如工具映射），key 为 requestId
+        this._ensureCleanupTimer();
+    }
+
+    _ensureCleanupTimer() {
+        if (!CodexConverter._cleanupTimer) {
+            CodexConverter._cleanupTimer = setInterval(() => {
+                const nowSec = Math.floor(Date.now() / 1000);
+                const ttlSec = 900; // 15 分钟
+                for (const [key, state] of this.streamParams.entries()) {
+                    const created = state?.createdAt || Math.floor((state?._createdAt || 0) / 1000);
+                    if (created && (nowSec - created > ttlSec)) {
+                        this.streamParams.delete(key);
+                    }
+                }
+                for (const [key, state] of this.requestStates.entries()) {
+                    const created = state?.createdAt || Math.floor((state?._createdAt || 0) / 1000);
+                    if (created && (nowSec - created > ttlSec)) {
+                        this.requestStates.delete(key);
+                    }
+                }
+            }, 5 * 60 * 1000);
+            if (CodexConverter._cleanupTimer.unref) {
+                CodexConverter._cleanupTimer.unref();
+            }
+        }
     }
 
     _getReqState(requestId) {
@@ -30,7 +55,8 @@ export class CodexConverter extends BaseConverter {
         if (!this.requestStates.has(id)) {
             this.requestStates.set(id, {
                 toolNameMap: new Map(),
-                reverseToolNameMap: new Map()
+                reverseToolNameMap: new Map(),
+                _createdAt: Date.now()
             });
         }
         return this.requestStates.get(id);

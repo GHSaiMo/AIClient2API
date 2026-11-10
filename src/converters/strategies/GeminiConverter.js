@@ -211,7 +211,7 @@ export class GeminiConverter extends BaseConverter {
     convertStreamChunk(chunk, targetProtocol, model, requestId) {
         switch (targetProtocol) {
             case MODEL_PROTOCOL_PREFIX.OPENAI:
-                return this.toOpenAIStreamChunk(chunk, model);
+                return this.toOpenAIStreamChunk(chunk, model, requestId);
             case MODEL_PROTOCOL_PREFIX.CLAUDE:
                 return this.toClaudeStreamChunk(chunk, model);
             case MODEL_PROTOCOL_PREFIX.OPENAI_RESPONSES:
@@ -395,7 +395,7 @@ export class GeminiConverter extends BaseConverter {
     /**
      * Gemini流式响应 -> OpenAI流式响应
      */
-    toOpenAIStreamChunk(geminiChunk, model) {
+    toOpenAIStreamChunk(geminiChunk, model, requestId = null) {
         if (!geminiChunk) return null;
 
         const candidate = geminiChunk.candidates?.[0];
@@ -481,8 +481,12 @@ export class GeminiConverter extends BaseConverter {
             return null;
         }
 
+        const chunkId = requestId
+            ? `chatcmpl-${requestId.replace(/[^a-zA-Z0-9_-]/g, '')}`
+            : `chatcmpl-${uuidv4()}`;
+
         const chunk = {
-            id: `chatcmpl-${uuidv4()}`,
+            id: chunkId,
             object: "chat.completion.chunk",
             created: Math.floor(Date.now() / 1000),
             model: model,

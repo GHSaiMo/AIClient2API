@@ -1,14 +1,42 @@
 import { v4 as uuidv4 } from 'uuid';
 
-// 流式处理状态管理
+// 流式处理状态管理（支持 TTL 淘汰与最大容量限制，防止异常断连导致内存泄露）
 class StreamState {
-  constructor() {
+  constructor(ttlMs = 15 * 60 * 1000, maxSize = 2000) {
     this.states = new Map(); // 使用Map存储不同请求的状态
+    this.ttlMs = ttlMs;
+    this.maxSize = maxSize;
+    this._cleanupTimer = null;
+    this._ensureCleanupTimer();
+  }
+
+  _ensureCleanupTimer() {
+    if (!this._cleanupTimer) {
+      this._cleanupTimer = setInterval(() => {
+        this.cleanupStale();
+      }, 5 * 60 * 1000);
+      if (this._cleanupTimer.unref) {
+        this._cleanupTimer.unref();
+      }
+    }
+  }
+
+  cleanupStale() {
+    const now = Date.now();
+    for (const [key, state] of this.states.entries()) {
+      if (state._createdAt && (now - state._createdAt > this.ttlMs)) {
+        this.states.delete(key);
+      }
+    }
   }
 
   // 获取或创建状态
   getOrCreateState(requestId) {
     if (!this.states.has(requestId)) {
+      if (this.states.size >= this.maxSize) {
+        const oldestKey = this.states.keys().next().value;
+        this.states.delete(oldestKey);
+      }
       this.states.set(requestId, {
         id: `resp_${uuidv4().replace(/-/g, '')}`,
         msgId: `msg_${uuidv4().replace(/-/g, '')}`,
@@ -17,6 +45,7 @@ class StreamState {
         model: null,
         status: 'in_progress',
         startTime: Math.floor(Date.now() / 1000),
+        _createdAt: Date.now(),
         toolCalls: [],
         currentToolCall: null
       });

@@ -97,7 +97,7 @@ export class ClaudeConverter extends BaseConverter {
     convertStreamChunk(chunk, targetProtocol, model, requestId) {
         switch (targetProtocol) {
             case MODEL_PROTOCOL_PREFIX.OPENAI:
-                return this.toOpenAIStreamChunk(chunk, model);
+                return this.toOpenAIStreamChunk(chunk, model, requestId);
             case MODEL_PROTOCOL_PREFIX.GEMINI:
                 return this.toGeminiStreamChunk(chunk, model);
             case MODEL_PROTOCOL_PREFIX.OPENAI_RESPONSES:
@@ -467,11 +467,14 @@ export class ClaudeConverter extends BaseConverter {
     /**
      * Claude流式响应 -> OpenAI流式响应
      */
-    toOpenAIStreamChunk(claudeChunk, model) {
+    toOpenAIStreamChunk(claudeChunk, model, requestId = null) {
         if (!claudeChunk) return null;
 
         // 处理 Claude 流式事件
-        const chunkId = `chatcmpl-${uuidv4()}`;
+        // 使用 requestId 构建确定性 chunkId，保证同一流内 ID 一致并消除逐块 uuidv4 分配
+        const chunkId = requestId
+            ? `chatcmpl-${requestId.replace(/[^a-zA-Z0-9_-]/g, '')}`
+            : (claudeChunk.message?.id || `chatcmpl-${uuidv4()}`);
         const timestamp = Math.floor(Date.now() / 1000);
 
         // message_start 事件

@@ -66,8 +66,56 @@ export function countTextTokens(text) {
     } catch (error) {
         // Fallback to estimation if tokenizer fails
         logger.warn('[TokenUtils] Tokenizer error, falling back to estimation:', error.message);
-        return Math.ceil((text || '').length / 4);
+        return fastEstimateTokens(text);
     }
+}
+
+/**
+ * 高性能启发式 Token 快速估算 (Fast heuristic token estimation)
+ * 避免对超大文本执行纯 JS BPE 分词导致的数十至数百毫秒主线程阻塞
+ * - ASCII（英文、代码、标点、数字、JSON结构）：约 3.7 字符 / token (~0.27)
+ * - 非 ASCII（中文、日韩文、Emoji、全角符号）：约 1.5 字符 / token (~0.67)
+ * 相比单一除以 4，对中英文混合及代码的拟合度高且计算耗时仅 < 0.1ms
+ */
+export function fastEstimateTokens(text) {
+    if (!text || typeof text !== 'string') return 0;
+    const len = text.length;
+    if (len === 0) return 0;
+
+    let asciiCount = 0;
+    for (let i = 0; i < len; i++) {
+        if (text.charCodeAt(i) < 128) {
+            asciiCount++;
+        }
+    }
+    const nonAsciiCount = len - asciiCount;
+    return Math.ceil(asciiCount * 0.27 + nonAsciiCount * 0.67);
+}
+
+/**
+ * 快速估算请求体的输入 token 数量（TTFT 优化版）
+ */
+export function fastEstimateInputTokens(requestBody) {
+    if (!requestBody || typeof requestBody !== 'object') return 0;
+    let allText = "";
+
+    if (requestBody.system) {
+        allText += processContent(requestBody.system);
+    }
+
+    if (requestBody.messages && Array.isArray(requestBody.messages)) {
+        for (const message of requestBody.messages) {
+            if (message.content) {
+                allText += processContent(message.content);
+            }
+        }
+    }
+
+    if (requestBody.tools && Array.isArray(requestBody.tools)) {
+        allText += JSON.stringify(requestBody.tools);
+    }
+
+    return fastEstimateTokens(allText);
 }
 
 /**
