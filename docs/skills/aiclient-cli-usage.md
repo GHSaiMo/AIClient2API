@@ -52,7 +52,7 @@ Use these for self-discovery or system monitoring:
 
 ### Path Routing
 Force a specific provider by prefixing the AI business path:
-- `/gemini-cli-oauth/v1/chat/completions`
+- `/claude-kiro-oauth/v1/chat/completions`
 - `/claude-custom/v1/messages`
 
 ### Real-time Logs (SSE)

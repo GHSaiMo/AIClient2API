@@ -6,16 +6,12 @@ let latestAccessData = null;
 let latestSnippetFormat = 'markdown';
 
 const recommendedModelMap = {
-    'gemini-cli-oauth': 'gemini-3-flash-preview',
-    'gemini-antigravity': 'gemini-3.8-flash',
     'claude-custom': 'claude-sonnet-4-5',
     'claude-kiro-oauth': 'claude-sonnet-4-5',
     'openai-custom': 'gpt-5.5',
     'atlascloud': 'gpt-5.5',
     'qiniu': 'gpt-5.5',
     'fenno': 'gpt-5.5',
-    'openai-qwen-oauth': 'qwen3-coder-plus',
-    'openai-iflow': 'qwen3-max',
     'openai-codex-oauth': 'gpt-5.6-luna',
     'openaiResponses-custom': 'gpt-5.5',
     'grok-web': 'grok-imagine-image-2.0',

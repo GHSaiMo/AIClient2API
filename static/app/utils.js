@@ -19,20 +19,6 @@ function getBaseProviderConfigs() {
             icon: 'fa-share-square'
         },
         { 
-            id: 'gemini-cli-oauth', 
-            name: t('dashboard.routing.nodeName.gemini'), 
-            usageName: 'Gemini CLI',
-            icon: 'fa-robot',
-            defaultPath: 'configs/gemini/'
-        },
-        { 
-            id: 'gemini-antigravity', 
-            name: t('dashboard.routing.nodeName.antigravity'), 
-            usageName: 'Antigravity',
-            icon: 'fa-rocket',
-            defaultPath: 'configs/antigravity/'
-        },
-        { 
             id: 'claude-kiro-oauth', 
             name: t('dashboard.routing.nodeName.kiro'), 
             usageName: 'Kiro',
@@ -45,18 +31,6 @@ function getBaseProviderConfigs() {
             usageName: 'Grok CLI',
             icon: 'fa-terminal',
             defaultPath: 'configs/grok-cli/'
-        },
-        { 
-            id: 'openai-qwen-oauth', 
-            name: t('dashboard.routing.nodeName.qwen'), 
-            icon: 'fa-cloud',
-            defaultPath: 'configs/qwen/'
-        },
-        { 
-            id: 'openai-iflow', 
-            name: t('dashboard.routing.nodeName.iflow'), 
-            icon: 'fa-stream',
-            defaultPath: 'configs/iflow/'
         },
         { 
             id: 'grok-web', 
@@ -287,26 +261,6 @@ function getFieldLabel(key) {
 function getProviderTypeFields(providerType) {
     // 基础配置字段定义
     const fieldConfigs = {
-        'gemini-cli-oauth': [
-            {
-                id: 'PROJECT_ID',
-                label: t('modal.provider.field.projectId'),
-                type: 'text',
-                placeholder: t('modal.provider.field.projectId.placeholder')
-            },
-            {
-                id: 'GEMINI_OAUTH_CREDS_FILE_PATH',
-                label: t('modal.provider.field.oauthPath'),
-                type: 'text',
-                placeholder: t('modal.provider.field.oauthPath.gemini.placeholder')
-            },
-            {
-                id: 'GEMINI_BASE_URL',
-                label: `Gemini Base URL <span class="optional-tag">${t('config.optional')}</span>`,
-                type: 'text',
-                placeholder: 'https://cloudcode-pa.googleapis.com'
-            }
-        ],
         'claude-kiro-oauth': [
             {
                 id: 'email',
@@ -337,66 +291,6 @@ function getProviderTypeFields(providerType) {
                 label: `${t('modal.provider.field.refreshIdcUrl')} <span class="optional-tag">${t('config.optional')}</span>`,
                 type: 'text',
                 placeholder: 'https://oidc.{{region}}.amazonaws.com/token'
-            }
-        ],
-        'openai-qwen-oauth': [
-            {
-                id: 'QWEN_OAUTH_CREDS_FILE_PATH',
-                label: t('modal.provider.field.oauthPath'),
-                type: 'text',
-                placeholder: t('modal.provider.field.oauthPath.qwen.placeholder')
-            },
-            {
-                id: 'QWEN_BASE_URL',
-                label: `Qwen Base URL <span class="optional-tag">${t('config.optional')}</span>`,
-                type: 'text',
-                placeholder: 'https://portal.qwen.ai/v1'
-            },
-            {
-                id: 'QWEN_OAUTH_BASE_URL',
-                label: `${t('modal.provider.field.oauthBaseUrl')} <span class="optional-tag">${t('config.optional')}</span>`,
-                type: 'text',
-                placeholder: 'https://chat.qwen.ai'
-            }
-        ],
-        'gemini-antigravity': [
-            {
-                id: 'PROJECT_ID',
-                label: `${t('modal.provider.field.projectId')} <span class="optional-tag">${t('config.optional')}</span>`,
-                type: 'text',
-                placeholder: t('modal.provider.field.projectId.optional.placeholder')
-            },
-            {
-                id: 'ANTIGRAVITY_OAUTH_CREDS_FILE_PATH',
-                label: t('modal.provider.field.oauthPath'),
-                type: 'text',
-                placeholder: t('modal.provider.field.oauthPath.antigravity.placeholder')
-            },
-            {
-                id: 'ANTIGRAVITY_BASE_URL_DAILY',
-                label: `${t('modal.provider.field.dailyBaseUrl')} <span class="optional-tag">${t('config.optional')}</span>`,
-                type: 'text',
-                placeholder: 'https://daily-cloudcode-pa.sandbox.googleapis.com'
-            },
-            {
-                id: 'ANTIGRAVITY_BASE_URL_AUTOPUSH',
-                label: `${t('modal.provider.field.autopushBaseUrl')} <span class="optional-tag">${t('config.optional')}</span>`,
-                type: 'text',
-                placeholder: 'https://autopush-cloudcode-pa.sandbox.googleapis.com'
-            }
-        ],
-        'openai-iflow': [
-            {
-                id: 'IFLOW_OAUTH_CREDS_FILE_PATH',
-                label: t('modal.provider.field.oauthPath'),
-                type: 'text',
-                placeholder: t('modal.provider.field.oauthPath.iflow.placeholder')
-            },
-            {
-                id: 'IFLOW_BASE_URL',
-                label: `iFlow Base URL <span class="optional-tag">${t('config.optional')}</span>`,
-                type: 'text',
-                placeholder: 'https://iflow.cn/api'
             }
         ],
         'openai-codex-oauth': [

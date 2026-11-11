@@ -125,17 +125,17 @@ Specify a specific provider via routing parameters:
         models: [...]
       },
       
-      // Gemini CLI (OpenAI Protocol)
-      "aiclient2api-gemini": {
-        baseUrl: "http://localhost:3000/gemini-cli-oauth/v1",
+      // OpenAI Codex (OpenAI Protocol)
+      "aiclient2api-codex": {
+        baseUrl: "http://localhost:3000/openai-codex-oauth/v1",
         apiKey: "${AICLIENT2API_KEY}",
         api: "openai-completions",
         models: [...]
       },
       
-      // Antigravity (OpenAI Protocol)
-      "aiclient2api-antigravity": {
-        baseUrl: "http://localhost:3000/gemini-antigravity/v1",
+      // Gemini Web (OpenAI Protocol)
+      "aiclient2api-gemini-web": {
+        baseUrl: "http://localhost:3000/gemini-web/v1",
         apiKey: "${AICLIENT2API_KEY}",
         api: "openai-completions",
         models: [...]

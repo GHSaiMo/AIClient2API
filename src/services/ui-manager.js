@@ -416,9 +416,6 @@ export async function handleUIApiRequests(method, pathParam, req, res, currentCo
         return await oauthApi.handleBatchImportKiroTokens(req, res);
     }
 
-    if (method === 'POST' && pathParam === '/api/gemini/batch-import-tokens') {
-        return await oauthApi.handleBatchImportGeminiTokens(req, res);
-    }
 
     if (method === 'POST' && pathParam === '/api/codex/batch-import-tokens') {
         return await oauthApi.handleBatchImportCodexTokens(req, res);

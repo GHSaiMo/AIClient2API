@@ -15,7 +15,6 @@ const KIRO_DIR = path.join(COCKPIT_DIR, 'kiro_accounts');
 const CODEX_DIR = path.join(COCKPIT_DIR, 'codex_accounts');
 
 const LOCAL_CONFIGS_DIR = path.resolve(ROOT, 'configs');
-const LOCAL_ANTI_DIR = path.join(LOCAL_CONFIGS_DIR, 'antigravity');
 const LOCAL_KIRO_DIR = path.join(LOCAL_CONFIGS_DIR, 'kiro');
 const LOCAL_CODEX_DIR = path.join(LOCAL_CONFIGS_DIR, 'codex');
 const LOCAL_POOLS_PATH = path.join(LOCAL_CONFIGS_DIR, 'provider_pools.json');
@@ -69,155 +68,29 @@ async function main() {
   const syncAll = args.includes('--all');
   const syncCodex = syncAll || args.includes('--codex') || args.includes('codex') || args.some(a => a.startsWith('--module=codex') || (a === '--module' && args[args.indexOf(a) + 1] === 'codex'));
   const syncKiro = syncAll || args.includes('--kiro') || args.includes('kiro') || args.some(a => a.startsWith('--module=kiro') || (a === '--module' && args[args.indexOf(a) + 1] === 'kiro'));
-  const syncAnti = syncAll || args.includes('--antigravity') || args.includes('antigravity') || args.some(a => a.startsWith('--module=antigravity') || (a === '--module' && args[args.indexOf(a) + 1] === 'antigravity'));
   const syncGrok = syncAll || args.includes('--grok') || args.includes('grok') || args.some(a => a.startsWith('--module=grok') || (a === '--module' && args[args.indexOf(a) + 1] === 'grok'));
 
-  if (!syncCodex && !syncKiro && !syncAnti && !syncGrok) {
+  if (!syncCodex && !syncKiro && !syncGrok) {
     console.error(`[Error] 必须显式指定要同步的模块！严禁全量自作主张同步。`);
     console.error(`用法示例:`);
     console.error(`  node scripts/sync-cockpit-credentials.mjs --codex       # 仅同步 Codex 账号`);
     console.error(`  node scripts/sync-cockpit-credentials.mjs --kiro        # 仅同步 Kiro 账号`);
     console.error(`  node scripts/sync-cockpit-credentials.mjs --grok        # 仅同步 Grok Web 账号`);
-    console.error(`  node scripts/sync-cockpit-credentials.mjs --antigravity # 仅同步 Antigravity 账号`);
     console.error(`  node scripts/sync-cockpit-credentials.mjs --all         # 显式全量同步`);
     process.exit(1);
   }
 
-  console.log(`[Sync Scope] 目标同步模块: codex=${syncCodex}, kiro=${syncKiro}, antigravity=${syncAnti}, grok=${syncGrok}`);
+  console.log(`[Sync Scope] 目标同步模块: codex=${syncCodex}, kiro=${syncKiro}, grok=${syncGrok}`);
 
-  if (syncAnti && !fs.existsSync(LOCAL_ANTI_DIR)) fs.mkdirSync(LOCAL_ANTI_DIR, { recursive: true });
   if (syncKiro && !fs.existsSync(LOCAL_KIRO_DIR)) fs.mkdirSync(LOCAL_KIRO_DIR, { recursive: true });
   if (syncCodex && !fs.existsSync(LOCAL_CODEX_DIR)) fs.mkdirSync(LOCAL_CODEX_DIR, { recursive: true });
 
   const pools = JSON.parse(fs.readFileSync(LOCAL_POOLS_PATH, 'utf8'));
-  if (!pools['gemini-antigravity']) pools['gemini-antigravity'] = [];
   if (!pools['claude-kiro-oauth']) pools['claude-kiro-oauth'] = [];
   if (!pools['openai-codex-oauth']) pools['openai-codex-oauth'] = [];
 
-  let antiUpdatedCount = 0;
-  let antiCreatedCount = 0;
-
   // ==========================================
-  // 1. Process Antigravity Accounts
-  // ==========================================
-  if (syncAnti) {
-    console.log('\n--- 1. Processing Antigravity Credentials ---');
-    const antiFiles = fs.readdirSync(ACCOUNTS_DIR).filter(f => f.endsWith('.json') && !f.endsWith('.bak'));
-    const cockpitAntiAccounts = [];
-    for (const f of antiFiles) {
-      try {
-        const raw = JSON.parse(fs.readFileSync(path.join(ACCOUNTS_DIR, f), 'utf8'));
-        const acc = decrypt(raw);
-        if (acc.disabled) {
-          console.log(`[Antigravity] Account ${acc.email || acc.id} is disabled in cockpit, skipping.`);
-          continue;
-        }
-        if (!acc.token || !acc.token.refresh_token) {
-          console.log(`[Antigravity] Account ${acc.email || acc.id} has no refresh token, skipping.`);
-          continue;
-        }
-        cockpitAntiAccounts.push(acc);
-      } catch (e) {
-        console.warn(`[Antigravity] Failed to decrypt ${f}:`, e.message);
-      }
-    }
-
-    // Scan local existing files
-    const localAntiFiles = fs.readdirSync(LOCAL_ANTI_DIR).filter(f => f.endsWith('.json'));
-    const localAntiMap = new Map();
-    for (const f of localAntiFiles) {
-      const filePath = path.join(LOCAL_ANTI_DIR, f);
-      try {
-        const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-        const email = extractEmailFromIdToken(data.id_token);
-        if (email) {
-          localAntiMap.set(email.toLowerCase(), { file: f, path: filePath, data });
-        }
-      } catch (e) {
-        console.warn(`[Antigravity] Could not read local file ${f}:`, e.message);
-      }
-    }
-
-    let antiTimestampBase = Date.now();
-
-    for (const acc of cockpitAntiAccounts) {
-      const email = (acc.email || (acc.token && acc.token.email) || '').toLowerCase();
-      if (!email) continue;
-
-      let targetFileName;
-      let targetFilePath;
-      const existing = localAntiMap.get(email);
-
-      if (existing) {
-        targetFileName = existing.file;
-        targetFilePath = existing.path;
-        antiUpdatedCount++;
-        console.log(`[Antigravity] Updating credentials for ${email} in ${targetFileName}`);
-      } else {
-        antiTimestampBase += 10;
-        targetFileName = `${antiTimestampBase}_oauth_creds.json`;
-        targetFilePath = path.join(LOCAL_ANTI_DIR, targetFileName);
-        antiCreatedCount++;
-        console.log(`[Antigravity] Creating new credentials for ${email} in ${targetFileName}`);
-      }
-
-      const credsContent = {
-        access_token: acc.token.access_token || '',
-        scope: acc.token.scope || 'https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/cloud-platform openid',
-        token_type: acc.token.token_type || 'Bearer',
-        id_token: acc.token.id_token || '',
-        expiry_date: acc.token.expiry_timestamp ? acc.token.expiry_timestamp * 1000 : (Date.now() + 3600 * 1000),
-        refresh_token: acc.token.refresh_token
-      };
-
-      fs.writeFileSync(targetFilePath, JSON.stringify(credsContent, null, 2) + '\n', 'utf8');
-
-      // Update or add in provider_pools.json
-      const relativePath = `./configs/antigravity/${targetFileName}`;
-      let poolEntry = pools['gemini-antigravity'].find(item =>
-        item.ANTIGRAVITY_OAUTH_CREDS_FILE_PATH === relativePath ||
-        (item.email && item.email.toLowerCase() === email)
-      );
-
-      if (poolEntry) {
-        poolEntry.ANTIGRAVITY_OAUTH_CREDS_FILE_PATH = relativePath;
-        poolEntry.email = email;
-        poolEntry.isHealthy = true;
-        poolEntry.isDisabled = false;
-        poolEntry.needsRefresh = false;
-        poolEntry.errorCount = 0;
-        poolEntry.lastErrorMessage = null;
-        poolEntry.lastRefreshTime = Date.now();
-      } else {
-        pools['gemini-antigravity'].push({
-          ANTIGRAVITY_OAUTH_CREDS_FILE_PATH: relativePath,
-          uuid: crypto.randomUUID(),
-          checkModelName: 'gemini-2.5-computer-use-preview-10-2025',
-          checkHealth: false,
-          isHealthy: true,
-          isDisabled: false,
-          lastUsed: null,
-          usageCount: 0,
-          errorCount: 0,
-          lastErrorTime: null,
-          lastHealthCheckTime: new Date().toISOString(),
-          lastHealthCheckModel: 'gemini-2.5-computer-use-preview-10-2025',
-          lastErrorMessage: null,
-          PROJECT_ID: '',
-          needsRefresh: false,
-          refreshCount: 0,
-          customName: null,
-          _lastSelectionSeq: 0,
-          lastRefreshTime: Date.now(),
-          scheduledRecoveryTime: null,
-          email: email
-        });
-      }
-    }
-  }
-
-  // ==========================================
-  // 2. Process Kiro Accounts
+  // 1. Process Kiro Accounts
   // ==========================================
   let kiroUpdatedCount = 0;
   let kiroCreatedCount = 0;
@@ -531,25 +404,18 @@ async function main() {
     const baseline = JSON.parse(fs.readFileSync(BASELINE_POOLS_PATH, 'utf8'));
     if (syncCodex) baseline['openai-codex-oauth'] = pools['openai-codex-oauth'];
     if (syncKiro) baseline['claude-kiro-oauth'] = pools['claude-kiro-oauth'];
-    if (syncAnti) baseline['gemini-antigravity'] = pools['gemini-antigravity'];
     fs.writeFileSync(BASELINE_POOLS_PATH, JSON.stringify(baseline, null, 2) + '\n', 'utf8');
   }
 
   console.log(`\n[Local Pools] Successfully updated configs/provider_pools.json`);
-  if (syncAnti) console.log(`  - gemini-antigravity: total ${pools['gemini-antigravity'].length} accounts (updated: ${antiUpdatedCount}, created: ${antiCreatedCount})`);
   if (syncKiro) console.log(`  - claude-kiro-oauth: total ${pools['claude-kiro-oauth'].length} accounts (updated: ${kiroUpdatedCount}, created: ${kiroCreatedCount})`);
   if (syncCodex) console.log(`  - openai-codex-oauth: total ${pools['openai-codex-oauth'].length} accounts (updated: ${codexUpdatedCount}, created: ${codexCreatedCount})`);
 
   // ==========================================
-  // 5. Sync to NAS Production & Restart
+  // Sync to NAS Production & Restart
   // ==========================================
-  console.log('\n--- 5. Syncing to NAS Production (192.168.50.39) ---');
+  console.log('\n--- Syncing to NAS Production (192.168.50.39) ---');
   try {
-    if (syncAnti) {
-      console.log('[NAS Sync] Syncing configs/antigravity/ ...');
-      execSync(`rsync -avz configs/antigravity/ nas:/vol1/1000/apps/AIClient2API/configs/antigravity/`, { stdio: 'inherit', cwd: ROOT });
-    }
-
     if (syncKiro) {
       console.log('[NAS Sync] Syncing configs/kiro/ ...');
       execSync(`rsync -avz configs/kiro/ nas:/vol1/1000/apps/AIClient2API/configs/kiro/`, { stdio: 'inherit', cwd: ROOT });

@@ -98,7 +98,7 @@ describe('Retry Backoff, Quota Cooldown and Error Logging Suite', () => {
             };
             const error = { status: 401, message: 'Unauthorized: API key is invalid or missing.' };
             
-            handleError(mockRes, error, 'gemini-antigravity');
+            handleError(mockRes, error, 'gemini-custom');
             
             expect(mockRes.writeHead).toHaveBeenCalledWith(401, { 'Content-Type': 'application/json' });
             const body = JSON.parse(mockRes.end.mock.calls[0][0]);

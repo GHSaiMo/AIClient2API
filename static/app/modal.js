@@ -1346,16 +1346,8 @@ function getFieldOrder(provider) {
             providerType = 'openai-custom';
         } else if (provider.CLAUDE_API_KEY && provider.CLAUDE_BASE_URL) {
             providerType = 'claude-custom';
-        } else if (provider.GEMINI_OAUTH_CREDS_FILE_PATH) {
-            providerType = 'gemini-cli-oauth';
         } else if (provider.KIRO_OAUTH_CREDS_FILE_PATH) {
             providerType = 'claude-kiro-oauth';
-        } else if (provider.QWEN_OAUTH_CREDS_FILE_PATH) {
-            providerType = 'openai-qwen-oauth';
-        } else if (provider.ANTIGRAVITY_OAUTH_CREDS_FILE_PATH) {
-            providerType = 'gemini-antigravity';
-        } else if (provider.IFLOW_OAUTH_CREDS_FILE_PATH) {
-            providerType = 'openai-iflow';
         } else if (provider.CODEX_OAUTH_CREDS_FILE_PATH) {
             providerType = 'openai-codex-oauth';
         } else if (provider.GROK_CLI_OAUTH_CREDS_FILE_PATH) {

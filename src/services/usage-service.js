@@ -15,8 +15,6 @@ export class UsageService {
     constructor() {
         this.providerHandlers = {
             [MODEL_PROVIDER.KIRO_API]: this.getKiroUsage.bind(this),
-            [MODEL_PROVIDER.GEMINI_CLI]: this.getGeminiUsage.bind(this),
-            [MODEL_PROVIDER.ANTIGRAVITY]: this.getAntigravityUsage.bind(this),
             [MODEL_PROVIDER.CODEX_API]: this.getCodexUsage.bind(this),
             [MODEL_PROVIDER.GROK_WEB]: this.getGrokUsage.bind(this),
             [MODEL_PROVIDER.GROK_CLI]: this.getGrokCliUsage.bind(this),
@@ -25,8 +23,6 @@ export class UsageService {
         // 映射提供商到对应的格式化函数
         this.formatters = {
             [MODEL_PROVIDER.KIRO_API]: formatKiroUsage,
-            [MODEL_PROVIDER.GEMINI_CLI]: formatGeminiUsage,
-            [MODEL_PROVIDER.ANTIGRAVITY]: formatAntigravityUsage,
             [MODEL_PROVIDER.CODEX_API]: formatCodexUsage,
             [MODEL_PROVIDER.GROK_WEB]: formatGrokUsage,
             [MODEL_PROVIDER.GROK_CLI]: formatGrokCliUsage,
@@ -161,19 +157,6 @@ export class UsageService {
         return this._getRawUsageFromAdapter(MODEL_PROVIDER.KIRO_API, uuid);
     }
 
-    /**
-     * 获取 Gemini CLI 提供商的用量信息
-     */
-    async getGeminiUsage(uuid = null) {
-        return this._getRawUsageFromAdapter(MODEL_PROVIDER.GEMINI_CLI, uuid);
-    }
-
-    /**
-     * 获取 Antigravity 提供商的用量信息
-     */
-    async getAntigravityUsage(uuid = null) {
-        return this._getRawUsageFromAdapter(MODEL_PROVIDER.ANTIGRAVITY, uuid);
-    }
 
     /**
      * 获取 Codex 提供商的用量信息
@@ -390,138 +373,6 @@ export function formatKiroUsage(usageData) {
     };
 }
 
-/**
- * 格式化 Gemini 用量
- */
-export function formatGeminiUsage(usageData) {
-    if (!usageData) return null;
-
-    // 检查是否为原始 API 响应 (包含 buckets 数组)
-    if (usageData.buckets && Array.isArray(usageData.buckets)) {
-        const supportedModels = getProviderModels(MODEL_PROVIDER.GEMINI_CLI);
-        const items = [];
-        let totalPercent = 0;
-        let maxResetAt = null;
-        
-        for (const bucket of usageData.buckets) {
-            // 过滤掉不在支持列表中的模型
-            if (!supportedModels.includes(bucket.modelId)) continue;
-
-            const remaining = typeof bucket.remainingFraction === 'number' ? bucket.remainingFraction : 0;
-            const percent = (1 - remaining) * 100;
-            
-            totalPercent += percent;
-            if (!maxResetAt || bucket.resetTime > maxResetAt) {
-                maxResetAt = bucket.resetTime;
-            }
-            
-            items.push({
-                id: bucket.modelId,
-                label: bucket.modelId,
-                used: percent,
-                limit: 100,
-                percent,
-                unit: 'percent',
-                status: getStatus(percent),
-                resetAt: formatTimestamp(bucket.resetTime)
-            });
-        }
-
-        // 按名称排序
-        items.sort((a, b) => a.id.localeCompare(b.id));
-
-        // 计算平均使用率作为概要 (因为各模型额度独立，用平均值更能反映整体可用性)
-        const avgUsedPercent = items.length > 0 ? totalPercent / items.length : 0;
-        const plan = parseTierId(usageData.tierId);
-
-        return {
-            summary: {
-                usedPercent: avgUsedPercent,
-                status: getStatus(avgUsedPercent),
-                resetAt: formatTimestamp(maxResetAt),
-                plan,
-                planClass: getPlanClass(plan),
-                unit: 'percent'
-            },
-            user: { 
-                email: usageData.account || null
-            },
-            items,
-            raw: usageData
-        };
-    }
-    return null;
-}
-
-/**
- * 格式化 Antigravity 用量
- */
-export function formatAntigravityUsage(usageData) {
-    if (!usageData) return null;
-
-    // 检查是否为原始 API 响应 (包含 models 对象且内部有 quotaInfo)
-    if (usageData.models && typeof usageData.models === 'object' && !usageData.summary) {
-        const supportedModels = getProviderModels(MODEL_PROVIDER.ANTIGRAVITY);
-        const items = [];
-        let totalPercent = 0;
-        let maxResetAt = null;
-        
-        for (const [modelId, modelData] of Object.entries(usageData.models)) {
-            // 只处理包含配额信息且在支持列表中的模型
-            // 对 Claude 模型添加别名显示 (保持与原逻辑一致)
-            const aliasName = modelId.startsWith('claude-') ? `gemini-${modelId}` : modelId;
-            
-            // 过滤：要么在 ANTIGRAVITY_MODELS 列表中，要么是以 claude- 开头（会被映射为 gemini-claude-*）
-            if (!supportedModels.includes(aliasName) && !modelId.startsWith('claude-')) continue;
-            
-            if (modelData && modelData.quotaInfo) {
-                const qInfo = modelData.quotaInfo;
-                const remaining = typeof qInfo.remainingFraction === 'number' ? qInfo.remainingFraction : (qInfo.remaining || 0);
-                const percent = (1 - remaining) * 100;
-                
-                totalPercent += percent;
-                if (!maxResetAt || qInfo.resetTime > maxResetAt) {
-                    maxResetAt = qInfo.resetTime;
-                }
-                
-                items.push({
-                    id: aliasName,
-                    label: aliasName,
-                    used: percent,
-                    limit: 100,
-                    percent,
-                    unit: 'percent',
-                    status: getStatus(percent),
-                    resetAt: formatTimestamp(qInfo.resetTime)
-                });
-            }
-        }
-
-        // 按名称排序
-        items.sort((a, b) => a.id.localeCompare(b.id));
-
-        // 计算平均使用率作为概要
-        const avgUsedPercent = items.length > 0 ? totalPercent / items.length : 0;
-        const plan = parseTierId(usageData.tierId);
-
-        return {
-            summary: {
-                usedPercent: avgUsedPercent,
-                status: getStatus(avgUsedPercent),
-                resetAt: formatTimestamp(maxResetAt),
-                plan,
-                planClass: getPlanClass(plan),
-                unit: 'percent'
-            },
-            user: { 
-                email: usageData.account || null
-            },
-            items,
-            raw: usageData
-        };
-    }
-    return null;
-}
 
 /**
  * 格式化 Grok 用量

@@ -170,7 +170,7 @@ describe('Client Probe Handler Suite', () => {
             end: jest.fn()
         };
         const req = { headers: { authorization: 'Bearer test' } };
-        await handleModelDetailRequest(req, mockRes, '/v1/models/gemini-3.8-flash', { MODEL_PROVIDER: 'gemini-antigravity' }, null);
+        await handleModelDetailRequest(req, mockRes, '/v1/models/gemini-3.8-flash', { MODEL_PROVIDER: 'claude-kiro-oauth' }, null);
         expect(mockRes.writeHead).toHaveBeenCalledWith(200, { 'Content-Type': 'application/json' });
         const parsed = JSON.parse(mockRes.end.mock.calls[0][0]);
         expect(parsed.id).toBe('gemini-3.8-flash');

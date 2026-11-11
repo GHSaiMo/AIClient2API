@@ -541,7 +541,7 @@ curl http://localhost:3000/claude-kiro-oauth/v1/chat/completions \
    {
      "PROXY_URL": "http://127.0.0.1:7890",
       "PROXY_ENABLED_PROVIDERS": [
-        "gemini-antigravity",
+        "openai-codex-oauth",
         "claude-kiro-oauth",
         "grok-web"
       ]
@@ -583,10 +583,10 @@ curl http://localhost:3000/claude-kiro-oauth/v1/chat/completions \
 
 ```json
 {
-  "gemini-antigravity": [
+  "claude-kiro-oauth": [
     {
       "uuid": "provider-1",
-      "notSupportedModels": ["gemini-3.0-pro", "gemini-3.5-flash"],
+      "notSupportedModels": ["claude-opus-4-5"],
       "checkHealth": true
     }
   ]

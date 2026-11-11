@@ -125,17 +125,17 @@ OpenClaw で AIClient2API を使用するためのクイック設定ガイド。
         models: [...]
       },
       
-      // Gemini CLI（OpenAI プロトコル）
-      "aiclient2api-gemini": {
-        baseUrl: "http://localhost:3000/gemini-cli-oauth/v1",
+      // OpenAI Codex（OpenAI プロトコル）
+      "aiclient2api-codex": {
+        baseUrl: "http://localhost:3000/openai-codex-oauth/v1",
         apiKey: "${AICLIENT2API_KEY}",
         api: "openai-completions",
         models: [...]
       },
       
-      // Antigravity（OpenAI プロトコル）
-      "aiclient2api-antigravity": {
-        baseUrl: "http://localhost:3000/gemini-antigravity/v1",
+      // Gemini Web（OpenAI プロトコル）
+      "aiclient2api-gemini-web": {
+        baseUrl: "http://localhost:3000/gemini-web/v1",
         apiKey: "${AICLIENT2API_KEY}",
         api: "openai-completions",
         models: [...]

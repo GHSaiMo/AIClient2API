@@ -24,41 +24,16 @@
                 }
             }
         },
-        "gemini-antigravity": {
-            "npm": "@ai-sdk/google",
-            "name": "AIClient2API-antigravity",
+        "openai-codex": {
+            "npm": "@ai-sdk/openai",
+            "name": "AIClient2API-codex",
             "options": {
-                "baseURL": "http://localhost:3000/gemini-antigravity/v1beta",
+                "baseURL": "http://localhost:3000/openai-codex-oauth/v1",
                 "apiKey": "123456"
             },
             "models": {
-                "gemini-2.5-flash-preview": {
-                    "name": "gemini-2.5-flash-antigravity"
-                },
-                "gemini-3-flash-preview": {
-                    "name": "gemini-3-flash-antigravity"
-                },
-                "gemini-3-pro-preview": {
-                    "name": "gemini-3-pro-antigravity"
-                }
-            }
-        },
-        "gemini-cli": {
-            "npm": "@ai-sdk/google",
-            "name": "AIClient2API-geminicli",
-            "options": {
-                "baseURL": "http://localhost:3000/v1beta",
-                "apiKey": "123456"
-            },
-            "models": {
-                "gemini-2.5-flash-preview": {
-                    "name": "gemini-2.5-flash-geminicli"
-                },
-                "gemini-3-flash-preview": {
-                    "name": "gemini-3-flash-geminicli"
-                },
-                "gemini-3-pro-preview": {
-                    "name": "gemini-3-pro-geminicli"
+                "gpt-5.6-luna": {
+                    "name": "GPT 5.6 Luna Codex"
                 }
             }
         }
@@ -89,10 +64,10 @@
     *   **`name`**: 在 UI 界面上显示的友好名称。
     *   **重点**: 这里的键名必须与服务端实际支持的模型标识符一致。
 
-### 2. 区分同类型的不同实例
-在示例中，有两个 `gemini` 相关的配置：`gemini-antigravity` 和 `gemini-cli`。
-*   它们虽然都使用 `@ai-sdk/google`，但通过不同的 `baseURL` 区分。
-*   这允许您在同一配置中接入来自不同网关或环境的同类模型，并通过自定义的 `name`（如 `gemini-2.5-flash-antigravity` vs `gemini-2.5-flash-geminicli`）在前端进行区分。
+### 2. 区分不同供应商配置
+在示例中，包含了 `kiro-claude` 和 `openai-codex` 配置：
+*   通过不同的 `baseURL` 区分不同供应商网关。
+*   这允许您在同一配置中接入来自不同网关或环境的模型，并通过自定义的 `name` 在前端进行区分。
 
 ### 3. `$schema`
 *   用于提供 JSON 模式验证。在支持的编辑器（如 VS Code）中，它可以为您提供自动补全和实时错误检查。

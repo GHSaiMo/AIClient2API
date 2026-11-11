@@ -8,13 +8,6 @@ export {
     handleCodexOAuth,
     handleCodexOAuthCallback,
     batchImportCodexTokensStream,
-    // Gemini OAuth
-    handleGeminiCliOAuth,
-    handleGeminiAntigravityOAuth,
-    batchImportGeminiTokensStream,
-    checkGeminiCredentialsDuplicate,
-    // Qwen OAuth
-    handleQwenOAuth,
     // Kiro OAuth
     handleKiroOAuth,
     checkKiroCredentialsDuplicate,
@@ -22,9 +15,6 @@ export {
     batchImportKiroRefreshTokens,
     batchImportKiroRefreshTokensStream,
     importAwsCredentials,
-    // iFlow OAuth
-    handleIFlowOAuth,
-    refreshIFlowTokens,
     // Grok Auth
     batchImportGrokTokensStream,
     // Grok CLI OAuth
