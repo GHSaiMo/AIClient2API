@@ -70,13 +70,14 @@ curl http://127.0.0.1:3005/
 > - 用户已完成全量失效凭据的移除与清洗，并将当前截面（含供应商列表、账户凭据、健康状态及启用/禁用开关）定为**唯一准则基准**。
 > - 归档路径：`configs/baselines/provider_pools.baseline.json` 与 `configs/baselines/snapshot-2026-11-12/`（含完整凭据文件副本、`config.nas.json`、`config.local.json`、`plugins.nas.json` 及 `manifest.json`，双端同步）。
 > - **回滚准则**：后续无论发生任何配置错乱、重启异常、自动关联异常或重置需求，**必须严格以此基准凭据池为准进行回滚恢复**，严禁使用旧的历史备份冲刷覆盖。
-> - **各供应商基准节点规模与开关状态（共 6 个 Provider，29 个节点）**：
+> - **各供应商基准节点规模与开关状态（共 7 个 Provider，30 个节点）**：
 >   - `claude-kiro-oauth`: 16 个节点，全部启用且健康 (`isDisabled: false`, `isHealthy: true`)
 >   - `openai-codex-oauth`: 9 个节点，全部启用且健康 (`isDisabled: false`, `isHealthy: true`)
 >   - `grok-cli-oauth`: 1 个节点，禁用 (`isDisabled: true`, `isHealthy: true`)
 >   - `grok-web`: 1 个节点，禁用 (`isDisabled: true`, `isHealthy: true`)
 >   - `gemini-web`: 1 个节点 (`gemini-4-argon`)，启用且健康 (`isDisabled: false`, `isHealthy: true`)
 >   - `yuanbao-web`: 1 个节点 (`yuanbao-hunyuan`)，启用且健康 (`isDisabled: false`, `isHealthy: true`)
+>   - `chatgpt-web`: 1 个节点 (`gpt-image-2` / Ego Lite Session)，启用且健康 (`isDisabled: false`, `isHealthy: true`)
 > - **入库副本**：完整基准含凭据保持 git 忽略；脱敏版位于 `configs/baseline-redacted/provider_pools.baseline.redacted.json`（`node scripts/export-redacted-baseline.mjs` 生成，仅供结构/状态参考，不可直接用于恢复）。
 > - **定向增量原则**：后续若添加新账号，仅更新对应供应商配置与基准，禁止非受邀全量冲刷。
 
@@ -115,5 +116,5 @@ curl http://127.0.0.1:3005/
    ```bash
    ssh nas "cd /vol1/1000/apps/AIClient2API && systemctl is-active aiclient2api && node -e \"const p=JSON.parse(require('fs').readFileSync('configs/provider_pools.json','utf8')); for(const [k,v] of Object.entries(p)) console.log(k, 'total:', v.length, 'enabled:', v.filter(x=>!x.isDisabled).length, 'disabled:', v.filter(x=>x.isDisabled).length, 'healthy:', v.filter(x=>x.isHealthy).length);\""
    ```
-   验收期望输出：`aiclient2api` 为 `active`，且节点数量与开关状态严格匹配上述基准（`claude-kiro-oauth` 16/16 启用、`openai-codex-oauth` 9/9 启用、`grok-cli-oauth` 1/1 禁用、`grok-web` 1/1 禁用、`gemini-web` 1/1 启用、`yuanbao-web` 1/1 启用）；详细节点清单可对照 `configs/baselines/snapshot-2026-11-12/manifest.json`。
+   验收期望输出：`aiclient2api` 为 `active`，且节点数量与开关状态严格匹配上述基准（`claude-kiro-oauth` 16/16 启用、`openai-codex-oauth` 9/9 启用、`grok-cli-oauth` 1/1 禁用、`grok-web` 1/1 禁用、`gemini-web` 1/1 启用、`yuanbao-web` 1/1 启用、`chatgpt-web` 1/1 启用）；详细节点清单可对照 `configs/baselines/snapshot-2026-11-12/manifest.json`。
 
