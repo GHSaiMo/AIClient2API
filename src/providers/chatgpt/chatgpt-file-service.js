@@ -1,6 +1,6 @@
 import { UndiciHttpClient } from '../../utils/undici-client.js';
-import logger from '../../utils/logger.js';
-import { getUndiciDispatcherForUrl } from '../../utils/proxy-utils.js';
+import { MODEL_PROVIDER } from '../../utils/common.js';
+import { configureUndiciTLSSidecar, getUndiciDispatcherForUrl } from '../../utils/proxy-utils.js';
 
 /**
  * 将 Base64 字符串或 Data URI 转换为 Buffer
@@ -127,6 +127,7 @@ export async function uploadImageToChatGPT({
     fileName = 'image.png',
     accessToken,
     proxyUrl = null,
+    config = null,
     headers = {}
 }) {
     const data = Buffer.isBuffer(image) ? image : decodeImageBase64(image);
@@ -134,7 +135,7 @@ export async function uploadImageToChatGPT({
     const mimeType = getImageMimeType(data);
 
     const baseHeaders = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36',
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36',
         'Origin': 'https://chatgpt.com',
         'Referer': 'https://chatgpt.com/',
         'Accept': 'application/json',
@@ -142,18 +143,36 @@ export async function uploadImageToChatGPT({
         ...headers
     };
 
-    const dispatcher = proxyUrl ? getUndiciDispatcherForUrl(proxyUrl, 'ChatGPT-File-Service') : null;
-    const client = new UndiciHttpClient({ dispatcher });
+    const client = new UndiciHttpClient();
+    const effectiveConfig = config || (proxyUrl ? {
+        MODEL_PROVIDER: MODEL_PROVIDER.CHATGPT_WEB,
+        PROXY_URL: proxyUrl,
+        PROXY_ENABLED_PROVIDERS: [MODEL_PROVIDER.CHATGPT_WEB]
+    } : null);
+
+    const buildReq = (reqOpts) => {
+        if (effectiveConfig) {
+            configureUndiciTLSSidecar(reqOpts, effectiveConfig, effectiveConfig.MODEL_PROVIDER || MODEL_PROVIDER.CHATGPT_WEB, 'https://chatgpt.com');
+        }
+        if (!reqOpts.dispatcher && proxyUrl) {
+            reqOpts.dispatcher = getUndiciDispatcherForUrl(proxyUrl, 'ChatGPT-File-Service');
+            reqOpts.proxyUrl = proxyUrl;
+        }
+        return reqOpts;
+    };
 
     // 1. 请求上传凭证
     const path = '/backend-api/files';
-    const initRes = await client.post('https://chatgpt.com' + path, {
-        file_name: fileName,
-        file_size: data.length,
-        use_case: 'multimodal',
-        width,
-        height
-    }, {
+    const initRes = await client.request(buildReq({
+        method: 'POST',
+        url: 'https://chatgpt.com' + path,
+        data: {
+            file_name: fileName,
+            file_size: data.length,
+            use_case: 'multimodal',
+            width,
+            height
+        },
         headers: {
             ...baseHeaders,
             'Content-Type': 'application/json',
@@ -161,7 +180,7 @@ export async function uploadImageToChatGPT({
             'X-OpenAI-Target-Route': path
         },
         timeout: 60000
-    });
+    }));
 
     const uploadMeta = initRes.data || {};
     if (!uploadMeta.upload_url || !uploadMeta.file_id) {
@@ -169,7 +188,7 @@ export async function uploadImageToChatGPT({
     }
 
     // 2. 直传 Azure Blob
-    await client.request({
+    await client.request(buildReq({
         method: 'PUT',
         url: uploadMeta.upload_url,
         data,
@@ -182,11 +201,14 @@ export async function uploadImageToChatGPT({
             'User-Agent': baseHeaders['User-Agent']
         },
         timeout: 120000
-    });
+    }));
 
     // 3. 确认上传完成
     const uploadedPath = `/backend-api/files/${uploadMeta.file_id}/uploaded`;
-    await client.post('https://chatgpt.com' + uploadedPath, {}, {
+    await client.request(buildReq({
+        method: 'POST',
+        url: 'https://chatgpt.com' + uploadedPath,
+        data: {},
         headers: {
             ...baseHeaders,
             'Content-Type': 'application/json',
@@ -194,7 +216,7 @@ export async function uploadImageToChatGPT({
             'X-OpenAI-Target-Route': uploadedPath
         },
         timeout: 60000
-    });
+    }));
 
     return {
         file_id: uploadMeta.file_id,

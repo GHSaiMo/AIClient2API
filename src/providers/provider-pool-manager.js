@@ -168,6 +168,9 @@ export class ProviderPoolManager {
             for (const providerStatus of providers) {
                 const config = providerStatus.config;
                 
+                // 排除禁用的节点（不健康节点也应允许尝试刷新以恢复健康）
+                if (config.isDisabled) continue;
+
                 // 根据 providerType 确定配置文件路径字段名
                 let configPath = null;
                 if (providerType.startsWith('claude-kiro')) {
@@ -177,24 +180,20 @@ export class ProviderPoolManager {
                 } else if (providerType.startsWith('grok-cli')) {
                     configPath = config.GROK_CLI_OAUTH_CREDS_FILE_PATH;
                 } else if (providerType.startsWith('chatgpt-web')) {
-                    // ChatGPT Web 直接通过 access_token / refresh_token 判断
-                    if (config.access_token && config.refresh_token) {
+                    const hasRefreshMaterial = Boolean(config.refresh_token || config.cookie_header || config.session_token);
+                    if (hasRefreshMaterial) {
                         try {
                             const { isJwtExpiredOrNear } = await import('./chatgpt/chatgpt-token-service.js');
-                            if (isJwtExpiredOrNear(config.access_token, 60 * 60 * 24)) {
-                                this._log('warn', `Node ${this._getDisplayName(config)} (${providerType}) access token near expiration. Enqueuing refresh...`);
+                            if (!config.access_token || isJwtExpiredOrNear(config.access_token, 60 * 60 * 24)) {
+                                this._log('warn', `Node ${this._getDisplayName(config)} (${providerType}) access token missing or near expiration. Enqueuing refresh...`);
                                 this._enqueueRefresh(providerType, providerStatus);
-                                continue;
                             }
                         } catch (err) {
                             this._log('debug', `Failed to check JWT expiry for ${this._getDisplayName(config)}: ${err.message}`);
                         }
                     }
+                    continue;
                 }
-                
-                // logger.info(`Checking node ${this._getDisplayName(config)} (${providerType}) expiry date... configPath: ${configPath}`);
-                // 排除禁用的节点（不健康节点也应允许尝试刷新以恢复健康）
-                if (config.isDisabled) continue;
 
                 if (configPath) {
                     try {

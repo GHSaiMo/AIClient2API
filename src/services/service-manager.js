@@ -649,7 +649,8 @@ export async function getProviderStatus(config, options = {}) {
         'grok-web': 'GROK_COOKIE_TOKEN',
         'grok-cli-oauth': 'GROK_CLI_OAUTH_CREDS_FILE_PATH',
         'gemini-web': 'uuid',
-        'openai-codex-oauth': 'CODEX_OAUTH_CREDS_FILE_PATH'
+        'openai-codex-oauth': 'CODEX_OAUTH_CREDS_FILE_PATH',
+        'chatgpt-web': 'email'
     };
     let providerPoolsSlim = [];
     let unhealthyProvideIdentifyList = [];

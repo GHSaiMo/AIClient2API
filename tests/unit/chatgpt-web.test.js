@@ -24,6 +24,11 @@ import {
     ImageContentPolicyError,
     CHATGPT_WEB_MODELS
 } from '../../src/providers/chatgpt/chatgpt-web-core.js';
+import {
+    parseCookieHeader,
+    hasChatGPTSessionCookie,
+    mergeSetCookieHeaders
+} from '../../src/providers/chatgpt/chatgpt-cookie-extractor.js';
 import { ChatGPTWebApiServiceAdapter } from '../../src/providers/adapter.js';
 import { MODEL_PROVIDER, MODEL_PROTOCOL_PREFIX } from '../../src/utils/constants.js';
 import { getProtocolPrefix } from '../../src/utils/common.js';
@@ -220,6 +225,26 @@ describe('ChatGPT Web Reverse Protocol & Pool Integration Suite', () => {
             expect(err.name).toBe('ImageContentPolicyError');
             expect(err.isPolicyError).toBe(true);
             expect(err.conversationId).toBe('conv_123');
+        });
+
+        it('should parse and merge ChatGPT Web cookies and reuse oai-did', () => {
+            const cookies = parseCookieHeader('oai-did=dev-123; __Secure-next-auth.session-token.0=part0; __Secure-next-auth.session-token.1=part1');
+            expect(hasChatGPTSessionCookie(cookies)).toBe(true);
+
+            const merged = mergeSetCookieHeaders(
+                'oai-did=dev-123; __Secure-next-auth.session-token=old; cf_clearance=cf1',
+                '__Secure-next-auth.session-token=new; Path=/; HttpOnly, oai-sc=sc2; Path=/'
+            );
+            const parsedMerged = parseCookieHeader(merged);
+            expect(parsedMerged['__Secure-next-auth.session-token']).toBe('new');
+            expect(parsedMerged['oai-sc']).toBe('sc2');
+            expect(parsedMerged['cf_clearance']).toBe('cf1');
+
+            const service = new ChatGPTWebService({
+                cookie_header: merged
+            });
+            expect(service.deviceId).toBe('dev-123');
+            expect(service.cookieHeader).toBe(merged);
         });
     });
 
