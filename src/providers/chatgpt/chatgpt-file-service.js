@@ -1,6 +1,6 @@
 import { UndiciHttpClient } from '../../utils/undici-client.js';
 import { MODEL_PROVIDER } from '../../utils/common.js';
-import { configureUndiciTLSSidecar, getUndiciDispatcherForUrl } from '../../utils/proxy-utils.js';
+import { configureUndiciProxy, configureUndiciTLSSidecar, getUndiciDispatcherForUrl } from '../../utils/proxy-utils.js';
 
 /**
  * 将 Base64 字符串或 Data URI 转换为 Buffer
@@ -161,6 +161,17 @@ export async function uploadImageToChatGPT({
         return reqOpts;
     };
 
+    const buildBlobPutReq = (reqOpts) => {
+        if (effectiveConfig) {
+            configureUndiciProxy(reqOpts, effectiveConfig, effectiveConfig.MODEL_PROVIDER || MODEL_PROVIDER.CHATGPT_WEB);
+        }
+        if (!reqOpts.dispatcher && !reqOpts.proxyUrl && proxyUrl) {
+            reqOpts.dispatcher = getUndiciDispatcherForUrl(proxyUrl, 'ChatGPT-File-Service');
+            reqOpts.proxyUrl = proxyUrl;
+        }
+        return reqOpts;
+    };
+
     // 1. 请求上传凭证
     const path = '/backend-api/files';
     const initRes = await client.request(buildReq({
@@ -187,13 +198,14 @@ export async function uploadImageToChatGPT({
         throw new Error(`Failed to obtain upload URL from ChatGPT: ${JSON.stringify(uploadMeta)}`);
     }
 
-    // 2. 直传 Azure Blob
-    await client.request(buildReq({
+    // 2. 直传 Azure Blob（绕过 tls-sidecar，直接携带 Content-Length 避免 chunked Transfer-Encoding 400）
+    await client.request(buildBlobPutReq({
         method: 'PUT',
         url: uploadMeta.upload_url,
         data,
         headers: {
             'Content-Type': mimeType,
+            'Content-Length': String(data.length),
             'x-ms-blob-type': 'BlockBlob',
             'x-ms-version': '2020-04-08',
             'Origin': 'https://chatgpt.com',

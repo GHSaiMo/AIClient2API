@@ -606,25 +606,27 @@ export class ChatGPTWebService {
         return res.data;
     }
 
-    _extractImageReferenceIds(payload) {
+    _extractImageReferenceIds(payload, excludeIds = null) {
         const fileIds = [];
         const sedimentIds = [];
         const text = typeof payload === 'string' ? payload : JSON.stringify(payload);
 
+        const isExcluded = (id) => excludeIds && excludeIds.has(id);
+
         let match;
         FILE_SERVICE_ID_RE.lastIndex = 0;
         while ((match = FILE_SERVICE_ID_RE.exec(text)) !== null) {
-            if (!fileIds.includes(match[1])) fileIds.push(match[1]);
+            if (!isExcluded(match[1]) && !fileIds.includes(match[1])) fileIds.push(match[1]);
         }
 
         REAL_IMAGE_FILE_ID_RE.lastIndex = 0;
         while ((match = REAL_IMAGE_FILE_ID_RE.exec(text)) !== null) {
-            if (!fileIds.includes(match[0])) fileIds.push(match[0]);
+            if (!isExcluded(match[0]) && !fileIds.includes(match[0])) fileIds.push(match[0]);
         }
 
         SEDIMENT_ID_RE.lastIndex = 0;
         while ((match = SEDIMENT_ID_RE.exec(text)) !== null) {
-            if (!sedimentIds.includes(match[1])) sedimentIds.push(match[1]);
+            if (!isExcluded(match[1]) && !sedimentIds.includes(match[1])) sedimentIds.push(match[1]);
         }
 
         return { fileIds, sedimentIds };
@@ -662,7 +664,7 @@ export class ChatGPTWebService {
         return data.download_url || data.url || '';
     }
 
-    async pollImageResults(conversationId, timeoutSecs = 120, initialFileIds = [], initialSedimentIds = []) {
+    async pollImageResults(conversationId, timeoutSecs = 120, initialFileIds = [], initialSedimentIds = [], excludeIds = null) {
         const startTime = Date.now();
         const intervalMs = 4000;
         const fileIds = [...initialFileIds];
@@ -684,7 +686,12 @@ export class ChatGPTWebService {
                 throw err;
             }
 
-            const { fileIds: polledFiles, sedimentIds: polledSeds } = this._extractImageReferenceIds(conversation);
+            const nonUserNodes = Object.values(conversation?.mapping || {}).filter(
+                node => node?.message?.author?.role !== 'user'
+            );
+            const scanPayload = nonUserNodes.length > 0 ? nonUserNodes : conversation;
+
+            const { fileIds: polledFiles, sedimentIds: polledSeds } = this._extractImageReferenceIds(scanPayload, excludeIds);
             for (const f of polledFiles) {
                 if (!fileIds.includes(f)) fileIds.push(f);
             }
@@ -835,7 +842,7 @@ export class ChatGPTWebService {
         return latestText;
     }
 
-    async _consumeConversationSSE(stream) {
+    async _consumeConversationSSE(stream, excludeIds = null) {
         let buffer = '';
         let conversationId = '';
         let streamError = null;
@@ -873,12 +880,15 @@ export class ChatGPTWebService {
                         if (text) lastAssistantText = text;
                     }
 
-                    const { fileIds, sedimentIds } = this._extractImageReferenceIds(parsed);
-                    for (const f of fileIds) {
-                        if (!initialFileIds.includes(f)) initialFileIds.push(f);
-                    }
-                    for (const s of sedimentIds) {
-                        if (!initialSedimentIds.includes(s)) initialSedimentIds.push(s);
+                    const isUserEcho = parsed.type === 'input_message' || msg?.author?.role === 'user';
+                    if (!isUserEcho) {
+                        const { fileIds, sedimentIds } = this._extractImageReferenceIds(parsed, excludeIds);
+                        for (const f of fileIds) {
+                            if (!initialFileIds.includes(f)) initialFileIds.push(f);
+                        }
+                        for (const s of sedimentIds) {
+                            if (!initialSedimentIds.includes(s)) initialSedimentIds.push(s);
+                        }
                     }
                 } catch {
                     // ignore partial/non-JSON SSE frames
@@ -908,13 +918,14 @@ export class ChatGPTWebService {
             references.push(uploaded);
         }
 
+        const excludeIds = new Set(references.map(r => r.file_id).filter(Boolean));
         logger.info(`[ChatGPT Web] Starting image generation with model=${model}, prompt="${prompt.slice(0, 50)}...", refs=${references.length}`);
 
         const requirements = await this.getChatRequirements();
         const conduitToken = await this.prepareConversation(prompt, requirements, model, true);
         const stream = await this.startConversationStream(prompt, requirements, conduitToken, model, references, true);
 
-        const { conversationId, initialFileIds, initialSedimentIds, streamError } = await this._consumeConversationSSE(stream);
+        const { conversationId, initialFileIds, initialSedimentIds, streamError } = await this._consumeConversationSSE(stream, excludeIds);
         logger.info(`[ChatGPT Web] Stream finished. conversationId=${conversationId}, initialFiles=${initialFileIds.length}, initialSediments=${initialSedimentIds.length}`);
 
         if (streamError && initialFileIds.length === 0 && initialSedimentIds.length === 0) {
@@ -925,7 +936,7 @@ export class ChatGPTWebService {
         let finalSedimentIds = [...initialSedimentIds];
 
         if (conversationId && finalFileIds.length === 0 && finalSedimentIds.length === 0) {
-            const polled = await this.pollImageResults(conversationId, 120, finalFileIds, finalSedimentIds);
+            const polled = await this.pollImageResults(conversationId, 120, finalFileIds, finalSedimentIds, excludeIds);
             finalFileIds = polled.fileIds;
             finalSedimentIds = polled.sedimentIds;
         }

@@ -246,6 +246,18 @@ describe('ChatGPT Web Reverse Protocol & Pool Integration Suite', () => {
             expect(service.deviceId).toBe('dev-123');
             expect(service.cookieHeader).toBe(merged);
         });
+
+        it('should exclude uploaded reference file IDs when extracting generated image IDs', () => {
+            const service = new ChatGPTWebService({ access_token: 'fake-token' });
+            const excludeIds = new Set(['file_00000000aaaa1111bbbb2222cccc3333']);
+            const payload = {
+                userRef: 'file-service://file_00000000aaaa1111bbbb2222cccc3333',
+                generated: 'sediment://file_00000000dddd4444eeee5555ffff6666'
+            };
+            const { fileIds, sedimentIds } = service._extractImageReferenceIds(payload, excludeIds);
+            expect(fileIds).toEqual(['file_00000000dddd4444eeee5555ffff6666']);
+            expect(sedimentIds).toEqual(['file_00000000dddd4444eeee5555ffff6666']);
+        });
     });
 
     describe('6. Constants, Protocols & Converters Registry', () => {
