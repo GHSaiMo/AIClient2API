@@ -11,8 +11,8 @@
       "usageCount": 0,
       "errorCount": 0,
       "lastErrorTime": null,
-      "lastHealthCheckTime": "2026-11-08T08:35:54.080Z",
-      "lastHealthCheckModel": null,
+      "lastHealthCheckTime": "2026-11-12T00:57:05.503Z",
+      "lastHealthCheckModel": "claude-haiku-4-5",
       "lastErrorMessage": null,
       "email": "user1@redacted.example",
       "socialProvider": "Github",
@@ -20,7 +20,8 @@
       "needsRefresh": false,
       "refreshCount": 0,
       "customName": null,
-      "lastRefreshTime": 1794126954080
+      "lastRefreshTime": 1794445025503,
+      "_lastSelectionSeq": 0
     },
     {
       "KIRO_OAUTH_CREDS_FILE_PATH": "./configs/kiro/1787295340772_kiro-auth-token/1787295340772_kiro-auth-token.json",
@@ -33,8 +34,8 @@
       "usageCount": 0,
       "errorCount": 0,
       "lastErrorTime": null,
-      "lastHealthCheckTime": "2026-11-08T09:34:54.645Z",
-      "lastHealthCheckModel": null,
+      "lastHealthCheckTime": "2026-11-12T00:57:08.673Z",
+      "lastHealthCheckModel": "claude-haiku-4-5",
       "lastErrorMessage": null,
       "email": "user1@redacted.example",
       "socialProvider": "Google",
@@ -42,8 +43,8 @@
       "needsRefresh": false,
       "refreshCount": 0,
       "customName": null,
-      "lastRefreshTime": 1794130494645,
-      "_lastSelectionSeq": 5
+      "lastRefreshTime": 1794445028673,
+      "_lastSelectionSeq": 0
     },
     {
       "KIRO_OAUTH_CREDS_FILE_PATH": "./configs/kiro/1787295342461_kiro-auth-token/1787295342461_kiro-auth-token.json",
@@ -56,8 +57,8 @@
       "usageCount": 0,
       "errorCount": 0,
       "lastErrorTime": null,
-      "lastHealthCheckTime": "2026-11-08T08:35:56.729Z",
-      "lastHealthCheckModel": null,
+      "lastHealthCheckTime": "2026-11-12T00:57:09.503Z",
+      "lastHealthCheckModel": "claude-haiku-4-5",
       "lastErrorMessage": null,
       "email": "user2@redacted.example",
       "socialProvider": "Github",
@@ -65,7 +66,8 @@
       "needsRefresh": false,
       "refreshCount": 0,
       "customName": null,
-      "lastRefreshTime": 1794126956730
+      "lastRefreshTime": 1794445029503,
+      "_lastSelectionSeq": 0
     },
     {
       "KIRO_OAUTH_CREDS_FILE_PATH": "./configs/kiro/1787295364577_kiro-auth-token/1787295364577_kiro-auth-token.json",
@@ -78,8 +80,8 @@
       "usageCount": 0,
       "errorCount": 0,
       "lastErrorTime": null,
-      "lastHealthCheckTime": "2026-11-08T09:38:03.376Z",
-      "lastHealthCheckModel": null,
+      "lastHealthCheckTime": "2026-11-12T00:57:24.800Z",
+      "lastHealthCheckModel": "claude-haiku-4-5",
       "lastErrorMessage": null,
       "email": "user3@redacted.example",
       "socialProvider": "Google",
@@ -87,8 +89,8 @@
       "needsRefresh": false,
       "refreshCount": 0,
       "customName": null,
-      "lastRefreshTime": 1794130683376,
-      "_lastSelectionSeq": 11
+      "lastRefreshTime": 1794445044800,
+      "_lastSelectionSeq": 0
     },
     {
       "KIRO_OAUTH_CREDS_FILE_PATH": "./configs/kiro/1787295367443_kiro-auth-token/1787295367443_kiro-auth-token.json",
@@ -101,8 +103,8 @@
       "usageCount": 0,
       "errorCount": 0,
       "lastErrorTime": null,
-      "lastHealthCheckTime": "2026-11-08T09:37:30.197Z",
-      "lastHealthCheckModel": null,
+      "lastHealthCheckTime": "2026-11-12T00:57:11.935Z",
+      "lastHealthCheckModel": "claude-haiku-4-5",
       "lastErrorMessage": null,
       "email": "user4@redacted.example",
       "socialProvider": "Google",
@@ -110,8 +112,8 @@
       "needsRefresh": false,
       "refreshCount": 0,
       "customName": null,
-      "lastRefreshTime": 1794130650198,
-      "_lastSelectionSeq": 10
+      "lastRefreshTime": 1794445031935,
+      "_lastSelectionSeq": 0
     },
     {
       "KIRO_OAUTH_CREDS_FILE_PATH": "./configs/kiro/1787295368285_kiro-auth-token/1787295368285_kiro-auth-token.json",
@@ -124,8 +126,8 @@
       "usageCount": 0,
       "errorCount": 0,
       "lastErrorTime": null,
-      "lastHealthCheckTime": "2026-11-08T08:36:00.332Z",
-      "lastHealthCheckModel": null,
+      "lastHealthCheckTime": "2026-11-12T00:57:26.192Z",
+      "lastHealthCheckModel": "claude-haiku-4-5",
       "lastErrorMessage": null,
       "email": "user4@redacted.example",
       "socialProvider": "Github",
@@ -133,7 +135,8 @@
       "needsRefresh": false,
       "refreshCount": 0,
       "customName": null,
-      "lastRefreshTime": 1794126960332
+      "lastRefreshTime": 1794445046192,
+      "_lastSelectionSeq": 0
     },
     {
       "KIRO_OAUTH_CREDS_FILE_PATH": "./configs/kiro/1787295380606_kiro-auth-token/1787295380606_kiro-auth-token.json",
@@ -146,8 +149,8 @@
       "usageCount": 0,
       "errorCount": 0,
       "lastErrorTime": null,
-      "lastHealthCheckTime": "2026-11-08T08:36:01.253Z",
-      "lastHealthCheckModel": null,
+      "lastHealthCheckTime": "2026-11-12T00:57:14.370Z",
+      "lastHealthCheckModel": "claude-haiku-4-5",
       "lastErrorMessage": null,
       "email": "user2@redacted.example",
       "socialProvider": "Google",
@@ -155,7 +158,8 @@
       "needsRefresh": false,
       "refreshCount": 0,
       "customName": null,
-      "lastRefreshTime": 1794126961253
+      "lastRefreshTime": 1794445034370,
+      "_lastSelectionSeq": 0
     },
     {
       "KIRO_OAUTH_CREDS_FILE_PATH": "./configs/kiro/1787295381564_kiro-auth-token/1787295381564_kiro-auth-token.json",
@@ -168,8 +172,8 @@
       "usageCount": 0,
       "errorCount": 0,
       "lastErrorTime": null,
-      "lastHealthCheckTime": "2026-11-08T08:36:02.178Z",
-      "lastHealthCheckModel": null,
+      "lastHealthCheckTime": "2026-11-12T00:57:14.753Z",
+      "lastHealthCheckModel": "claude-haiku-4-5",
       "lastErrorMessage": null,
       "email": "user5@redacted.example",
       "socialProvider": "Github",
@@ -177,7 +181,8 @@
       "needsRefresh": false,
       "refreshCount": 0,
       "customName": null,
-      "lastRefreshTime": 1794126962178
+      "lastRefreshTime": 1794445034753,
+      "_lastSelectionSeq": 0
     },
     {
       "KIRO_OAUTH_CREDS_FILE_PATH": "./configs/kiro/1787298094403_kiro-auth-token/1787298094403_kiro-auth-token.json",
@@ -190,8 +195,8 @@
       "usageCount": 0,
       "errorCount": 0,
       "lastErrorTime": null,
-      "lastHealthCheckTime": "2026-11-08T09:38:39.326Z",
-      "lastHealthCheckModel": null,
+      "lastHealthCheckTime": "2026-11-12T00:57:15.753Z",
+      "lastHealthCheckModel": "claude-haiku-4-5",
       "lastErrorMessage": null,
       "email": "user6@redacted.example",
       "socialProvider": "Google",
@@ -199,8 +204,8 @@
       "needsRefresh": false,
       "refreshCount": 0,
       "customName": null,
-      "lastRefreshTime": 1794130719326,
-      "_lastSelectionSeq": 12
+      "lastRefreshTime": 1794445035753,
+      "_lastSelectionSeq": 0
     },
     {
       "KIRO_OAUTH_CREDS_FILE_PATH": "./configs/kiro/1787298095829_kiro-auth-token/1787298095829_kiro-auth-token.json",
@@ -213,8 +218,8 @@
       "usageCount": 0,
       "errorCount": 0,
       "lastErrorTime": null,
-      "lastHealthCheckTime": "2026-11-08T09:36:37.000Z",
-      "lastHealthCheckModel": null,
+      "lastHealthCheckTime": "2026-11-12T00:57:28.022Z",
+      "lastHealthCheckModel": "claude-haiku-4-5",
       "lastErrorMessage": null,
       "email": "user5@redacted.example",
       "socialProvider": "Google",
@@ -222,8 +227,8 @@
       "needsRefresh": false,
       "refreshCount": 0,
       "customName": null,
-      "lastRefreshTime": 1794130597000,
-      "_lastSelectionSeq": 9
+      "lastRefreshTime": 1794445048022,
+      "_lastSelectionSeq": 0
     },
     {
       "KIRO_OAUTH_CREDS_FILE_PATH": "./configs/kiro/1787298096800_kiro-auth-token/1787298096800_kiro-auth-token.json",
@@ -236,8 +241,8 @@
       "usageCount": 0,
       "errorCount": 0,
       "lastErrorTime": null,
-      "lastHealthCheckTime": "2026-11-08T09:35:26.635Z",
-      "lastHealthCheckModel": null,
+      "lastHealthCheckTime": "2026-11-12T00:57:18.408Z",
+      "lastHealthCheckModel": "claude-haiku-4-5",
       "lastErrorMessage": null,
       "email": "user3@redacted.example",
       "socialProvider": "Github",
@@ -245,8 +250,8 @@
       "needsRefresh": false,
       "refreshCount": 0,
       "customName": null,
-      "lastRefreshTime": 1794130526635,
-      "_lastSelectionSeq": 6
+      "lastRefreshTime": 1794445038408,
+      "_lastSelectionSeq": 0
     },
     {
       "KIRO_OAUTH_CREDS_FILE_PATH": "./configs/kiro/1791994775099_kiro-auth-token/1791994775099_kiro-auth-token.json",
@@ -259,8 +264,8 @@
       "usageCount": 0,
       "errorCount": 0,
       "lastErrorTime": null,
-      "lastHealthCheckTime": "2026-11-08T09:36:03.010Z",
-      "lastHealthCheckModel": null,
+      "lastHealthCheckTime": "2026-11-12T00:57:19.622Z",
+      "lastHealthCheckModel": "claude-haiku-4-5",
       "lastErrorMessage": null,
       "email": "user7@redacted.example",
       "socialProvider": "Google",
@@ -268,8 +273,8 @@
       "needsRefresh": false,
       "refreshCount": 0,
       "customName": null,
-      "lastRefreshTime": 1794130563011,
-      "_lastSelectionSeq": 7
+      "lastRefreshTime": 1794445039622,
+      "_lastSelectionSeq": 0
     },
     {
       "KIRO_OAUTH_CREDS_FILE_PATH": "./configs/kiro/1793633787280_kiro-auth-token/1793633787280_kiro-auth-token.json",
@@ -282,8 +287,8 @@
       "usageCount": 0,
       "errorCount": 0,
       "lastErrorTime": null,
-      "lastHealthCheckTime": "2026-11-08T08:36:08.962Z",
-      "lastHealthCheckModel": null,
+      "lastHealthCheckTime": "2026-11-12T00:57:30.209Z",
+      "lastHealthCheckModel": "claude-haiku-4-5",
       "lastErrorMessage": null,
       "email": "user7@redacted.example",
       "socialProvider": "Github",
@@ -291,7 +296,8 @@
       "needsRefresh": false,
       "refreshCount": 0,
       "customName": null,
-      "lastRefreshTime": 1794126968962
+      "lastRefreshTime": 1794445050209,
+      "_lastSelectionSeq": 0
     },
     {
       "KIRO_OAUTH_CREDS_FILE_PATH": "./configs/kiro/1793633787290_kiro-auth-token/1793633787290_kiro-auth-token.json",
@@ -304,8 +310,8 @@
       "usageCount": 0,
       "errorCount": 0,
       "lastErrorTime": null,
-      "lastHealthCheckTime": "2026-11-08T08:36:09.859Z",
-      "lastHealthCheckModel": null,
+      "lastHealthCheckTime": "2026-11-12T00:57:31.633Z",
+      "lastHealthCheckModel": "claude-haiku-4-5",
       "lastErrorMessage": null,
       "email": "user8@redacted.example",
       "socialProvider": "Google",
@@ -313,7 +319,8 @@
       "needsRefresh": false,
       "refreshCount": 0,
       "customName": null,
-      "lastRefreshTime": 1794126969859
+      "lastRefreshTime": 1794445051633,
+      "_lastSelectionSeq": 0
     },
     {
       "KIRO_OAUTH_CREDS_FILE_PATH": "./configs/kiro/1793633787300_kiro-auth-token/1793633787300_kiro-auth-token.json",
@@ -326,8 +333,8 @@
       "usageCount": 0,
       "errorCount": 0,
       "lastErrorTime": null,
-      "lastHealthCheckTime": "2026-11-08T08:36:10.464Z",
-      "lastHealthCheckModel": null,
+      "lastHealthCheckTime": "2026-11-12T00:57:33.203Z",
+      "lastHealthCheckModel": "claude-haiku-4-5",
       "lastErrorMessage": null,
       "email": "user9@redacted.example",
       "socialProvider": "Google",
@@ -335,7 +342,8 @@
       "needsRefresh": false,
       "refreshCount": 0,
       "customName": null,
-      "lastRefreshTime": 1794126970464
+      "lastRefreshTime": 1794445053203,
+      "_lastSelectionSeq": 0
     },
     {
       "KIRO_OAUTH_CREDS_FILE_PATH": "./configs/kiro/1793636611557_kiro-auth-token/1793636611557_kiro-auth-token.json",
@@ -348,8 +356,8 @@
       "usageCount": 0,
       "errorCount": 0,
       "lastErrorTime": null,
-      "lastHealthCheckTime": "2026-11-08T08:36:11.390Z",
-      "lastHealthCheckModel": null,
+      "lastHealthCheckTime": "2026-11-12T00:57:35.293Z",
+      "lastHealthCheckModel": "claude-haiku-4-5",
       "lastErrorMessage": null,
       "email": "user10@redacted.example",
       "socialProvider": "Github",
@@ -357,34 +365,13 @@
       "needsRefresh": false,
       "refreshCount": 0,
       "customName": null,
-      "lastRefreshTime": 1794126971390
+      "lastRefreshTime": 1794445055293,
+      "_lastSelectionSeq": 0
     }
   ],
   "grok-cli-oauth": [
     {
-      "GROK_CLI_OAUTH_CREDS_FILE_PATH": "./configs/grok-cli/user11@redacted.example-7e293d62_oauth_creds.json",
-      "uuid": "9908357e-7b3e-4312-8e85-843bab8cb062",
-      "checkModelName": "grok-3-mini",
-      "checkHealth": false,
-      "isHealthy": false,
-      "isDisabled": true,
-      "lastUsed": null,
-      "usageCount": 0,
-      "errorCount": 0,
-      "lastErrorTime": "2026-11-08T09:41:54.577Z",
-      "lastHealthCheckTime": "2026-11-08T09:41:54.941Z",
-      "lastHealthCheckModel": null,
-      "lastErrorMessage": "<REDACTED>",
-      "email": "user2@redacted.example",
-      "needsRefresh": false,
-      "refreshCount": 0,
-      "customName": null,
-      "lastRefreshTime": 1794130914941,
-      "_lastSelectionSeq": 15,
-      "scheduledRecoveryTime": "2026-11-08T09:47:06.032Z"
-    },
-    {
-      "GROK_CLI_OAUTH_CREDS_FILE_PATH": "./configs/grok-cli/user12@redacted.example-d3a37124_oauth_creds.json",
+      "GROK_CLI_OAUTH_CREDS_FILE_PATH": "./configs/grok-cli/user11@redacted.example-d3a37124_oauth_creds.json",
       "uuid": "86c0ca3f-3304-43d2-bc0a-3deaf366aa80",
       "checkModelName": "grok-3-mini",
       "checkHealth": false,
@@ -405,58 +392,9 @@
       "_lastSelectionSeq": 18
     }
   ],
-  "grok-web": [
-    {
-      "uuid": "8fadb642-7c0b-43df-bf4f-00c4facacd1d",
-      "email": "user2@redacted.example",
-      "customName": "user2@redacted.example (Google Chrome)",
-      "GROK_COOKIE_TOKEN": "<REDACTED>",
-      "GROK_CF_CLEARANCE": "<REDACTED>",
-      "GROK_BASE_URL": "https://grok.com",
-      "checkModelName": "grok-4.1-mini",
-      "checkHealth": false,
-      "isHealthy": false,
-      "isDisabled": true,
-      "lastUsed": null,
-      "usageCount": 0,
-      "errorCount": 0,
-      "lastErrorTime": "2026-11-08T10:00:54.710Z",
-      "lastHealthCheckTime": "2026-11-08T08:56:45.894Z",
-      "lastErrorMessage": "<REDACTED>",
-      "needsRefresh": false,
-      "refreshCount": 0,
-      "_lastSelectionSeq": 19,
-      "lastRefreshTime": 1794128205896,
-      "lastHealthCheckModel": null,
-      "scheduledRecoveryTime": "2026-11-08T10:06:22.542Z"
-    },
-    {
-      "uuid": "2532c022-dab1-42a4-bf2a-18bd766e3448",
-      "email": "user3@redacted.example",
-      "customName": "user3@redacted.example (Ego lite)",
-      "GROK_COOKIE_TOKEN": "<REDACTED>",
-      "GROK_CF_CLEARANCE": "<REDACTED>",
-      "GROK_BASE_URL": "https://grok.com",
-      "checkModelName": "grok-4.1-mini",
-      "checkHealth": false,
-      "isHealthy": true,
-      "isDisabled": false,
-      "lastUsed": null,
-      "usageCount": 0,
-      "errorCount": 0,
-      "lastErrorTime": null,
-      "lastHealthCheckTime": "2026-11-08T08:56:45.896Z",
-      "lastErrorMessage": null,
-      "needsRefresh": false,
-      "refreshCount": 0,
-      "_lastSelectionSeq": 0,
-      "lastRefreshTime": 1794132080762,
-      "lastHealthCheckModel": null
-    }
-  ],
   "openai-codex-oauth": [
     {
-      "CODEX_OAUTH_CREDS_FILE_PATH": "./configs/codex/user13@redacted.example_oauth_creds.json",
+      "CODEX_OAUTH_CREDS_FILE_PATH": "./configs/codex/user12@redacted.example_oauth_creds.json",
       "uuid": "6118be4f-8cd4-4e8d-8ae2-fed979310436",
       "checkModelName": "gpt-5.6-luna",
       "checkHealth": false,
@@ -469,15 +407,15 @@
       "lastHealthCheckTime": null,
       "lastHealthCheckModel": null,
       "lastErrorMessage": null,
-      "email": "user14@redacted.example",
+      "email": "user13@redacted.example",
       "needsRefresh": false,
       "refreshCount": 0,
       "customName": null,
       "_lastSelectionSeq": 0,
-      "lastRefreshTime": 1794128278981
+      "lastRefreshTime": 1794447229290
     },
     {
-      "CODEX_OAUTH_CREDS_FILE_PATH": "./configs/codex/user15@redacted.example_oauth_creds.json",
+      "CODEX_OAUTH_CREDS_FILE_PATH": "./configs/codex/user14@redacted.example_oauth_creds.json",
       "uuid": "73123373-0da7-4ffe-9b9f-2878d38541c9",
       "checkModelName": "gpt-5.6-luna",
       "checkHealth": false,
@@ -494,10 +432,11 @@
       "needsRefresh": false,
       "refreshCount": 0,
       "customName": null,
-      "_lastSelectionSeq": 4
+      "_lastSelectionSeq": 4,
+      "lastRefreshTime": 1794447229290
     },
     {
-      "CODEX_OAUTH_CREDS_FILE_PATH": "./configs/codex/user16@redacted.example_oauth_creds.json",
+      "CODEX_OAUTH_CREDS_FILE_PATH": "./configs/codex/user15@redacted.example_oauth_creds.json",
       "uuid": "df8152b2-c24d-4af1-815a-2d0790ed7eba",
       "checkModelName": "gpt-5.6-luna",
       "checkHealth": false,
@@ -515,10 +454,10 @@
       "refreshCount": 0,
       "customName": null,
       "_lastSelectionSeq": 0,
-      "lastRefreshTime": 1794127093108
+      "lastRefreshTime": 1794447229289
     },
     {
-      "CODEX_OAUTH_CREDS_FILE_PATH": "./configs/codex/user17@redacted.example_oauth_creds.json",
+      "CODEX_OAUTH_CREDS_FILE_PATH": "./configs/codex/user16@redacted.example_oauth_creds.json",
       "uuid": "b9d2944f-d106-4a03-bd26-4b84442fdc2d",
       "checkModelName": "gpt-5.6-luna",
       "checkHealth": false,
@@ -531,14 +470,15 @@
       "lastHealthCheckTime": null,
       "lastHealthCheckModel": null,
       "lastErrorMessage": null,
-      "email": "user18@redacted.example",
+      "email": "user17@redacted.example",
       "needsRefresh": false,
       "refreshCount": 0,
       "customName": null,
-      "_lastSelectionSeq": 5
+      "_lastSelectionSeq": 5,
+      "lastRefreshTime": 1794447229289
     },
     {
-      "CODEX_OAUTH_CREDS_FILE_PATH": "./configs/codex/user19@redacted.example_oauth_creds.json",
+      "CODEX_OAUTH_CREDS_FILE_PATH": "./configs/codex/user18@redacted.example_oauth_creds.json",
       "uuid": "cc89a10c-3d2d-48bf-b9b6-6764f0c3e3ea",
       "checkModelName": "gpt-5.6-luna",
       "checkHealth": false,
@@ -555,16 +495,17 @@
       "needsRefresh": false,
       "refreshCount": 0,
       "customName": null,
-      "_lastSelectionSeq": 6
+      "_lastSelectionSeq": 6,
+      "lastRefreshTime": 1794447229291
     },
     {
-      "CODEX_OAUTH_CREDS_FILE_PATH": "./configs/codex/user20@redacted.example_oauth_creds.json",
+      "CODEX_OAUTH_CREDS_FILE_PATH": "./configs/codex/user19@redacted.example_oauth_creds.json",
       "uuid": "5e494e3d-cc22-4924-9b87-34d689ff14a3",
       "checkModelName": "gpt-5.6-luna",
       "checkHealth": false,
       "isHealthy": true,
       "isDisabled": false,
-      "lastUsed": "2026-11-09T08:47:09.752Z",
+      "lastUsed": "2026-11-12T01:34:39.766Z",
       "usageCount": 1,
       "errorCount": 0,
       "lastErrorTime": null,
@@ -576,10 +517,10 @@
       "refreshCount": 0,
       "customName": null,
       "_lastSelectionSeq": 0,
-      "lastRefreshTime": 1794214029752
+      "lastRefreshTime": 1794447279766
     },
     {
-      "CODEX_OAUTH_CREDS_FILE_PATH": "./configs/codex/user21@redacted.example_oauth_creds.json",
+      "CODEX_OAUTH_CREDS_FILE_PATH": "./configs/codex/user20@redacted.example_oauth_creds.json",
       "uuid": "6a49b73b-7d2b-4d5a-9aab-bfaa444121a2",
       "checkModelName": "gpt-5.6-luna",
       "checkHealth": false,
@@ -595,10 +536,11 @@
       "email": "user7@redacted.example",
       "needsRefresh": false,
       "refreshCount": 0,
-      "customName": null
+      "customName": null,
+      "lastRefreshTime": 1794447229291
     },
     {
-      "CODEX_OAUTH_CREDS_FILE_PATH": "./configs/codex/user22@redacted.example_oauth_creds.json",
+      "CODEX_OAUTH_CREDS_FILE_PATH": "./configs/codex/user21@redacted.example_oauth_creds.json",
       "uuid": "b5849049-8222-4f17-953d-8a734fb72ac7",
       "checkModelName": "gpt-5.6-luna",
       "checkHealth": false,
@@ -615,10 +557,11 @@
       "needsRefresh": false,
       "refreshCount": 0,
       "customName": null,
-      "_lastSelectionSeq": 0
+      "_lastSelectionSeq": 0,
+      "lastRefreshTime": 1794447229290
     },
     {
-      "CODEX_OAUTH_CREDS_FILE_PATH": "./configs/codex/user23@redacted.example_oauth_creds.json",
+      "CODEX_OAUTH_CREDS_FILE_PATH": "./configs/codex/user22@redacted.example_oauth_creds.json",
       "uuid": "d9449d28-fb2e-4ed2-8ee1-344deff07b3b",
       "checkModelName": "gpt-5.6-luna",
       "checkHealth": false,
@@ -635,7 +578,8 @@
       "needsRefresh": false,
       "refreshCount": 0,
       "customName": null,
-      "_lastSelectionSeq": 0
+      "_lastSelectionSeq": 0,
+      "lastRefreshTime": 1794447229291
     }
   ],
   "gemini-web": [
@@ -680,6 +624,32 @@
       "lastHealthCheckTime": null,
       "lastHealthCheckModel": null,
       "_lastSelectionSeq": 4
+    }
+  ],
+  "grok-web": [
+    {
+      "uuid": "2532c022-dab1-42a4-bf2a-18bd766e3448",
+      "email": "user3@redacted.example",
+      "customName": "user3@redacted.example (Ego lite)",
+      "GROK_COOKIE_TOKEN": "<REDACTED>",
+      "GROK_CF_CLEARANCE": "<REDACTED>",
+      "GROK_BASE_URL": "https://grok.com",
+      "checkModelName": "grok-4.20",
+      "checkHealth": false,
+      "isHealthy": true,
+      "isDisabled": true,
+      "lastUsed": null,
+      "usageCount": 0,
+      "errorCount": 0,
+      "lastErrorTime": null,
+      "lastHealthCheckTime": "2026-11-12T01:22:09.799Z",
+      "lastErrorMessage": null,
+      "needsRefresh": false,
+      "refreshCount": 0,
+      "_lastSelectionSeq": 0,
+      "lastRefreshTime": 1794446529799,
+      "lastHealthCheckModel": "grok-4.20",
+      "scheduledRecoveryTime": "2026-11-12T01:21:02.083Z"
     }
   ]
 }
