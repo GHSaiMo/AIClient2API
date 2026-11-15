@@ -1382,9 +1382,9 @@ export async function handleStreamRequest(res, service, model, requestBody, from
                 logger.warn(`[Provider Pool] Definitive auth failure for ${toProvider} (${pooluuid}). Marking as unhealthy immediately: ${error.message}`);
                 providerPoolManager.markProviderUnhealthyImmediately(toProvider, { uuid: pooluuid }, error.message);
                 credentialMarkedUnhealthy = true;
-            } else if (error.response?.status === 400) {
-                // 400 报错码通常是请求参数问题，不记录为提供商错误
-                logger.info(`[Provider Pool] Skipping unhealthy marking for ${toProvider} (${pooluuid}) due to status 400 (client error)`);
+            } else if (status === 400 || error.response?.status === 400 || status === 404 || error.response?.status === 404) {
+                // 400/404 报错码通常是请求参数或模型不存在等客户端问题，不记录为提供商错误，也不触发切号重试
+                logger.info(`[Provider Pool] Skipping unhealthy marking for ${toProvider} (${pooluuid}) due to status ${status || error.response?.status} (client error)`);
             } else {
                 logger.info(`[Provider Pool] Marking ${toProvider} as unhealthy due to stream error (status: ${status || 'unknown'})`);
                 // 如果是号池模式，并且请求处理失败，则标记当前使用的提供者为不健康
@@ -1739,9 +1739,9 @@ export async function handleUnaryRequest(res, service, model, requestBody, fromP
                 logger.warn(`[Provider Pool] Definitive auth failure for ${toProvider} (${pooluuid}). Marking as unhealthy immediately: ${error.message}`);
                 providerPoolManager.markProviderUnhealthyImmediately(toProvider, { uuid: pooluuid }, error.message);
                 credentialMarkedUnhealthy = true;
-            } else if (error.response?.status === 400) {
-                // 400 报错码通常是请求参数问题，不记录为提供商错误
-                logger.info(`[Provider Pool] Skipping unhealthy marking for ${toProvider} (${pooluuid}) due to status 400 (client error)`);
+            } else if (status === 400 || error.response?.status === 400 || status === 404 || error.response?.status === 404) {
+                // 400/404 报错码通常是请求参数或模型不存在等客户端问题，不记录为提供商错误，也不触发切号重试
+                logger.info(`[Provider Pool] Skipping unhealthy marking for ${toProvider} (${pooluuid}) due to status ${status || error.response?.status} (client error)`);
             } else {
                 logger.info(`[Provider Pool] Marking ${toProvider} as unhealthy due to unary error (status: ${status || 'unknown'})`);
                 // 如果是号池模式，并且请求处理失败，则标记当前使用的提供者为不健康

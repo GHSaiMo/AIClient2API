@@ -365,8 +365,8 @@ async function handleImageGenerationRequest(req, res, currentConfig, providerPoo
                     logger.warn(`[Provider Pool] Grok session failure (403) for ${slotProviderType} (${slotUuid}). Marking as unhealthy: ${error.message}`);
                     providerPoolManager.markProviderUnhealthyImmediately(slotProviderType, {uuid: slotUuid}, error.message);
                     credentialMarkedUnhealthy = true;
-                } else if (error.response?.status !== 400) {
-                    logger.info(`[Provider Pool] Marking ${slotProviderType} as unhealthy due to image generation error (status: ${error.response?.status || 'unknown'})`);
+                } else if (error.response?.status !== 400 && error.response?.status !== 404 && error.status !== 400 && error.status !== 404) {
+                    logger.info(`[Provider Pool] Marking ${slotProviderType} as unhealthy due to image generation error (status: ${error.response?.status || error.status || 'unknown'})`);
                     providerPoolManager.markProviderUnhealthy(slotProviderType, {uuid: slotUuid}, error.message);
                     credentialMarkedUnhealthy = true;
                 }

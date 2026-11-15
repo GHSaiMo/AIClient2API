@@ -1132,10 +1132,15 @@ export class ProviderPoolManager {
 
         // 如果指定了模型，则排除不支持该模型的提供商
         if (requestedModel) {
+            const defaultProviderModels = getProviderModels(providerType);
             const modelFilteredProviders = availableAndHealthyProviders.filter(p => {
                 const supportedModels = getConfiguredSupportedModels(providerType, p.config);
                 if (supportedModels.length > 0) {
                     return supportedModels.includes(requestedModel);
+                }
+                // 如果该提供商类型在预设模型列表中有定义，且请求的模型不在其中，则排除
+                if (defaultProviderModels.length > 0 && !defaultProviderModels.includes(requestedModel)) {
+                    return false;
                 }
                 // 如果提供商没有配置 notSupportedModels，则认为它支持所有模型
                 if (!p.config.notSupportedModels || !Array.isArray(p.config.notSupportedModels)) {
