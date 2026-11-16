@@ -230,6 +230,22 @@ export class GrokApiService {
     /**
      * 获取模型映射
      */
+    _hasImageAttachmentInputs(requestBody = {}) {
+        if (!requestBody || typeof requestBody !== 'object') return false;
+        if (Array.isArray(requestBody._extractedImages) && requestBody._extractedImages.length > 0) return true;
+        if (Array.isArray(requestBody.fileAttachments) && requestBody.fileAttachments.length > 0) return true;
+        if (Array.isArray(requestBody.imageAttachments) && requestBody.imageAttachments.length > 0) return true;
+        if (Array.isArray(requestBody.messages)) {
+            for (const msg of requestBody.messages) {
+                if (!Array.isArray(msg?.content)) continue;
+                if (msg.content.some((part) => part?.type === 'image_url' && part?.image_url?.url)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     _getModelMapping(modelId) {
         const rawModelId = typeof modelId === 'string' ? modelId : '';
         const normalizedModelId = normalizeGrokModelId(rawModelId);
@@ -743,7 +759,7 @@ export class GrokApiService {
             // 对于特定的编辑/媒体模式，如果已经有了 modeId，某些情况下 modelName 可能需要调整或保持一致
         }
 
-        if (isMediaModel && !isVideoModel && !isEditModel) {
+        if (isMediaModel && !isVideoModel) {
             payload.enable_nsfw = isNsfw;
             const aspectRatio = requestBody.aspect_ratio || requestBody.aspectRatio;
             if (aspectRatio) {
@@ -1083,8 +1099,9 @@ export class GrokApiService {
         const modelLower = normalizedModel.toLowerCase();
         const isImagine = (modelLower.includes('imagine') || modelLower.includes('edit')) && !modelLower.includes('video');
         const isPro = isGrokProModel(normalizedModel);
-        // 识别优先使用 WS 的模型 (包括 2.0 / Pro 以及标准 Imagine 模型，排除视频、纯编辑和精简版)
-        const isWSPreferred = isImagine && !modelLower.includes('video') && !modelLower.includes('edit') && !modelLower.includes('lite') && !modelLower.includes('fast');
+        const hasImageInputs = this._hasImageAttachmentInputs(requestBody);
+        // 识别优先使用 WS 的模型 (仅限纯文生图；携带参考图片的图生图请求必须走 app_chat 上传附件链路)
+        const isWSPreferred = isImagine && !hasImageInputs && !modelLower.includes('video') && !modelLower.includes('edit') && !modelLower.includes('lite') && !modelLower.includes('fast');
         
         let wsAttempted = false;
         let collected;
@@ -1142,7 +1159,7 @@ export class GrokApiService {
             }
         } catch (error) {
             // 只有此前从未尝试过 WS 的图片请求，才在 app_chat 失败后尝试一次 ws_imagine 兜底（彻底切断 WS 循环）
-            if (isImagine && !modelLower.includes('video') && !wsAttempted && !requestBody._skipWs) {
+            if (isImagine && !hasImageInputs && !modelLower.includes('video') && !wsAttempted && !requestBody._skipWs) {
                 logger.warn(`[Grok] app_chat image generation failed, trying ws_imagine fallback: ${error.message}`);
                 try {
                     return await this._generateAndCollectWS(model, requestBody);
@@ -1527,13 +1544,14 @@ export class GrokApiService {
         const modelLower = normalizedModel.toLowerCase();
         const isImagine = (modelLower.includes('imagine') || modelLower.includes('edit')) && !modelLower.includes('video');
         const isPro = isGrokProModel(normalizedModel);
-        // 识别优先使用 WS 的模型 (包括 2.0 / Pro 以及标准 Imagine 模型，排除视频、纯编辑和精简版)
-        const isWSPreferred = isImagine && !modelLower.includes('video') && !modelLower.includes('edit') && !modelLower.includes('lite') && !modelLower.includes('fast');
         const isNsfw = isGrokNsfwModel(rawModel) || requestBody.nsfw === true || requestBody.disableNsfwFilter === true;
         if (isNsfw) await this.setupNsfw();
 
-        // 提前提取图片和消息，确保上传逻辑能获取到图片
+        // 提前提取图片和消息，确保上传逻辑与 WS 分流判断能获取到图片
         this._extractMessagesAndFiles(requestBody, modelLower.includes('video'));
+        const hasImageInputs = this._hasImageAttachmentInputs(requestBody);
+        // 识别优先使用 WS 的模型 (仅限纯文生图；携带参考图片的图生图请求必须走 app_chat 上传附件链路)
+        const isWSPreferred = isImagine && !hasImageInputs && !modelLower.includes('video') && !modelLower.includes('edit') && !modelLower.includes('lite') && !modelLower.includes('fast');
 
         // 如果是优先 WS 的模型且未显式跳过，直接走 WS 流逻辑
         if (isWSPreferred && retryCount === 0 && !requestBody._skipWs) {
@@ -1696,7 +1714,7 @@ export class GrokApiService {
 
             // 只有此前从未尝试过 WS 的图片生成请求，才在 app_chat 失败后尝试一次 ws_imagine 兜底（严格单向，杜绝循环）
             const isImagineImage = (modelLower.includes('imagine') || modelLower.includes('edit')) && !modelLower.includes('video');
-            if (isImagineImage && !hasYieldedData && retryCount === 0 && !requestBody._skipWs) {
+            if (isImagineImage && !hasImageInputs && !hasYieldedData && retryCount === 0 && !requestBody._skipWs) {
                 logger.warn(`[Grok] app_chat stream failed, trying ws_imagine fallback: ${error.message}`);
                 try {
                     yield* this._generateContentStreamWS(model, requestBody);

@@ -22,6 +22,21 @@ import { convertData } from '../convert/convert.js';
 const IMAGE_GEN_MAX_N = 4;
 const VALID_RESPONSE_FORMATS = new Set(['b64_json', 'url']);
 
+function aspectRatioFromImageSize(size = '') {
+    const match = /^(\d+)\s*x\s*(\d+)$/i.exec(String(size || '').trim());
+    if (!match) return '';
+    const width = Number(match[1]);
+    const height = Number(match[2]);
+    if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return '';
+    if (width === height) return '1:1';
+    const ratio = width / height;
+    if (ratio >= 1.65) return '16:9';
+    if (ratio > 1.15) return '3:2';
+    if (ratio <= 0.62) return '9:16';
+    if (ratio < 0.85) return '2:3';
+    return '1:1';
+}
+
 /**
  * Handle API authentication and routing
  * @param {string} method - The HTTP method
@@ -176,7 +191,7 @@ async function handleImageGenerationRequest(req, res, currentConfig, providerPoo
                 return;
             }
 
-            const aspectRatio = body.aspect_ratio || body.aspectRatio || body.extra_body?.aspect_ratio;
+            const aspectRatio = body.aspect_ratio || body.aspectRatio || body.extra_body?.aspect_ratio || aspectRatioFromImageSize(size);
 
             const quality = body.quality;
             const resolution = body.resolution;
@@ -640,6 +655,8 @@ async function handleImageEditsRequest(req, res, currentConfig, providerPoolMana
         }));
         const totalImageBytes = imageFiles.reduce((total, file) => total + file.buffer.length, 0);
 
+        const aspectRatio = fields.aspect_ratio || fields.aspectRatio || aspectRatioFromImageSize(size);
+
         // 构造虚拟 OpenAI 对话请求，参考对话接口实现自动转换
         const virtualOpenAIRequest = {
             model,
@@ -653,7 +670,10 @@ async function handleImageEditsRequest(req, res, currentConfig, providerPoolMana
             n,
             size,
             response_format,
+            aspect_ratio: aspectRatio || undefined,
+            aspectRatio: aspectRatio || undefined,
             _imageSize: size,
+            _aspectRatio: aspectRatio || undefined,
             _monitorRequestId: currentConfig._monitorRequestId // 注入监控 ID
         };
 

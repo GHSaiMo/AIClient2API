@@ -411,6 +411,51 @@ describe('Phase 2: Grok Reasoning Replay & Tool Governance Suite', () => {
             expect(statusCode).toBe(400);
             expect(responseData).toContain('prompt is required');
         });
+
+        it('GrokApiService should bypass WS and never fallback to WS when image inputs are attached', async () => {
+            const service = new GrokApiService({ GROK_COOKIE_TOKEN: 'test_token' });
+            const wsSpy = jest.spyOn(service, '_generateAndCollectWS').mockResolvedValue({
+                message: '',
+                cardAttachments: [{ jsonData: JSON.stringify({ id: 'ws', image: { original: 'https://assets.grok.com/ws.jpg' } }) }]
+            });
+            const chatSpy = jest.spyOn(service, '_generateAndCollect').mockResolvedValue({
+                message: '',
+                generatedImageUrls: ['https://assets.grok.com/edited.jpg'],
+                cardAttachments: [{ jsonData: JSON.stringify({ id: 'edit', image: { original: 'https://assets.grok.com/edited.jpg' } }) }]
+            });
+
+            const res = await service.generateContent('grok-imagine-image-2.0', {
+                messages: [{
+                    role: 'user',
+                    content: [
+                        { type: 'text', text: 'add sunglasses' },
+                        { type: 'image_url', image_url: { url: 'data:image/png;base64,iVBORw0KGgo=' } }
+                    ]
+                }],
+                aspect_ratio: '2:3',
+                n: 1
+            });
+
+            expect(wsSpy).not.toHaveBeenCalled();
+            expect(chatSpy).toHaveBeenCalledTimes(1);
+            expect(res.generatedImageUrls).toEqual(['https://assets.grok.com/edited.jpg']);
+
+            chatSpy.mockRejectedValueOnce(new Error('app_chat failed'));
+            await expect(service.generateContent('grok-imagine-image-2.0', {
+                messages: [{
+                    role: 'user',
+                    content: [
+                        { type: 'text', text: 'add sunglasses' },
+                        { type: 'image_url', image_url: { url: 'data:image/png;base64,iVBORw0KGgo=' } }
+                    ]
+                }],
+                n: 1
+            })).rejects.toThrow('app_chat failed');
+            expect(wsSpy).not.toHaveBeenCalled();
+
+            wsSpy.mockRestore();
+            chatSpy.mockRestore();
+        });
     });
 });
 
