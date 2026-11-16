@@ -456,6 +456,68 @@ describe('Phase 2: Grok Reasoning Replay & Tool Governance Suite', () => {
             wsSpy.mockRestore();
             chatSpy.mockRestore();
         });
+
+        it('GrokApiService _generateAndCollectWS should reject incomplete (<100%) images on timeout/close instead of salvaging blurry previews', async () => {
+            const { ImagineWebSocketService } = await import('../../src/providers/grok/ws-imagine.js');
+            const service = new GrokApiService({ GROK_COOKIE_TOKEN: 'test_token' });
+
+            const timeoutStreamSpy = jest.spyOn(ImagineWebSocketService.prototype, 'stream').mockImplementation(async function* () {
+                yield {
+                    type: 'image',
+                    id: 'salvage-50',
+                    percentage_complete: 50,
+                    url: 'https://imagine-public.x.ai/imagine-public/images/salvage-50.png',
+                    blob: '/9j/4AAQSkZJRg==',
+                };
+                yield { type: 'error', error: 'Grok WS idle timeout: no response for 120s' };
+            });
+
+            await expect(service._generateAndCollectWS('grok-imagine-image-2.0', { n: 1, message: 'test prompt' }))
+                .rejects.toThrow('Grok WS idle timeout: no response for 120s');
+            timeoutStreamSpy.mockRestore();
+
+            const closeStreamSpy = jest.spyOn(ImagineWebSocketService.prototype, 'stream').mockImplementation(async function* () {
+                yield {
+                    type: 'image',
+                    id: 'partial-50',
+                    percentage_complete: 50,
+                    blob: '/9j/4AAQSkZJRg==',
+                };
+            });
+
+            await expect(service._generateAndCollectWS('grok-imagine-image-2.0', { n: 1, message: 'test prompt' }))
+                .rejects.toThrow('WebSocket generation returned no final images');
+            closeStreamSpy.mockRestore();
+        });
+
+        it('GrokApiService _generateAndCollectWS should format final image blob data URI with proper mime when url is absent, and keep only 100% final images', async () => {
+            const { ImagineWebSocketService } = await import('../../src/providers/grok/ws-imagine.js');
+            const service = new GrokApiService({ GROK_COOKIE_TOKEN: 'test_token' });
+            const streamSpy = jest.spyOn(ImagineWebSocketService.prototype, 'stream').mockImplementation(async function* () {
+                yield {
+                    type: 'image',
+                    id: 'img-1',
+                    percentage_complete: 100,
+                    stage: 'final',
+                    blob: '/9j/4AAQSkZJRg==',
+                };
+                yield {
+                    type: 'image',
+                    id: 'img-2',
+                    percentage_complete: 50,
+                    blob: '/9j/incomplete==',
+                };
+                yield { type: 'error', error: 'Grok WS idle timeout: no response for 120s' };
+            });
+
+            const res = await service._generateAndCollectWS('grok-imagine-image-2.0', { n: 2, message: 'test prompt' });
+            expect(res.cardAttachments.length).toBe(1);
+            const card = JSON.parse(res.cardAttachments[0].jsonData);
+            expect(card.id).toBe('img-1');
+            expect(card.image.original).toBe('data:image/jpeg;base64,/9j/4AAQSkZJRg==');
+
+            streamSpy.mockRestore();
+        });
     });
 });
 

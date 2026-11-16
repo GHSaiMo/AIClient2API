@@ -1258,10 +1258,19 @@ export class GrokApiService {
         };
         
         let imagesCollected = 0;
-        const latestImages = new Map(); // 用于缓存每个 imageId 的最新状态
+        const incompleteImages = new Map(); // 仅用于日志诊断，绝不将 <100% 半成品救回为成品
+
+        const formatBlobDataUri = (blob = '') => {
+            if (!blob || typeof blob !== 'string') return '';
+            if (blob.startsWith('data:')) return blob;
+            const mime = blob.startsWith('/9j/')
+                ? 'image/jpeg'
+                : (blob.startsWith('UklGR') ? 'image/webp' : 'image/png');
+            return `data:${mime};base64,${blob}`;
+        };
 
         const addImgToCollected = async (item) => {
-            const imageUrl = item.url || ((item.blob && !item.blob.startsWith('data:')) ? `data:image/png;base64,${item.blob}` : item.blob);
+            const imageUrl = item.url || formatBlobDataUri(item.blob);
             
             // 处理 imagine-public 图片：仅在显式声明需要分享链接时才创建媒体发布（Post），避免污染主页及多余等待
             let shareLink = null;
@@ -1304,16 +1313,14 @@ export class GrokApiService {
                     String(errorMsg).toLowerCase().includes('credits') ||
                     String(errorMsg).toLowerCase().includes('quota');
                 
-                // 救回逻辑：如果发生错误且没有 100% 的图，但有中间图，则使用中间图
-                if (imagesCollected === 0 && latestImages.size > 0) {
-                    logger.info(`[Grok WS] Salvaging ${latestImages.size} intermediate images on error.`);
-                    for (const img of latestImages.values()) {
-                        await addImgToCollected(img);
-                    }
+                // 绝不将 <100% 扩散中间帧当作成品救回，避免向上游返回模糊半成品并掩盖真实失败
+                if (imagesCollected === 0 && incompleteImages.size > 0) {
+                    const progresses = Array.from(incompleteImages.values()).map((img) => `${img.percentage_complete ?? 0}%`).join(',');
+                    logger.warn(`[Grok WS] Discarding ${incompleteImages.size} incomplete intermediate image(s) (${progresses}) on error: ${errorMsg}`);
                 }
 
                 if (imagesCollected > 0) {
-                    logger.warn(`[Grok WS] Error after collecting ${imagesCollected} images: ${errorMsg}. Returning partial results.`);
+                    logger.warn(`[Grok WS] Error after collecting ${imagesCollected} final images: ${errorMsg}. Returning completed results.`);
                     collected.message += (collected.message ? "\n" : "") + `[Grok Error] ${errorMsg}`;
                     break;
                 }
@@ -1340,30 +1347,29 @@ export class GrokApiService {
                 if (this._isPart0(item.url)) continue;
 
                 const imgId = item.id || item.image_id || item.job_id || uuidv4();
-                latestImages.set(imgId, item);
-
                 const hasMedia = item.url || item.blob;
                 const isFinal = item.percentage_complete === 100 || item.stage === 'final';
 
                 if (hasMedia && isFinal) {
+                    incompleteImages.delete(imgId);
                     await addImgToCollected(item);
                     if (imagesCollected >= n) {
                         logger.info(`[Grok WS] Collected requested ${imagesCollected}/${n} image(s). Concluding stream early.`);
                         break;
                     }
+                } else if (hasMedia) {
+                    incompleteImages.set(imgId, item);
                 }
             }
         }
         
-        // 结束循环后的救回逻辑
-        if (imagesCollected === 0 && latestImages.size > 0) {
-            for (const img of latestImages.values()) {
-                await addImgToCollected(img);
-            }
+        if (imagesCollected === 0 && incompleteImages.size > 0) {
+            const progresses = Array.from(incompleteImages.values()).map((img) => `${img.percentage_complete ?? 0}%`).join(',');
+            logger.warn(`[Grok WS] Stream ended without final image; discarding ${incompleteImages.size} incomplete intermediate image(s) (${progresses}).`);
         }
         
         if (collected.cardAttachments.length === 0) {
-            throw new Error("WebSocket generation returned no images");
+            throw new Error("WebSocket generation returned no final images");
         }
 
         attachGrokUsageEstimatePayload(collected, requestBody);

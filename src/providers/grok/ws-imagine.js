@@ -75,8 +75,10 @@ export class ImagineWebSocketService {
         let done = false;
         let resolveNext = null;
 
-        const IDLE_TIMEOUT_MS = Number(this.config.GROK_WS_IDLE_TIMEOUT_MS) || 45000;
+        const IDLE_TIMEOUT_MS = Number(this.config.GROK_WS_IDLE_TIMEOUT_MS) || 120000;
+        const HEARTBEAT_INTERVAL_MS = 20000;
         let idleTimer = null;
+        let heartbeatTimer = null;
 
         const clearIdleTimer = () => {
             if (idleTimer) {
@@ -85,11 +87,40 @@ export class ImagineWebSocketService {
             }
         };
 
+        const clearHeartbeatTimer = () => {
+            if (heartbeatTimer) {
+                clearInterval(heartbeatTimer);
+                heartbeatTimer = null;
+            }
+        };
+
+        const clearAllTimers = () => {
+            clearIdleTimer();
+            clearHeartbeatTimer();
+        };
+
+        const startHeartbeatTimer = () => {
+            clearHeartbeatTimer();
+            if (!done) {
+                heartbeatTimer = setInterval(() => {
+                    if (done || ws.readyState !== WebSocket.OPEN) {
+                        clearHeartbeatTimer();
+                        return;
+                    }
+                    if (typeof ws.ping === 'function') {
+                        try { ws.ping(); } catch {}
+                    }
+                }, HEARTBEAT_INTERVAL_MS);
+                heartbeatTimer.unref?.();
+            }
+        };
+
         const resetIdleTimer = () => {
             clearIdleTimer();
             if (!done) {
                 idleTimer = setTimeout(() => {
                     logger.warn(`[Grok WS] Idle timeout (${IDLE_TIMEOUT_MS}ms) reached without incoming data`);
+                    clearHeartbeatTimer();
                     queue.push({ type: 'error', error: `Grok WS idle timeout: no response for ${IDLE_TIMEOUT_MS / 1000}s` });
                     done = true;
                     if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
@@ -147,6 +178,7 @@ export class ImagineWebSocketService {
                     }
                 };
                 ws.send(JSON.stringify(payload));
+                startHeartbeatTimer();
                 resetIdleTimer();
             }, 50);
         });
@@ -166,7 +198,7 @@ export class ImagineWebSocketService {
         });
 
         ws.on('close', (code, reason) => {
-            clearIdleTimer();
+            clearAllTimers();
             logger.debug(`[Grok WS] Connection closed: ${code} ${reason}`);
             done = true;
             if (resolveNext) {
@@ -176,7 +208,7 @@ export class ImagineWebSocketService {
         });
 
         ws.on('error', (err) => {
-            clearIdleTimer();
+            clearAllTimers();
             logger.error(`[Grok WS] WebSocket error: ${err.message}`);
             queue.push({ type: 'error', error: err.message });
             done = true;
@@ -196,7 +228,7 @@ export class ImagineWebSocketService {
                 }
             }
         } finally {
-            clearIdleTimer();
+            clearAllTimers();
             if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
                 ws.close();
             }
