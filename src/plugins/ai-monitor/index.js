@@ -177,7 +177,10 @@ const aiMonitorPlugin = {
         async onInternalRequestConverted({ requestId, internalRequest, converterName }) {
             setImmediate(() => {
                 const reqId = requestId || 'N/A';
-                logger.info(`[AI Monitor][${reqId}] >>> Internal Req Converted [${converterName}]: ${JSON.stringify(internalRequest)}`);
+                logger.info(`[AI Monitor][${reqId}] >>> Internal Req Converted [${converterName}]`);
+                if (logger.shouldLog('debug')) {
+                    logger.debug(`[AI Monitor][${reqId}] >>> Internal Req Converted [${converterName}]: ${JSON.stringify(internalRequest)}`);
+                }
             });
         }
     }
