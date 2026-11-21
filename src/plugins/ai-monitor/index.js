@@ -27,6 +27,29 @@ function ensureCacheCleanup(cacheMap) {
     }
 }
 
+function flushStreamCacheEntry(traceRequestId) {
+    if (!traceRequestId) return;
+    const cache = aiMonitorPlugin.streamCache.get(traceRequestId);
+    if (!cache) return;
+    aiMonitorPlugin.streamCache.delete(traceRequestId);
+
+    setImmediate(() => {
+        const hasConversion = cache.toProvider !== cache.fromProvider;
+        const isTruncated = (cache.nativeCount || 0) > cache.nativeChunks.length;
+        const truncSuffix = isTruncated ? ` (Sampled ${cache.nativeChunks.length}/${cache.nativeCount} chunks)` : '';
+        logger.info(`[AI Monitor][${traceRequestId}] <<< Stream Response Aggregated: ${hasConversion ? cache.toProvider + ' -> ' : ''}${cache.fromProvider}${truncSuffix}`);
+
+        if (logger.shouldLog('debug')) {
+            if (hasConversion) {
+                logger.debug(`[AI Monitor][${traceRequestId}] [Res Native Full]: ${JSON.stringify(cache.nativeChunks)}`);
+                logger.debug(`[AI Monitor][${traceRequestId}] [Res Converted Full]: ${JSON.stringify(cache.convertedChunks)}`);
+            } else {
+                logger.debug(`[AI Monitor][${traceRequestId}] [Res Full]: ${JSON.stringify(cache.nativeChunks)}`);
+            }
+        }
+    });
+}
+
 const aiMonitorPlugin = {
     name: 'ai-monitor',
     version: '1.0.0',
@@ -39,6 +62,14 @@ const aiMonitorPlugin = {
 
     async init(config) {
         logger.info('[AI Monitor Plugin] Initialized');
+    },
+
+    async destroy() {
+        if (cacheCleanupTimer) {
+            clearInterval(cacheCleanupTimer);
+            cacheCleanupTimer = null;
+        }
+        aiMonitorPlugin.streamCache.clear();
     },
 
     /**
@@ -87,29 +118,17 @@ const aiMonitorPlugin = {
                 }
             });
 
-            // 处理流式响应的聚合输出
+            // 兜底冲刷流式响应聚合缓存（正常路径由 onStreamEnd 即时触发，消除盲猜 2000ms 定时器）
             if (isStream && traceRequestId) {
-                setTimeout(() => {
-                    const cache = aiMonitorPlugin.streamCache.get(traceRequestId);
-                    if (cache) {
-                        const hasConversion = cache.toProvider !== cache.fromProvider;
-                        const isTruncated = (cache.nativeCount || 0) > cache.nativeChunks.length;
-                        const truncSuffix = isTruncated ? ` (Sampled ${cache.nativeChunks.length}/${cache.nativeCount} chunks)` : '';
-                        logger.info(`[AI Monitor][${traceRequestId}] <<< Stream Response Aggregated: ${hasConversion ? cache.toProvider + ' -> ' : ''}${cache.fromProvider}${truncSuffix}`);
-                        
-                        if (logger.shouldLog('debug')) {
-                            if (hasConversion) {
-                                logger.debug(`[AI Monitor][${traceRequestId}] [Res Native Full]: ${JSON.stringify(cache.nativeChunks)}`);
-                                logger.debug(`[AI Monitor][${traceRequestId}] [Res Converted Full]: ${JSON.stringify(cache.convertedChunks)}`);
-                            } else {
-                                logger.debug(`[AI Monitor][${traceRequestId}] [Res Full]: ${JSON.stringify(cache.nativeChunks)}`);
-                            }
-                        }
-                        
-                        aiMonitorPlugin.streamCache.delete(traceRequestId);
-                    }
-                }, 2000); // 等待流传输完成
+                flushStreamCacheEntry(traceRequestId);
             }
+        },
+
+        /**
+         * 流式响应结束钩子 - 流真正结束时即时聚合输出并释放缓存
+         */
+        async onStreamEnd({ requestId }) {
+            flushStreamCacheEntry(requestId);
         },
 
         /**

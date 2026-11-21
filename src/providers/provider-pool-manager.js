@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import { getServiceAdapter, getRegisteredProviders, invalidateServiceAdapter } from './adapter.js';
 import logger from '../utils/logger.js';
+import requestContext from '../utils/context.js';
 import { MODEL_PROVIDER, getProtocolPrefix } from '../utils/common.js';
 import { withFileLock, atomicWriteFile } from '../utils/file-lock.js';
 import { convertData } from '../convert/convert.js';
@@ -393,7 +394,10 @@ export class ProviderPoolManager {
 
         const runTask = async () => {
             try {
-                await this._refreshNodeToken(providerType, providerStatus, force);
+                // 隔离后台刷新上下文，防止继承触发方客户端请求的 upstreamAbortSignal
+                await requestContext.run({ requestId: `refresh:${uuid.slice(0, 8)}` }, () =>
+                    this._refreshNodeToken(providerType, providerStatus, force)
+                );
             } catch (err) {
                 this._log('error', `Failed to process refresh for node ${this._getDisplayName(providerStatus.config)}: ${err.message}`);
             } finally {
@@ -2559,6 +2563,24 @@ export class ProviderPoolManager {
                 this._log('error', `Failed to write provider_pools.json: ${error.message}`);
             }
         });
+    }
+
+    /**
+     * 优雅关闭时强制冲刷所有防抖待落盘状态并清理后台定时器
+     */
+    async shutdown() {
+        for (const providerType of Object.keys(this.refreshBufferTimers || {})) {
+            clearTimeout(this.refreshBufferTimers[providerType]);
+            delete this.refreshBufferTimers[providerType];
+        }
+        if (this.refreshBufferQueues) {
+            for (const q of Object.values(this.refreshBufferQueues)) {
+                q?.clear?.();
+            }
+        }
+        if (this.pendingSaves.size > 0 || this.saveTimer) {
+            await this._flushPendingSaves();
+        }
     }
 
 }

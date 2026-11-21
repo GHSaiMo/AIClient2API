@@ -1,6 +1,7 @@
 import logger from '../../utils/logger.js';
 import { handleModelUsageStatsRoutes } from './api-routes.js';
 import {
+    clearPendingRequest,
     finalizeRequest,
     getStats,
     recordStreamChunkUsage,
@@ -8,6 +9,7 @@ import {
     resetStats,
     resetTokenStats,
     setConfigGetter,
+    stopStatsPersistence,
     syncWriteToFile
 } from './stats-manager.js';
 
@@ -27,7 +29,7 @@ const modelUsageStatsPlugin = {
     },
 
     async destroy() {
-        syncWriteToFile();
+        await stopStatsPersistence();
         logger.info('[Model Usage Stats] Destroyed');
     },
 
@@ -73,6 +75,12 @@ const modelUsageStatsPlugin = {
                 nativeChunk,
                 clientChunk: chunkToSend
             });
+        },
+
+        async onStreamEnd({ requestId, aborted }) {
+            if (aborted && requestId) {
+                clearPendingRequest(requestId);
+            }
         },
 
         async onContentGenerated(config) {

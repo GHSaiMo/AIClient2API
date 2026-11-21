@@ -153,9 +153,23 @@ function ensureLoaded() {
         if (persistTimer.unref) {
             persistTimer.unref();
         }
-        process.on('beforeExit', () => syncWriteToFile());
-        process.on('SIGINT', () => { syncWriteToFile(); process.exit(0); });
-        process.on('SIGTERM', () => { syncWriteToFile(); process.exit(0); });
+        process.once('beforeExit', () => syncWriteToFile());
+        process.once('exit', () => syncWriteToFile());
+    }
+}
+
+export async function stopStatsPersistence() {
+    if (persistTimer) {
+        clearInterval(persistTimer);
+        persistTimer = null;
+    }
+    await persistIfDirty();
+    syncWriteToFile();
+}
+
+export function clearPendingRequest(requestId) {
+    if (requestId) {
+        pendingRequests.delete(requestId);
     }
 }
 

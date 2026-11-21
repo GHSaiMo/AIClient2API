@@ -1299,10 +1299,24 @@ export class GrokApiService {
             logger.info(`[Grok WS] Collected image: ${cardData.id} (progress: ${item.percentage_complete}%)`);
         };
 
+        const summarizeWsItemForLog = (rawItem) => {
+            if (!rawItem || typeof rawItem !== 'object') return rawItem;
+            if (!rawItem.blob && !rawItem.b64_json) return rawItem;
+            const clone = { ...rawItem };
+            if (typeof clone.blob === 'string') {
+                clone.blob = `<base64 len=${clone.blob.length}>`;
+            }
+            if (typeof clone.b64_json === 'string') {
+                clone.b64_json = `<base64 len=${clone.b64_json.length}>`;
+            }
+            return clone;
+        };
+
         for await (const item of stream) {
-            // 增加 WS 原始输出日志
-            if (item.type === 'image' || item.type === 'error') {
-                logger.info(`[Grok WS Raw] Item: ${JSON.stringify(item)}`);
+            if (item.type === 'error') {
+                logger.warn(`[Grok WS Raw] Error item: ${JSON.stringify(summarizeWsItemForLog(item))}`);
+            } else if (item.type === 'image' && logger.shouldLog('debug')) {
+                logger.debug(`[Grok WS Raw] Image item: ${JSON.stringify(summarizeWsItemForLog(item))}`);
             }
 
             if (item.type === 'error') {

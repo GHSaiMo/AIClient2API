@@ -3,6 +3,45 @@ import * as path from 'path';
 import { randomUUID } from 'crypto';
 import { AsyncLocalStorage } from 'node:async_hooks';
 
+const LARGE_BINARY_KEYS = new Set(['blob', 'b64_json', 'image_base64', 'audio_base64', 'bytesBase64Encoded']);
+const DEFAULT_MAX_MESSAGE_LENGTH = 16 * 1024; // 单条日志最大 16KB，防止巨型 Base64 / Payload 撑爆磁盘与内存
+
+function getLocalDateString(date = new Date()) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+}
+
+function sanitizeLogString(str, maxLen = DEFAULT_MAX_MESSAGE_LENGTH) {
+    if (typeof str !== 'string') return String(str);
+    let result = str;
+    if (result.length > 1024) {
+        result = result
+            .replace(/data:(?:image|audio|video|application)\/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=\s]{512,}/g, (m) => `<data-uri len=${m.length}>`)
+            .replace(/"(blob|b64_json|image_base64|bytesBase64Encoded)"\s*:\s*"[A-Za-z0-9+/=]{512,}"/g, (_, key) => `"${key}":"<base64 redacted>"`);
+    }
+    if (maxLen > 0 && result.length > maxLen) {
+        return `${result.slice(0, maxLen)}... [truncated ${result.length - maxLen} chars]`;
+    }
+    return result;
+}
+
+function safeJsonReplacer(key, value) {
+    if (typeof value === 'string') {
+        if (LARGE_BINARY_KEYS.has(key) && value.length > 256) {
+            return `<base64 len=${value.length}>`;
+        }
+        if (value.length > 1024 && /^data:(?:image|audio|video|application)\/[a-zA-Z0-9.+-]+;base64,/.test(value)) {
+            return `<data-uri len=${value.length}>`;
+        }
+        if (value.length > 4096) {
+            return `${value.slice(0, 4096)}... [truncated ${value.length - 4096} chars]`;
+        }
+    }
+    return value;
+}
+
 /**
  * 统一日志工具类
  * 支持控制台和文件输出，自动添加请求ID和时间戳
@@ -17,9 +56,11 @@ class Logger {
             includeRequestId: true,
             includeTimestamp: true,
             maxFileSize: 10 * 1024 * 1024, // 10MB
-            maxFiles: 10
+            maxFiles: 10,
+            maxMessageLength: DEFAULT_MAX_MESSAGE_LENGTH
         };
         this.currentLogFile = null;
+        this.currentDateStr = null;
         this.logStream = null;
         this.asyncStorage = new AsyncLocalStorage(); // 使用 AsyncLocalStorage 存储请求上下文
         this.levels = {
@@ -40,7 +81,12 @@ class Logger {
      * @param {Object} config - 日志配置对象
      */
     initialize(config = {}) {
-        this.config = { ...this.config, ...config };
+        const envOutputMode = process.env.LOG_OUTPUT_MODE;
+        this.config = {
+            ...this.config,
+            ...config,
+            ...(envOutputMode ? { outputMode: envOutputMode } : {})
+        };
         
         if (this.config.outputMode === 'none') {
             this.config.enabled = false;
@@ -49,29 +95,32 @@ class Logger {
 
         if (this.config.outputMode === 'file' || this.config.outputMode === 'all') {
             this.initializeFileLogging();
+        } else {
+            this.close();
         }
     }
 
     /**
      * 初始化文件日志
      */
-    initializeFileLogging() {
+    initializeFileLogging(dateStr = getLocalDateString()) {
         try {
             // 确保日志目录存在
             if (!fs.existsSync(this.config.logDir)) {
                 fs.mkdirSync(this.config.logDir, { recursive: true });
             }
 
-            // 创建日志文件名（按本地日期）
-            const date = new Date();
-            const year = date.getFullYear();
-            const month = String(date.getMonth() + 1).padStart(2, '0');
-            const day = String(date.getDate()).padStart(2, '0');
-            const dateStr = `${year}-${month}-${day}`;
+            if (this.logStream && !this.logStream.destroyed) {
+                this.logStream.end();
+            }
+
+            // 创建日志文件名（按本地日期），并同步打开 FD 确保轮转后文件立即可见且不产生悬空异步 open
+            this.currentDateStr = dateStr;
             this.currentLogFile = path.join(this.config.logDir, `app-${dateStr}.log`);
+            const fd = fs.openSync(this.currentLogFile, 'a');
 
             // 创建写入流
-            this.logStream = fs.createWriteStream(this.currentLogFile, { flags: 'a' });
+            this.logStream = fs.createWriteStream(this.currentLogFile, { fd, flags: 'a', autoClose: true });
             
             // 监听错误
             this.logStream.on('error', (err) => {
@@ -178,16 +227,20 @@ class Logger {
         // 添加日志级别
         parts.push(`[${level.toUpperCase()}]`);
 
-        // 添加消息内容
+        // 添加消息内容（自动脱敏超长 Base64 并限制单条日志体积）
+        const maxLen = this.config.maxMessageLength ?? DEFAULT_MAX_MESSAGE_LENGTH;
         const message = args.map(arg => {
-            if (typeof arg === 'object') {
+            if (arg instanceof Error) {
+                return sanitizeLogString(arg.stack || arg.message || String(arg), maxLen);
+            }
+            if (typeof arg === 'object' && arg !== null) {
                 try {
-                    return JSON.stringify(arg, null, 2);
+                    return sanitizeLogString(JSON.stringify(arg, safeJsonReplacer), maxLen);
                 } catch (e) {
-                    return String(arg);
+                    return sanitizeLogString(String(arg), maxLen);
                 }
             }
-            return String(arg);
+            return sanitizeLogString(String(arg), maxLen);
         }).join(' ');
 
         parts.push(message);
@@ -208,10 +261,17 @@ class Logger {
     }
 
     /**
-     * 检查并轮转日志文件
+     * 检查并轮转日志文件（支持跨零点自动切分新日期文件 + 单文件体积轮转）
      */
     checkAndRotateLogFile() {
         try {
+            const todayStr = getLocalDateString();
+            if (this.currentDateStr && todayStr !== this.currentDateStr) {
+                this.initializeFileLogging(todayStr);
+                this.cleanupOldLogs();
+                return;
+            }
+
             if (!this.currentLogFile || !fs.existsSync(this.currentLogFile)) {
                 return;
             }
@@ -224,17 +284,14 @@ class Logger {
                 }
 
                 // 重命名当前日志文件，添加时间戳
-                const timestamp = new Date().getTime();
+                const timestamp = Date.now();
                 const ext = path.extname(this.currentLogFile);
                 const basename = path.basename(this.currentLogFile, ext);
                 const newName = path.join(this.config.logDir, `${basename}-${timestamp}${ext}`);
                 fs.renameSync(this.currentLogFile, newName);
 
-                // 重新创建日志流
-                this.logStream = fs.createWriteStream(this.currentLogFile, { flags: 'a' });
-                this.logStream.on('error', (err) => {
-                    console.error('[Logger] Failed to write to log file:', err.message);
-                });
+                // 重新创建日志流（同时对齐最新日期）
+                this.initializeFileLogging(todayStr);
 
                 // 清理旧日志文件
                 this.cleanupOldLogs();
@@ -381,11 +438,18 @@ class Logger {
     }
 
     /**
-     * 清空当日日志文件
+     * 清空当日日志文件（兼容纯 console 模式清空内存日志缓冲）
      * @returns {boolean} 是否成功清空
      */
     clearTodayLog() {
         try {
+            if (Array.isArray(global.logBuffer)) {
+                global.logBuffer.length = 0;
+            }
+            if (this.config.outputMode === 'console' || this.config.outputMode === 'none') {
+                console.log('[Logger] In-memory log buffer cleared successfully');
+                return true;
+            }
             if (!this.currentLogFile || !fs.existsSync(this.currentLogFile)) {
                 console.warn('[Logger] No current log file to clear');
                 return false;

@@ -94,12 +94,15 @@ class YuanbaoRunnerManager {
             };
 
             const inFd = fs.openSync(this.scriptPath, 'r');
-
-            this.process = spawn(egoBin, ['nodejs'], {
-                stdio: [inFd, 'pipe', 'pipe'],
-                env,
-                detached: false
-            });
+            try {
+                this.process = spawn(egoBin, ['nodejs'], {
+                    stdio: [inFd, 'pipe', 'pipe'],
+                    env,
+                    detached: false
+                });
+            } finally {
+                try { fs.closeSync(inFd); } catch {}
+            }
 
             this.process.stdout.on('data', (data) => {
                 const msg = data.toString().trim();
@@ -141,6 +144,28 @@ class YuanbaoRunnerManager {
             return true;
         }
         return this.start();
+    }
+
+    async stop() {
+        if (!this.process) return;
+        const proc = this.process;
+        this.process = null;
+        this.ready = false;
+        logger.info('[Yuanbao Runner] Stopping child runner process...');
+        await new Promise((resolve) => {
+            const timeout = setTimeout(() => {
+                try { proc.kill('SIGKILL'); } catch {}
+                resolve();
+            }, 3000);
+            proc.once('exit', () => {
+                clearTimeout(timeout);
+                resolve();
+            });
+            try { proc.kill('SIGTERM'); } catch {
+                clearTimeout(timeout);
+                resolve();
+            }
+        });
     }
 }
 

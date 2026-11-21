@@ -13,6 +13,8 @@
 
 import './security-hardening.js';
 import { fork } from 'child_process';
+import * as crypto from 'crypto';
+import * as fs from 'fs';
 import logger from '../utils/logger.js';
 import * as http from 'http';
 import * as path from 'path';
@@ -39,9 +41,53 @@ const config = {
     workerScript: path.join(__dirname, '../services/api-server.js'),
     maxRestartAttempts: 10,
     restartDelay: 1000, // 重启延迟（毫秒）
+    masterHost: process.env.MASTER_HOST || '127.0.0.1', // 默认仅绑定本机回环，杜绝局域网未授权控制暴露
     masterPort: parseInt(process.env.MASTER_PORT) || 3100, // 主进程管理端口
     args: process.argv.slice(2) // 传递给子进程的参数
 };
+
+function safeCompareSecret(candidate, expected) {
+    if (typeof candidate !== 'string' || typeof expected !== 'string' || !expected) {
+        return false;
+    }
+    const hashA = crypto.createHash('sha256').update(candidate, 'utf8').digest();
+    const hashB = crypto.createHash('sha256').update(expected, 'utf8').digest();
+    return crypto.timingSafeEqual(hashA, hashB) && candidate.length === expected.length;
+}
+
+function getMasterRequiredKey() {
+    if (process.env.MASTER_API_KEY) {
+        return process.env.MASTER_API_KEY;
+    }
+    try {
+        const cfgPath = path.join(process.cwd(), 'configs', 'config.json');
+        if (fs.existsSync(cfgPath)) {
+            const parsed = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+            if (typeof parsed.REQUIRED_API_KEY === 'string' && parsed.REQUIRED_API_KEY.trim()) {
+                return parsed.REQUIRED_API_KEY.trim();
+            }
+        }
+    } catch {}
+    return null;
+}
+
+function isMasterRequestAuthorized(req, url) {
+    const expectedKey = getMasterRequiredKey();
+    if (!expectedKey) {
+        return true;
+    }
+    const authHeader = req.headers['authorization'];
+    const bearer = typeof authHeader === 'string' && authHeader.startsWith('Bearer ')
+        ? authHeader.slice(7)
+        : null;
+    const xApiKey = req.headers['x-api-key'];
+    const queryKey = url.searchParams.get('key');
+    return (
+        safeCompareSecret(bearer, expectedKey) ||
+        safeCompareSecret(xApiKey, expectedKey) ||
+        safeCompareSecret(queryKey, expectedKey)
+    );
+}
 
 /**
  * 启动子进程
@@ -243,30 +289,38 @@ function getStatus() {
  */
 function createMasterServer() {
     const server = http.createServer(async (req, res) => {
-        const url = new URL(req.url, `http://${req.headers.host}`);
-        const path = url.pathname;
+        const url = new URL(req.url, `http://${req.headers.host || '127.0.0.1'}`);
+        const reqPath = url.pathname;
         const method = req.method;
 
-        // 设置 CORS 头
-        res.setHeader('Access-Control-Allow-Origin', '*');
-        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+        // 健康检查（仅本机只读存活探测免鉴权）
+        if (method === 'GET' && reqPath === '/master/health') {
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({
+                status: 'healthy',
+                workerRunning: workerProcess !== null,
+                timestamp: new Date().toISOString()
+            }));
+            return;
+        }
 
-        if (method === 'OPTIONS') {
-            res.writeHead(204);
-            res.end();
+        // 所有管理操作端点强制校验 API Key 并禁用通配 CORS，防御跨站 CSRF 与内网未授权停机
+        if (!isMasterRequestAuthorized(req, url)) {
+            logger.warn(`[Master] Rejected unauthorized ${method} ${reqPath} from ${req.socket?.remoteAddress || 'unknown'}`);
+            res.writeHead(401, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Unauthorized: valid API key required' }));
             return;
         }
 
         // 状态端点
-        if (method === 'GET' && path === '/master/status') {
+        if (method === 'GET' && reqPath === '/master/status') {
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify(getStatus()));
             return;
         }
 
         // 重启端点
-        if (method === 'POST' && path === '/master/restart') {
+        if (method === 'POST' && reqPath === '/master/restart') {
             logger.info('[Master] Restart requested via API');
             const result = await restartWorker();
             res.writeHead(result.success ? 200 : 500, { 'Content-Type': 'application/json' });
@@ -275,7 +329,7 @@ function createMasterServer() {
         }
 
         // 停止端点
-        if (method === 'POST' && path === '/master/stop') {
+        if (method === 'POST' && reqPath === '/master/stop') {
             logger.info('[Master] Stop requested via API');
             await stopWorker(true);
             res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -284,7 +338,7 @@ function createMasterServer() {
         }
 
         // 启动端点
-        if (method === 'POST' && path === '/master/start') {
+        if (method === 'POST' && reqPath === '/master/start') {
             logger.info('[Master] Start requested via API');
             if (workerProcess) {
                 res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -297,30 +351,19 @@ function createMasterServer() {
             return;
         }
 
-        // 健康检查
-        if (method === 'GET' && path === '/master/health') {
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({
-                status: 'healthy',
-                workerRunning: workerProcess !== null,
-                timestamp: new Date().toISOString()
-            }));
-            return;
-        }
-
         // 404
         res.writeHead(404, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: 'Not Found' }));
     });
 
-    server.listen(config.masterPort, () => {
-        logger.info(`[Master] Management server listening on port ${config.masterPort}`);
+    server.listen(config.masterPort, config.masterHost, () => {
+        logger.info(`[Master] Management server listening on http://${config.masterHost}:${config.masterPort}`);
         logger.info(`[Master] Available endpoints:`);
-        logger.info(`  GET  /master/status  - Get master and worker status`);
+        logger.info(`  GET  /master/status  - Get master and worker status (auth required)`);
         logger.info(`  GET  /master/health  - Health check`);
-        logger.info(`  POST /master/restart - Restart worker process`);
-        logger.info(`  POST /master/stop    - Stop worker process`);
-        logger.info(`  POST /master/start   - Start worker process`);
+        logger.info(`  POST /master/restart - Restart worker process (auth required)`);
+        logger.info(`  POST /master/stop    - Stop worker process (auth required)`);
+        logger.info(`  POST /master/start   - Start worker process (auth required)`);
     });
 
     return server;

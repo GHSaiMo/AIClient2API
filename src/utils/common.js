@@ -1,14 +1,64 @@
 export { MODEL_PROTOCOL_PREFIX, MODEL_PROVIDER } from './constants.js';
 import { promises as fs } from 'fs';
 import * as path from 'path';
-import * as http from 'http'; // Add http for IncomingMessage and ServerResponse types
-import * as crypto from 'crypto'; // Import crypto for MD5 hashing
+import * as http from 'http';
+import * as crypto from 'crypto';
 import logger from './logger.js';
+import requestContext from './context.js';
 import { convertData, getOpenAIStreamChunkStop } from '../convert/convert.js';
 import { ProviderStrategyFactory } from './provider-strategies.js';
 import { getPluginManager } from '../core/plugin-manager.js';
 import { MODEL_PROTOCOL_PREFIX, MODEL_PROVIDER } from './constants.js';
-import { getEstimatedModelContextLength } from '../handlers/probe-handler.js';
+import { getCustomModelConfig } from '../providers/provider-models.js';
+import { ENDPOINT_TYPE, getProtocolPrefix } from './protocol-utils.js';
+import {
+    RETRYABLE_NETWORK_ERRORS,
+    RETRYABLE_NETWORK_ERRORS_SET,
+    isRetryableNetworkError,
+    ensureValidStatusCode,
+    getErrorStatusCode,
+    getNormalizedErrorResponseText,
+    buildHttpErrorReason,
+    normalizeProviderErrorMessage,
+    getRetryAfterMs,
+    isRateLimitError,
+    getRateLimitCooldownRecoveryTime,
+    isQuotaExhaustedError,
+    getQuotaCooldownRecoveryTime,
+    calculateRetryDelay,
+    createEmptyUpstreamResponseError,
+    createErrorResponse,
+    createStreamErrorResponse,
+    handleError
+} from './retry-error-utils.js';
+import {
+    resolveCustomModelRouting,
+    handleModelListRequest,
+    handleModelDetailRequest
+} from './model-registry-utils.js';
+
+export {
+    ENDPOINT_TYPE,
+    getProtocolPrefix,
+    RETRYABLE_NETWORK_ERRORS,
+    RETRYABLE_NETWORK_ERRORS_SET,
+    isRetryableNetworkError,
+    ensureValidStatusCode,
+    getNormalizedErrorResponseText,
+    buildHttpErrorReason,
+    normalizeProviderErrorMessage,
+    getRetryAfterMs,
+    isRateLimitError,
+    getRateLimitCooldownRecoveryTime,
+    isQuotaExhaustedError,
+    getQuotaCooldownRecoveryTime,
+    calculateRetryDelay,
+    createEmptyUpstreamResponseError,
+    handleError,
+    resolveCustomModelRouting,
+    handleModelListRequest,
+    handleModelDetailRequest
+};
 
 // ==================== 时间与时区 ====================
 
@@ -18,429 +68,8 @@ import { getEstimatedModelContextLength } from '../handlers/probe-handler.js';
  */
 export function getBeijingDateString() {
     const now = new Date();
-    // 强制增加 8 小时偏移来模拟 UTC+8
     const utc8Time = new Date(now.getTime() + (8 * 60 * 60 * 1000));
     return utc8Time.toISOString().split('T')[0];
-}
-
-// ==================== 网络错误处理 ====================
-
-/**
- * 可重试的网络错误标识列表
- * 这些错误可能出现在 error.code 或 error.message 中
- */
-export const RETRYABLE_NETWORK_ERRORS = [
-    'ECONNRESET',      // 连接被重置
-    'ETIMEDOUT',       // 连接超时
-    'ECONNREFUSED',    // 连接被拒绝
-    'ENOTFOUND',       // DNS 解析失败
-    'ENETUNREACH',     // 网络不可达
-    'EHOSTUNREACH',    // 主机不可达
-    'EPIPE',           // 管道破裂
-    'EAI_AGAIN',       // DNS 临时失败
-    'ECONNABORTED',    // 连接中止
-    'ESOCKETTIMEDOUT', // Socket 超时
-    'ERR_STREAM_WRITE_AFTER_END', // 流关闭后写入
-    'ERR_STREAM_DESTROYED',       // 流已销毁
-    'ERR_STREAM_PREMATURE_CLOSE', // 流过早关闭
-    'ERR_STREAM_ALREADY_FINISHED',// 流已完成
-    'ERR_HTTP_HEADERS_SENT',      // 响应头已发送
-    'ECANCELED',                  // 操作取消
-    'UND_ERR_SOCKET',             // undici socket 错误
-    'UND_ERR_ABORTED',            // undici 请求中止
-];
-
-export const RETRYABLE_NETWORK_ERRORS_SET = new Set(RETRYABLE_NETWORK_ERRORS);
-
-/**
- * 检查是否为可重试的网络错误
- * @param {Error} error - 错误对象
- * @returns {boolean} - 是否为可重试的网络错误
- */
-export function isRetryableNetworkError(error) {
-    if (!error) return false;
-    
-    const errorCode = error.code || error.cause?.code || '';
-    if (errorCode && RETRYABLE_NETWORK_ERRORS_SET.has(errorCode)) {
-        return true;
-    }
-
-    const errorMessage = error.message || error.cause?.message || (typeof error === 'string' ? error : '');
-    if (!errorMessage) return false;
-
-    return RETRYABLE_NETWORK_ERRORS.some(err => errorMessage.includes(err));
-}
-
-/**
- * 确保状态码是有效的 HTTP 状态码
- * @param {any} code - 待检查的状态码
- * @returns {number} - 有效的 HTTP 状态码 (100-599)，默认为 500
- */
-export function ensureValidStatusCode(code) {
-    const num = parseInt(code, 10);
-    if (!isNaN(num) && num >= 100 && num < 600) {
-        return num;
-    }
-    return 500;
-}
-
-
-function getErrorStatusCode(error) {
-    return error?.response?.status || error?.status || error?.statusCode || error?.code || null;
-}
-
-function getHttpStatusLabel(status) {
-    switch (status) {
-        case 400: return 'Bad Request';
-        case 401: return 'Unauthorized';
-        case 402: return 'Payment Required';
-        case 403: return 'Forbidden';
-        case 404: return 'Not Found';
-        case 408: return 'Request Timeout';
-        case 409: return 'Conflict';
-        case 422: return 'Unprocessable Entity';
-        case 429: return 'Too Many Requests';
-        case 500: return 'Internal Server Error';
-        case 502: return 'Bad Gateway';
-        case 503: return 'Service Unavailable';
-        case 504: return 'Gateway Timeout';
-        default: return 'HTTP Error';
-    }
-}
-
-function extractReadableErrorText(data) {
-    if (data === undefined || data === null) return '';
-    if (typeof data === 'string') return data;
-    if (Buffer.isBuffer(data)) return data.toString('utf8');
-
-    if (Array.isArray(data)) {
-        return data
-            .map(item => extractReadableErrorText(item))
-            .filter(Boolean)
-            .join(' | ');
-    }
-
-    if (typeof data !== 'object') {
-        return String(data);
-    }
-
-    const directFields = [
-        data.message,
-        data.error_description,
-        data.description,
-        data.detail,
-        data.reason,
-        data.msg
-    ].filter(value => typeof value === 'string' && value.trim());
-
-    if (directFields.length > 0) {
-        return directFields.join(' | ');
-    }
-
-    if (typeof data.error === 'string' && data.error.trim()) {
-        return data.error;
-    }
-
-    if (data.error && typeof data.error === 'object') {
-        const nestedError = extractReadableErrorText(data.error);
-        if (nestedError) return nestedError;
-    }
-
-    if (Array.isArray(data.details)) {
-        const detailText = data.details
-            .map(detail => extractReadableErrorText(detail))
-            .filter(Boolean)
-            .join(' | ');
-        if (detailText) return detailText;
-    }
-
-    if (data.metadata && typeof data.metadata === 'object') {
-        const metadataText = extractReadableErrorText(data.metadata);
-        if (metadataText) return metadataText;
-    }
-
-    try {
-        return JSON.stringify(data);
-    } catch {
-        return String(data);
-    }
-}
-
-export async function getNormalizedErrorResponseText(error) {
-    const data = error?.response?.data;
-    const fallbackText = extractReadableErrorText(data) || error?.message || '';
-
-    if (!data || typeof data?.on !== 'function' || typeof data?.read !== 'function') {
-        return fallbackText;
-    }
-
-    const chunks = [];
-    try {
-        for await (const chunk of data) {
-            chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
-        }
-
-        const bodyText = Buffer.concat(chunks).toString('utf8');
-        if (!bodyText) return fallbackText;
-
-        try {
-            const parsed = JSON.parse(bodyText);
-            return extractReadableErrorText(parsed) || bodyText;
-        } catch {
-            return bodyText;
-        }
-    } catch (readError) {
-        logger.warn(`[Error Normalize] Failed to read error response stream: ${readError.message}`);
-        return fallbackText;
-    }
-}
-
-export function buildHttpErrorReason(status, context, responseText = '', options = {}) {
-    const statusLabel = getHttpStatusLabel(status);
-    const responseSnippet = responseText ? responseText.substring(0, 500) : '';
-    const suffix = options.suffix ? ` - ${options.suffix}` : '';
-    const prefix = status ? `${status} ${statusLabel}` : statusLabel;
-    return `${prefix}${context ? ` (${context})` : ''}${suffix}${responseSnippet ? `: ${responseSnippet}` : ''}`;
-}
-
-export async function normalizeProviderErrorMessage(error, options = {}) {
-    const status = options.status ?? getErrorStatusCode(error);
-    const responseText = await getNormalizedErrorResponseText(error);
-    const reason = buildHttpErrorReason(status, options.context || '', responseText, {
-        suffix: options.suffix || ''
-    });
-    // Normalize in place so existing throw/logging paths that keep using `error`
-    // automatically see the readable message without forcing every caller to reassign.
-    error.message = reason;
-    return { responseText, reason, status };
-}
-
-function getHeaderValue(headers, headerName) {
-    if (!headers) return null;
-
-    if (typeof headers.get === 'function') {
-        return headers.get(headerName) || headers.get(headerName.toLowerCase());
-    }
-
-    const lowerName = headerName.toLowerCase();
-    for (const [key, value] of Object.entries(headers)) {
-        if (key.toLowerCase() === lowerName) {
-            return Array.isArray(value) ? value[0] : value;
-        }
-    }
-
-    return null;
-}
-
-function parseRetryAfterMs(value, now = Date.now()) {
-    if (value === null || value === undefined) return null;
-
-    const rawValue = Array.isArray(value) ? value[0] : value;
-    const text = String(rawValue).trim();
-    if (!text) return null;
-
-    const seconds = Number(text);
-    if (Number.isFinite(seconds)) {
-        return Math.max(0, Math.round(seconds * 1000));
-    }
-
-    const dateMs = Date.parse(text);
-    if (!Number.isNaN(dateMs)) {
-        return Math.max(0, dateMs - now);
-    }
-
-    return null;
-}
-
-function parseDurationMs(value) {
-    if (value === null || value === undefined) return null;
-    if (typeof value === 'number' && Number.isFinite(value)) return Math.max(0, Math.round(value));
-
-    const text = String(value).trim();
-    const match = text.match(/^([\d.]+)\s*(ms|s)?$/i);
-    if (!match) return null;
-
-    const amount = Number(match[1]);
-    if (!Number.isFinite(amount)) return null;
-
-    return Math.max(0, Math.round(match[2]?.toLowerCase() === 's' ? amount * 1000 : amount));
-}
-
-function getRetryDelayFromBody(errorBody) {
-    try {
-        const data = typeof errorBody === 'string' ? JSON.parse(errorBody) : errorBody;
-
-        const directDelay = parseDurationMs(data?.retryDelay ?? data?.retry_delay ?? data?.retryAfterMs);
-        if (directDelay !== null) return directDelay;
-
-        const details = data?.error?.details;
-        if (Array.isArray(details)) {
-            for (const detail of details) {
-                const retryDelay = parseDurationMs(detail?.retryDelay || detail?.metadata?.quotaResetDelay);
-                if (retryDelay !== null) return retryDelay;
-            }
-        }
-
-        const message = data?.error?.message;
-        if (message) {
-            const match = message.match(/after\s+([\d.]+)\s*(ms|s)?\.?/i);
-            if (match) {
-                const amount = parseFloat(match[1]);
-                return Math.max(0, Math.round(match[2]?.toLowerCase() === 'ms' ? amount : amount * 1000));
-            }
-        }
-    } catch {}
-
-    return null;
-}
-
-export function getRetryAfterMs(error, now = Date.now()) {
-    const headerDelay = parseRetryAfterMs(getHeaderValue(error?.response?.headers, 'retry-after'), now);
-    if (headerDelay !== null) return headerDelay;
-
-    const explicitDelay = parseDurationMs(error?.retryAfterMs);
-    if (explicitDelay !== null) return explicitDelay;
-
-    const internalRetryAfterDelay = parseDurationMs(error?.retryAfter);
-    if (internalRetryAfterDelay !== null) return internalRetryAfterDelay;
-
-    const retryAfterDelay = parseRetryAfterMs(error?.response?.data?.retryAfter ?? error?.response?.data?.retry_after, now);
-    if (retryAfterDelay !== null) return retryAfterDelay;
-
-    return getRetryDelayFromBody(error?.response?.data);
-}
-
-function getPositiveInteger(value, fallback) {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) && parsed >= 0 ? Math.round(parsed) : fallback;
-}
-
-/**
- * Checks whether an error indicates rate limiting (429 Too Many Requests, rate_limit_exceeded, Image rate limit).
- * @param {Error|object} error - The error to inspect
- * @returns {boolean}
- */
-export function isRateLimitError(error) {
-    if (!error) return false;
-    const status = Number(getErrorStatusCode(error));
-    if (status === 429 || error.status === 429 || error.statusCode === 429 || error.code === 429 || error.err_code === 'rate_limit_exceeded') {
-        return true;
-    }
-    if (error.isRateLimit === true) return true;
-    const msg = String(error.message || '').toLowerCase();
-    if (msg.includes('rate limit') || msg.includes('rate_limit') || msg.includes('too many requests') || msg.includes('image rate limit')) {
-        return true;
-    }
-    const rawData = error.response?.data;
-    if (typeof rawData === 'string') {
-        const lower = rawData.toLowerCase();
-        if (lower.includes('rate limit') || lower.includes('rate_limit') || lower.includes('too many requests') || lower.includes('rate_limit_exceeded')) {
-            return true;
-        }
-    }
-    return false;
-}
-
-/**
- * Calculates a scheduled recovery time for 429/rate limit account cooldown.
- * Returns a recovery Date when rate limit is detected.
- */
-export function getRateLimitCooldownRecoveryTime(error, config = {}, now = Date.now()) {
-    if (!isRateLimitError(error)) {
-        return null;
-    }
-
-    // 默认 60 秒冷却，支持配置覆盖与 Retry-After 头
-    const defaultCooldownMs = getPositiveInteger(config.RATE_LIMIT_COOLDOWN_MS, 60000);
-    const maxCooldownMs = getPositiveInteger(config.RATE_LIMIT_COOLDOWN_MAX_MS, 300000);
-    const jitterMs = getPositiveInteger(config.RATE_LIMIT_COOLDOWN_JITTER_MS, 0);
-    const retryAfterMs = getRetryAfterMs(error, now);
-    const baseCooldownMs = retryAfterMs === null ? defaultCooldownMs : retryAfterMs;
-    const cappedCooldownMs = Math.min(baseCooldownMs, Math.max(defaultCooldownMs, maxCooldownMs));
-    const jitter = jitterMs > 0 ? Math.floor(Math.random() * (jitterMs + 1)) : 0;
-
-    return new Date(now + cappedCooldownMs + jitter);
-}
-
-/**
- * Checks whether an error indicates quota exhaustion (402 Payment Required, spending-limit, monthly request limit).
- * @param {Error|object} error - The error to inspect
- * @returns {boolean}
- */
-export function isQuotaExhaustedError(error) {
-    if (!error) return false;
-    const status = Number(getErrorStatusCode(error));
-    if (status === 402 || error.status === 402 || error.statusCode === 402 || error.code === 402) return true;
-    if (error.isQuotaExhausted === true) return true;
-
-    const errCode = String(error.err_code || error.code || '').toLowerCase();
-    if (errCode === 'usage_pool_exhausted' || errCode === 'quota_exceeded' || errCode === 'insufficient_quota') {
-        return true;
-    }
-
-    const msg = String(error.message || '').toLowerCase();
-    
-    let dataStr = '';
-    const rawData = error.response?.data;
-    if (typeof rawData === 'string') {
-        dataStr = rawData.toLowerCase();
-    } else if (rawData && typeof rawData.on !== 'function' && typeof rawData.read !== 'function' && !Buffer.isBuffer(rawData)) {
-        try {
-            dataStr = JSON.stringify(rawData).toLowerCase();
-        } catch {
-            dataStr = '';
-        }
-    }
-
-    const quotaKeywords = [
-        'spending-limit',
-        'monthly_request_count',
-        'payment required',
-        'payment_required',
-        'usage_limit_reached',
-        'usage_pool_exhausted',
-        'usage limit exceeded',
-        'usage limit',
-        'media generation credits',
-        'used up your media generation',
-        'insufficient_quota',
-        'quota exceeded',
-        'out of credits',
-    ];
-
-    return quotaKeywords.some(kw => msg.includes(kw) || dataStr.includes(kw));
-}
-
-/**
- * Calculates a scheduled recovery time for 402/quota exhaustion cooldown.
- * Defaults to a 5-minute cooldown with optional jitter.
- * @param {Error|object} error - The error to inspect
- * @param {object} config - Server config
- * @param {number} now - Current timestamp
- * @returns {Date|null}
- */
-export function getQuotaCooldownRecoveryTime(error, config = {}, now = Date.now()) {
-    if (!isQuotaExhaustedError(error)) {
-        return null;
-    }
-    const defaultCooldownMs = getPositiveInteger(config.QUOTA_COOLDOWN_MS, 300000); // 5 minutes
-    const jitterMs = getPositiveInteger(config.QUOTA_COOLDOWN_JITTER_MS, 30000);
-    const jitter = jitterMs > 0 ? Math.floor(Math.random() * (jitterMs + 1)) : 0;
-    return new Date(now + defaultCooldownMs + jitter);
-}
-
-/**
- * Calculates retry delay with exponential backoff and jitter.
- * Avoids excessively short (< 500ms) or excessively long/random delays.
- * @param {number} currentRetry - Current retry index (0-based)
- * @param {number} baseDelay - Base delay in ms (default: 1000)
- * @param {number} maxDelay - Maximum delay in ms (default: 8000)
- * @returns {number} Delay in milliseconds
- */
-export function calculateRetryDelay(currentRetry = 0, baseDelay = 1000, maxDelay = 8000) {
-    const expDelay = Math.min(maxDelay, baseDelay * Math.pow(1.5, currentRetry));
-    const jitter = Math.floor(Math.random() * Math.min(expDelay * 0.4, 1000));
-    return Math.max(500, Math.floor(expDelay + jitter));
 }
 
 // ==================== API 常量 ====================
@@ -450,234 +79,6 @@ export const API_ACTIONS = {
     STREAM_GENERATE_CONTENT: 'streamGenerateContent',
 };
 export const DEFAULT_REQUEST_BODY_MAX_BYTES = 10 * 1024 * 1024;
-
-import {
-    usesManagedModelList,
-    getConfiguredSupportedModels,
-    getCustomModelConfig,
-    getCustomModelActualProvider,
-    getCustomModelListProvider,
-    normalizeModelIds
-} from '../providers/provider-models.js';
-
-/**
- * 获取指定提供商类型下，所有节点配置的已选模型列表（去重聚合）
- * @param {object} providerPoolManager - 提供商池管理器
- * @param {string} providerType - 提供商类型
- * @returns {string[]} 聚合后的模型 ID 列表
- */
-function getConfiguredSupportedModelsFromPool(providerPoolManager, providerType) {
-    if (!providerPoolManager?.providerStatus?.[providerType]) {
-        return [];
-    }
-
-    return [...new Set(
-        providerPoolManager.providerStatus[providerType]
-            .flatMap(providerStatus => getConfiguredSupportedModels(providerType, providerStatus.config))
-    )].sort((a, b) => a.localeCompare(b));
-}
-
-function getCustomModelEntriesForProvider(config, providerType = null, options = {}) {
-    const customModels = Array.isArray(config?.customModels) ? config.customModels : [];
-    const entries = [];
-
-    customModels.forEach(modelConfig => {
-        if (!modelConfig?.id) {
-            return;
-        }
-
-        const modelProvider = getCustomModelListProvider(modelConfig);
-        const actualProvider = getCustomModelActualProvider(modelConfig);
-        const isMatch = !providerType ||
-            modelProvider === providerType ||
-            (modelProvider && providerType.startsWith(modelProvider + '-'));
-
-        if (!isMatch) {
-            return;
-        }
-
-        const modelId = modelConfig.id;
-        if (!modelId) {
-            return;
-        }
-
-        const responseId = options.prefixProvider && modelProvider
-            ? `${modelProvider}:${modelId}`
-            : modelId;
-
-        entries.push({
-            id: responseId,
-            modelId,
-            provider: modelProvider || providerType || MODEL_PROVIDER.AUTO,
-            actualProvider: actualProvider || modelProvider || providerType || MODEL_PROVIDER.AUTO,
-            config: modelConfig
-        });
-    });
-
-    return entries;
-}
-
-export function resolveCustomModelRouting(model, currentProvider, customModelConfig = getCustomModelConfig(model, currentProvider)) {
-    if (!customModelConfig) {
-        return {
-            isCustomModel: false,
-            model,
-            provider: currentProvider,
-            actualModel: model,
-            actualProvider: currentProvider,
-            config: null
-        };
-    }
-
-    const customActualProvider = getCustomModelActualProvider(customModelConfig);
-    const customActualModel = customModelConfig.actualModel || customModelConfig.id || model;
-
-    return {
-        isCustomModel: true,
-        model: customActualModel,
-        provider: customActualProvider || currentProvider,
-        actualModel: customActualModel,
-        actualProvider: customActualProvider || currentProvider,
-        config: customModelConfig
-    };
-}
-
-function appendCustomModelsToModelList(clientModelList, customEntries, providerType, listEndpointType) {
-    const entries = Array.isArray(customEntries) ? customEntries : [];
-    const hasMetadataValue = (value) => value !== undefined && value !== null;
-
-    if (!entries.length) {
-        return clientModelList;
-    }
-
-    if (listEndpointType === ENDPOINT_TYPE.GEMINI_MODEL_LIST) {
-        const models = Array.isArray(clientModelList?.models) ? clientModelList.models : [];
-
-        entries.forEach(entry => {
-            const existingModel = models.find(model => {
-                const existingId = model?.baseModelId || model?.name;
-                if (!existingId) return false;
-                const normalizedId = existingId.startsWith('models/') ? existingId.substring(7) : existingId;
-                return normalizedId === entry.id;
-            });
-            if (existingModel) {
-                existingModel.displayName = entry.config.name || existingModel.displayName || entry.id;
-                existingModel.description = entry.config.description || existingModel.description || `Model ${entry.modelId} provided by ${entry.provider || providerType}`;
-                if (hasMetadataValue(entry.config.contextLength)) existingModel.inputTokenLimit = entry.config.contextLength;
-                if (hasMetadataValue(entry.config.maxTokens)) existingModel.outputTokenLimit = entry.config.maxTokens;
-                return;
-            }
-
-            const modelResponse = {
-                name: `models/${entry.id}`,
-                baseModelId: entry.id,
-                version: 'v1',
-                displayName: entry.config.name || entry.id,
-                description: entry.config.description || `Model ${entry.modelId} provided by ${entry.provider || providerType}`,
-                supportedGenerationMethods: ['generateContent', 'countTokens']
-            };
-
-            if (hasMetadataValue(entry.config.contextLength)) modelResponse.inputTokenLimit = entry.config.contextLength;
-            if (hasMetadataValue(entry.config.maxTokens)) modelResponse.outputTokenLimit = entry.config.maxTokens;
-
-            models.push(modelResponse);
-        });
-
-        return {
-            ...clientModelList,
-            models
-        };
-    }
-
-    if (listEndpointType === ENDPOINT_TYPE.OPENAI_MODEL_LIST) {
-        const models = Array.isArray(clientModelList?.data) ? clientModelList.data : [];
-
-        entries.forEach(entry => {
-            const existingModel = models.find(model => model?.id === entry.id);
-            if (existingModel) {
-                // 更新现有模型的元数据
-                if (entry.config.name) existingModel.display_name = entry.config.name;
-                if (entry.config.description) existingModel.description = entry.config.description;
-                if (hasMetadataValue(entry.config.contextLength)) existingModel.context_length = entry.config.contextLength;
-                if (hasMetadataValue(entry.config.maxTokens)) existingModel.max_tokens = entry.config.maxTokens;
-                return;
-            }
-
-            // 添加新模型
-            const modelResponse = {
-                id: entry.id,
-                object: 'model',
-                created: Math.floor(Date.now() / 1000),
-                owned_by: entry.provider || providerType || 'custom',
-                display_name: entry.config.name || entry.id
-            };
-
-            if (entry.config.description) modelResponse.description = entry.config.description;
-            if (hasMetadataValue(entry.config.contextLength)) modelResponse.context_length = entry.config.contextLength;
-            if (hasMetadataValue(entry.config.maxTokens)) modelResponse.max_tokens = entry.config.maxTokens;
-
-            models.push(modelResponse);
-        });
-
-        return {
-            ...clientModelList,
-            object: 'list',
-            data: models
-        };
-    }
-
-    return clientModelList;
-}
-
-/**
- * Extracts the protocol prefix from a given model provider string.
- * This is used to determine if two providers belong to the same underlying protocol (e.g., gemini, openai, claude).
- * @param {string} provider - The model provider string (e.g., 'gemini-cli', 'openai-custom').
- * @returns {string} The protocol prefix (e.g., 'gemini', 'openai', 'claude').
- */
-export function getProtocolPrefix(provider) {
-    // Special case for Codex - it needs its own protocol
-    if (provider === 'openai-codex-oauth') {
-        return MODEL_PROTOCOL_PREFIX.CODEX;
-    }
-    // Grok CLI OAuth talks to xAI Responses API directly.
-    if (provider === 'grok-cli-oauth' || provider.startsWith('grok-cli-oauth-')) {
-        return MODEL_PROTOCOL_PREFIX.OPENAI_RESPONSES;
-    }
-    // Special cases for OpenAI-compatible dedicated providers.
-    if (provider === 'atlascloud' || provider.startsWith('atlascloud-') ||
-        provider === 'qiniu' || provider.startsWith('qiniu-') ||
-        provider === 'fenno' || provider.startsWith('fenno-')) {
-        return MODEL_PROTOCOL_PREFIX.OPENAI;
-    }
-    // ChatGPT Web
-    if (provider === 'chatgpt-web' || provider.startsWith('chatgpt-web-')) {
-        return MODEL_PROTOCOL_PREFIX.CHATGPT;
-    }
-    // Gemini Web (talks OpenAI format locally to sidecar)
-    if (provider === 'gemini-web' || provider.startsWith('gemini-web-')) {
-        return MODEL_PROTOCOL_PREFIX.OPENAI;
-    }
-    // Tencent Yuanbao Web (talks OpenAI format locally to runner)
-    if (provider === 'yuanbao-web' || provider.startsWith('yuanbao-web-') || provider === 'yuanbao') {
-        return MODEL_PROTOCOL_PREFIX.OPENAI;
-    }
-
-    const hyphenIndex = provider.indexOf('-');
-    if (hyphenIndex !== -1) {
-        return provider.substring(0, hyphenIndex);
-    }
-    return provider; // Return original if no hyphen is found
-}
-
-export const ENDPOINT_TYPE = {
-    OPENAI_CHAT: 'openai_chat',
-    OPENAI_RESPONSES: 'openai_responses',
-    GEMINI_CONTENT: 'gemini_content',
-    CLAUDE_MESSAGE: 'claude_message',
-    OPENAI_MODEL_LIST: 'openai_model_list',
-    GEMINI_MODEL_LIST: 'gemini_model_list',
-};
 
 export const FETCH_SYSTEM_PROMPT_FILE = path.join(process.cwd(), 'configs', 'fetch_system_prompt.txt');
 export const INPUT_SYSTEM_PROMPT_FILE = path.join(process.cwd(), 'configs', 'input_system_prompt.txt');
@@ -904,6 +305,15 @@ export async function logConversation(type, content, logMode, logFilename) {
  * @param {string} REQUIRED_API_KEY - The API key required for authorization.
  * @returns {boolean} True if authorized, false otherwise.
  */
+function timingSafeEqualString(candidate, expected) {
+    if (typeof candidate !== 'string' || typeof expected !== 'string' || expected.length === 0) {
+        return false;
+    }
+    const hashA = crypto.createHash('sha256').update(candidate, 'utf8').digest();
+    const hashB = crypto.createHash('sha256').update(expected, 'utf8').digest();
+    return crypto.timingSafeEqual(hashA, hashB) && candidate.length === expected.length;
+}
+
 export function isAuthorized(req, requestUrl, REQUIRED_API_KEY) {
     const authHeader = req.headers['authorization'];
     const queryKey = requestUrl.searchParams.get('key');
@@ -913,27 +323,27 @@ export function isAuthorized(req, requestUrl, REQUIRED_API_KEY) {
     // Check for Bearer token in Authorization header (OpenAI style)
     if (authHeader && authHeader.startsWith('Bearer ')) {
         const token = authHeader.substring(7);
-        if (token === REQUIRED_API_KEY) {
+        if (timingSafeEqualString(token, REQUIRED_API_KEY)) {
             return true;
         }
     }
 
     // Check for API key in URL query parameter (Gemini style)
-    if (queryKey === REQUIRED_API_KEY) {
+    if (timingSafeEqualString(queryKey, REQUIRED_API_KEY)) {
         return true;
     }
 
     // Check for API key in x-goog-api-key header (Gemini style)
-    if (googApiKey === REQUIRED_API_KEY) {
+    if (timingSafeEqualString(googApiKey, REQUIRED_API_KEY)) {
         return true;
     }
 
     // Check for API key in x-api-key header (Claude style)
-    if (claudeApiKey === REQUIRED_API_KEY) {
+    if (timingSafeEqualString(claudeApiKey, REQUIRED_API_KEY)) {
         return true;
     }
 
-    logger.info(`[Auth] Unauthorized request denied. Bearer: "${authHeader ? 'present' : 'N/A'}", Query Key: "${queryKey}", x-goog-api-key: "${googApiKey}", x-api-key: "${claudeApiKey}"`);
+    logger.info(`[Auth] Unauthorized request denied. Bearer: "${authHeader ? 'present' : 'N/A'}", Query Key: "${queryKey ? 'present' : 'N/A'}", x-goog-api-key: "${googApiKey ? 'present' : 'N/A'}", x-api-key: "${claudeApiKey ? 'present' : 'N/A'}"`);
     return false;
 }
 
@@ -961,21 +371,6 @@ export async function handleUnifiedResponse(res, responsePayload, isStream, stat
 
 function getPluginHookRequestId(config) {
     return config?._monitorRequestId || null;
-}
-
-/**
- * 创建一个通用的「上游空响应」错误（HTTP 200 但内容完全为空：无文本、无工具调用、无思考内容）。
- * 任何 provider 的 *-core.js 检测到这种情况时都可以抛出这个错误，以复用下面的空响应重试分支。
- * 标记为可切换凭证重试，且不计入凭证错误次数（这通常不是凭证本身的问题，可能是上游偶发静默无输出）。
- *
- * @param {string} providerLabel - 用于日志/错误信息的标签，如 'Kiro'、'Qwen' 等
- */
-export function createEmptyUpstreamResponseError(providerLabel = 'Upstream') {
-    const error = new Error(`[${providerLabel}] Upstream returned an empty response (no text, tool call, or thinking content).`);
-    error.isEmptyUpstreamResponse = true;
-    error.shouldSwitchCredential = true;
-    error.skipErrorCount = true;
-    return error;
 }
 
 /**
@@ -1073,20 +468,44 @@ export async function handleStreamRequest(res, service, model, requestBody, from
     // 导致外层和内层重复对同一个 res 做收尾（重复 res.end()），从而抛出 "write after end"。
     const isRetry = currentRetry > 0 || (retryContext?.emptyResponseRetry ?? 0) > 0;
     
-    // 使用共享的 clientDisconnected 状态（如果是重试，继承上层的状态）
+    // 使用共享的 clientDisconnected 与 AbortController 状态（如果是重试，继承上层的状态）
     let clientDisconnected = retryContext?.clientDisconnected || { value: false };
+    let streamAbortController = retryContext?.streamAbortController || null;
     if (!isRetry) {
         clientDisconnected = { value: false }; // 使用对象引用，便于在递归中共享状态
+        streamAbortController = new AbortController();
+        const outerAbortSignal = requestContext.get('upstreamAbortSignal');
+        if (outerAbortSignal) {
+            if (outerAbortSignal.aborted) {
+                clientDisconnected.value = true;
+                streamAbortController.abort(outerAbortSignal.reason);
+            } else {
+                outerAbortSignal.addEventListener('abort', () => {
+                    clientDisconnected.value = true;
+                    if (!streamAbortController.signal.aborted) {
+                        streamAbortController.abort(outerAbortSignal.reason);
+                    }
+                }, { once: true });
+            }
+        }
     }
 
-    // 监听客户端断开连接事件（命名函数，便于移除）
+    // 监听客户端断开连接事件（命名函数，便于移除），立即触发底层 fetch/WS 中止
     const onClientClose = () => {
-        clientDisconnected.value = true;
-        logger.info('[Stream] Client disconnected, stopping stream processing');
+        if (!res.writableEnded) {
+            clientDisconnected.value = true;
+            if (streamAbortController && !streamAbortController.signal.aborted) {
+                streamAbortController.abort(new Error('Client disconnected during stream'));
+            }
+            logger.info('[Stream] Client disconnected, aborting upstream stream processing');
+        }
     };
     
     const onClientError = (err) => {
         clientDisconnected.value = true;
+        if (streamAbortController && !streamAbortController.signal.aborted) {
+            streamAbortController.abort(err);
+        }
         logger.error('[Stream] Response stream error:', err.message);
     };
     
@@ -1105,24 +524,30 @@ export async function handleStreamRequest(res, service, model, requestBody, from
     let streamHookChain = Promise.resolve();
     let hasToolCall = false;
     let hasMessageStop = false; // 跟踪是否已经发送过结束标志（message_stop / done）
+    let streamFailed = false;
+    let streamRequestId;
 
     try {
-        // fs.writeFile('request'+Date.now()+'.json', JSON.stringify(requestBody));
-        // The service returns a stream in its native format (toProvider).
         const needsConversion = getProtocolPrefix(fromProvider) !== getProtocolPrefix(toProvider);
         requestBody.model = model;
-        const nativeStream = await service.generateContentStream(model, requestBody);
-        
-        // 如果提供者内部发生了模型回退（如 Antigravity 自动降级），同步更新本地 model 变量
-        // 这确保了后续的监控钩子和统计插件记录的是实际使用的模型
-        if (requestBody.model && requestBody.model !== model) {
-            model = requestBody.model;
-        }
+        const streamStore = {
+            ...requestContext.getStore(),
+            ...(streamAbortController ? { upstreamAbortSignal: streamAbortController.signal } : {})
+        };
         const addEvent = getProtocolPrefix(fromProvider) === MODEL_PROTOCOL_PREFIX.CLAUDE || getProtocolPrefix(fromProvider) === MODEL_PROTOCOL_PREFIX.OPENAI_RESPONSES;
         // 为每个请求生成唯一 ID，用于在单例 converter 中隔离并发流状态
-        const streamRequestId = `req_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+        streamRequestId = `req_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
 
-        for await (const nativeChunk of nativeStream) {
+        await requestContext.run(streamStore, async () => {
+            const nativeStream = await service.generateContentStream(model, requestBody);
+
+            // 如果提供者内部发生了模型回退（如 Antigravity 自动降级），同步更新本地 model 变量
+            // 这确保了后续的监控钩子和统计插件记录的是实际使用的模型
+            if (requestBody.model && requestBody.model !== model) {
+                model = requestBody.model;
+            }
+
+            for await (const nativeChunk of nativeStream) {
             // 检查客户端是否已断开连接
             if (clientDisconnected.value) {
                 logger.info('[Stream] Stopping iteration due to client disconnect');
@@ -1227,7 +652,7 @@ export async function handleStreamRequest(res, service, model, requestBody, from
                     hasMessageStop = true;
                 }
 
-                // event 行与 data 行合并为一次写入，减少 write 调用与小包
+            // event 行与 data 行合并为一次写入，减少 write 调用与小包
                 const ssePayload = addEvent
                     ? `event: ${chunk.type}\ndata: ${JSON.stringify(chunk)}\n\n`
                     : `data: ${JSON.stringify(chunk)}\n\n`;
@@ -1240,7 +665,8 @@ export async function handleStreamRequest(res, service, model, requestBody, from
                 }
                 // logger.info(`data: ${JSON.stringify(chunk)}\n`);
             }
-        }
+            }
+        });
 
         // 上游流正常结束但一个字节都没发给客户端：这是「静默空响应」，不能算成功。
         // 直接抛出通用空响应错误，交给下面的 isEmptyUpstreamResponse 分支做小额重试；
@@ -1260,14 +686,15 @@ export async function handleStreamRequest(res, service, model, requestBody, from
         }
 
     }  catch (error) {
-        logger.error('\n[Server] Error during stream processing:', error.stack);
-        
-        // 如果客户端已断开，不需要发送错误响应
-        if (clientDisconnected.value) {
-            logger.info('[Stream] Skipping error response due to client disconnect');
+        streamFailed = true;
+        // 如果客户端已主动断开（或触发了客户端中止信号），不惩罚账号、不重试、不写错误响应
+        if (clientDisconnected.value || error?.isClientAbort || streamAbortController?.signal?.aborted) {
+            clientDisconnected.value = true;
+            logger.info('[Stream] Skipping provider penalty and error response due to client disconnect');
             responseClosed = true;
             return;
         }
+        logger.error('\n[Server] Error during stream processing:', error.stack);
         
         // 如果已经发送了数据（包括 metadata），不进行重试（避免响应数据损坏或顺序错误）
         if (anyDataSent) {
@@ -1303,6 +730,7 @@ export async function handleStreamRequest(res, service, model, requestBody, from
                     maxRetries,
                     emptyResponseRetry,
                     clientDisconnected,
+                    streamAbortController,
                     anyDataSent
                 };
 
@@ -1427,6 +855,7 @@ export async function handleStreamRequest(res, service, model, requestBody, from
                         maxRetries,
                         excludeUuids: currentExcludeUuids,
                         clientDisconnected,  // 传递断开状态
+                        streamAbortController,
                         anyDataSent          // 传递数据发送状态
                     };
                     
@@ -1518,12 +947,30 @@ export async function handleStreamRequest(res, service, model, requestBody, from
             }
         }
         
-        // 确保所有流式钩子已执行完毕
+        // 确保所有流式钩子已执行完毕，并在最外层通知插件流生命周期结束（消除盲猜定时器与残留缓存）
         await streamHookChain;
+        if (!isRetry) {
+            const hookRequestId = getPluginHookRequestId(CONFIG);
+            if (hookRequestId) {
+                try {
+                    const pluginManager = getPluginManager();
+                    if (pluginManager) {
+                        await pluginManager.executeHook('onStreamEnd', {
+                            requestId: hookRequestId,
+                            fromProvider,
+                            toProvider,
+                            model,
+                            completed: !streamFailed && !clientDisconnected.value,
+                            aborted: clientDisconnected.value
+                        });
+                    }
+                } catch (_) {}
+            }
+        }
 
         // 及时释放流式状态，防止异常断连导致内存残留
         try {
-            const { streamStateManager } = await import('../providers/openai/openai-responses-core.mjs');
+            const { streamStateManager } = await import('../providers/openai/responses-stream-state.js');
             if (typeof streamRequestId !== 'undefined') {
                 streamStateManager.cleanup(streamRequestId);
             }
@@ -1651,6 +1098,10 @@ export async function handleUnaryRequest(res, service, model, requestBody, fromP
             });
         }
     } catch (error) {
+        if (error?.isClientAbort || requestContext.get('upstreamAbortSignal')?.aborted) {
+            logger.info('[Unary] Client disconnected prematurely, skipping provider penalty and retry');
+            return;
+        }
         logger.error('\n[Server] Error during unary processing:', error.stack);
 
         // 上游空响应（无文本/工具调用/思考内容）：使用独立的小额重试预算，
@@ -1820,194 +1271,6 @@ export async function handleUnaryRequest(res, service, model, requestBody, fromP
         }
     }
 }
-
-/**
- * Handles requests for listing available models. It fetches models from the
- * service, transforms them to the format expected by the client (OpenAI, Claude, etc.),
- * and sends the JSON response.
- * @param {http.IncomingMessage} req The HTTP request object.
- * @param {http.ServerResponse} res The HTTP response object.
- * @param {Object} service - The API service instance.
- * @param {string} endpointType The type of endpoint being called (e.g., OPENAI_MODEL_LIST).
- * @param {Object} CONFIG - The server configuration object.
- * @param {Object} providerPoolManager - The provider pool manager instance.
- * @param {string} pooluuid - The selected provider UUID.
- */
-export async function handleModelListRequest(req, res, service, endpointType, CONFIG, providerPoolManager, pooluuid) {
-    const clientProviderMap = {
-        [ENDPOINT_TYPE.OPENAI_MODEL_LIST]: MODEL_PROTOCOL_PREFIX.OPENAI,
-        [ENDPOINT_TYPE.GEMINI_MODEL_LIST]: MODEL_PROTOCOL_PREFIX.GEMINI,
-    };
-
-    const fromProvider = clientProviderMap[endpointType];
-
-    try {        
-        if (!fromProvider) {
-            throw new Error(`Unsupported endpoint type for model list: ${endpointType}`);
-        }
-
-        let clientModelList;
-
-        const buildConfiguredModelListResponse = (models, providerType, listEndpointType) => {
-            if (listEndpointType === ENDPOINT_TYPE.OPENAI_MODEL_LIST) {
-                return {
-                    object: 'list',
-                    data: models.map(modelId => {
-                        const customConfig = getCustomModelConfig(modelId, providerType);
-                        const modelResponse = {
-                            id: modelId,
-                            object: 'model',
-                            created: Math.floor(Date.now() / 1000),
-                            owned_by: providerType
-                        };
-                        
-                        // 注入自定义元数据
-                        if (customConfig) {
-                            if (customConfig.contextLength) modelResponse.context_length = customConfig.contextLength;
-                            if (customConfig.maxTokens) modelResponse.max_tokens = customConfig.maxTokens;
-                            if (customConfig.description) modelResponse.description = customConfig.description;
-                        }
-                        
-                        return modelResponse;
-                    })
-                };
-            }
-
-            if (listEndpointType === ENDPOINT_TYPE.GEMINI_MODEL_LIST) {
-                return {
-                    models: models.map(modelId => {
-                        const customConfig = getCustomModelConfig(modelId, providerType);
-                        const modelResponse = {
-                            name: `models/${modelId}`,
-                            baseModelId: modelId,
-                            version: 'v1',
-                            displayName: modelId,
-                            description: `Model ${modelId} provided by ${providerType}`,
-                            supportedGenerationMethods: ['generateContent', 'countTokens']
-                        };
-                        
-                        if (customConfig) {
-                            if (customConfig.contextLength) modelResponse.inputTokenLimit = customConfig.contextLength;
-                            if (customConfig.maxTokens) modelResponse.outputTokenLimit = customConfig.maxTokens;
-                            if (customConfig.description) modelResponse.description = customConfig.description;
-                        }
-                        
-                        return modelResponse;
-                    })
-                };
-            }
-
-            return { data: [] };
-        };
-
-        // --- 核心逻辑: auto 路由模式下的模型聚合 ---
-        if (CONFIG.MODEL_PROVIDER === MODEL_PROVIDER.AUTO && providerPoolManager) {
-            logger.info(`[ModelList] Aggregating models for 'auto' mode...`);
-            clientModelList = await providerPoolManager.getAllAvailableModels(endpointType);
-        } else {
-            // --- 单提供商逻辑 ---
-            const toProvider = CONFIG.MODEL_PROVIDER;
-            const pooledSupportedModels = getConfiguredSupportedModelsFromPool(providerPoolManager, toProvider);
-            const configuredSupportedModels = pooledSupportedModels.length > 0
-                ? pooledSupportedModels
-                : getConfiguredSupportedModels(toProvider, CONFIG);
-
-            if (usesManagedModelList(toProvider) && configuredSupportedModels.length > 0) {
-                logger.info(`[ModelList] Returning configured supported models for ${toProvider}: ${configuredSupportedModels.join(', ')}`);
-                clientModelList = buildConfiguredModelListResponse(configuredSupportedModels, toProvider, endpointType);
-            } else {
-
-            // service 可能未在上层预先注入（例如仅改了路径 provider 前缀），这里兜底获取
-            let resolvedService = service;
-            if (!resolvedService) {
-                const { getApiService } = await import('../services/service-manager.js');
-                resolvedService = await getApiService(CONFIG, null, { skipUsageCount: true });
-            }
-
-            if (!resolvedService || typeof resolvedService.listModels !== 'function') {
-                throw new Error(`[ModelList] Service adapter is unavailable or does not implement listModels() for provider: ${toProvider}`);
-            }
-
-            // 1. Get the model list in the backend's native format.
-            const nativeModelList = await resolvedService.listModels();
-
-            // 2. Convert the model list to the client's expected format, if necessary.
-            clientModelList = nativeModelList;
-            if (!getProtocolPrefix(toProvider).includes(getProtocolPrefix(fromProvider))) {
-                logger.info(`[ModelList Convert] Converting model list from ${toProvider} to ${fromProvider}`);
-                clientModelList = convertData(nativeModelList, 'modelList', toProvider, fromProvider);
-            } else {
-                logger.info(`[ModelList Convert] Model list format matches. No conversion needed.`);
-            }
-            }
-
-            const customEntries = getCustomModelEntriesForProvider(CONFIG, toProvider);
-            clientModelList = appendCustomModelsToModelList(clientModelList, customEntries, toProvider, endpointType);
-        }
-
-        if (CONFIG.MODEL_PROVIDER === MODEL_PROVIDER.AUTO) {
-            const customEntries = getCustomModelEntriesForProvider(CONFIG, null, { prefixProvider: true });
-            clientModelList = appendCustomModelsToModelList(clientModelList, customEntries, MODEL_PROVIDER.AUTO, endpointType);
-        }
-
-        // logger.info(`[ModelList Response] Sending model list to client: ${JSON.stringify(clientModelList)}`);
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify(clientModelList));
-    } catch (error) {
-        logger.error('\n[Server] Error during model list processing:', error.stack);
-        // if (providerPoolManager && pooluuid && CONFIG.MODEL_PROVIDER !== MODEL_PROVIDER.AUTO) {
-        //     // 如果是号池模式（且非 auto 模式），并且请求处理失败，则标记当前使用的提供者为不健康
-        //     providerPoolManager.markProviderUnhealthy(CONFIG.MODEL_PROVIDER, {
-        //         uuid: pooluuid
-        //     }, error.message);
-        // }
-        handleError(res, error, CONFIG.MODEL_PROVIDER, fromProvider);
-    }
-}
-
-/**
- * Handles single model lookup requests (e.g., GET /v1/models/:model or /api/v1/models/:model).
- * Returns OpenAI-compatible model detail object with context_length.
- * @param {http.IncomingMessage} req The HTTP request object.
- * @param {http.ServerResponse} res The HTTP response object.
- * @param {string} path The request path.
- * @param {Object} CONFIG The server configuration object.
- * @param {Object} [providerPoolManager] The provider pool manager instance.
- */
-export async function handleModelDetailRequest(req, res, path, CONFIG, providerPoolManager) {
-    try {
-        const modelId = path.replace(/^\/(?:api\/)?v1\/models\//, '');
-        const provider = CONFIG?.MODEL_PROVIDER || MODEL_PROVIDER.GEMINI_ANTIGRAVITY;
-        const ctx = getEstimatedModelContextLength(modelId, provider);
-        const customConfig = getCustomModelConfig(modelId, provider);
-
-        const modelResponse = {
-            id: modelId,
-            object: 'model',
-            created: Math.floor(Date.now() / 1000),
-            owned_by: provider || 'system',
-            context_length: ctx,
-            max_input_tokens: ctx,
-            max_tokens: 65536
-        };
-
-        if (customConfig) {
-            if (customConfig.contextLength) {
-                modelResponse.context_length = customConfig.contextLength;
-                modelResponse.max_input_tokens = customConfig.contextLength;
-            }
-            if (customConfig.maxTokens) modelResponse.max_tokens = customConfig.maxTokens;
-            if (customConfig.description) modelResponse.description = customConfig.description;
-        }
-
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify(modelResponse));
-    } catch (error) {
-        logger.error('[Server] Error during model detail processing:', error.stack);
-        handleError(res, error, CONFIG?.MODEL_PROVIDER, MODEL_PROTOCOL_PREFIX.OPENAI);
-    }
-}
-
 
 /**
  * Handles requests for content generation (both unary and streaming). This function
@@ -2288,250 +1551,6 @@ function _applyCustomModelParameters(requestBody, customConfig, provider) {
     // }
 }
 
-export function handleError(res, error, provider = null, fromProvider = null, req = null) {
-    const rawStatusCode = error.response?.status || error.statusCode || error.status || error.code || 500;
-    const statusCode = ensureValidStatusCode(rawStatusCode);
-    
-    // 如果没有提供 fromProvider 但提供了 req，尝试从路径推断
-    if (!fromProvider && req && req.url) {
-        if (req.url.includes('/v1/messages')) fromProvider = MODEL_PROTOCOL_PREFIX.CLAUDE;
-        else if (req.url.includes('/v1/chat/completions')) fromProvider = MODEL_PROTOCOL_PREFIX.OPENAI;
-        else if (req.url.includes('/v1beta/models')) fromProvider = MODEL_PROTOCOL_PREFIX.GEMINI;
-    }
-
-    // 如果指定了客户端协议，则使用 createErrorResponse 创建符合该协议的错误响应
-    if (fromProvider) {
-        if (res.writableEnded || res.destroyed || res.finished) {
-            logger.warn('[Server] Response already ended or destroyed, skipping protocol error response');
-            return;
-        }
-        const errorResponse = createErrorResponse(error, fromProvider);
-        if (!res.headersSent) {
-            res.writeHead(statusCode, { 'Content-Type': 'application/json' });
-        }
-        try {
-            res.end(JSON.stringify(errorResponse));
-        } catch (e) {}
-        return;
-    }
-
-    const hasOriginalMessage = error.message && error.message.trim() !== '';
-    let errorMessage = error.message;
-    let suggestions = [];
-
-    // 根据提供商获取适配的错误信息和建议
-    const providerSuggestions = _getProviderSpecificSuggestions(statusCode, provider);
-    
-    // Provide detailed information and suggestions for different error types
-    switch (statusCode) {
-        case 401:
-            errorMessage = 'Authentication failed. Please check your credentials.';
-            suggestions = providerSuggestions.auth;
-            break;
-        case 403:
-            errorMessage = 'Access forbidden. Insufficient permissions.';
-            suggestions = providerSuggestions.permission;
-            break;
-        case 429:
-            errorMessage = 'Too many requests. Rate limit exceeded.';
-            suggestions = providerSuggestions.rateLimit;
-            break;
-        case 500:
-        case 502:
-        case 503:
-        case 504:
-            errorMessage = 'Server error occurred. This is usually temporary.';
-            suggestions = providerSuggestions.serverError;
-            break;
-        default:
-            if (statusCode >= 400 && statusCode < 500) {
-                errorMessage = `Client error (${statusCode}): ${error.message}`;
-                suggestions = providerSuggestions.clientError;
-            } else if (statusCode >= 500) {
-                errorMessage = `Server error (${statusCode}): ${error.message}`;
-                suggestions = providerSuggestions.serverError;
-            }
-    }
-
-    errorMessage = hasOriginalMessage ? error.message.trim() : errorMessage;
-    if (statusCode >= 400 && statusCode < 500) {
-        const hint = suggestions.length > 0 ? ` (Hint: ${suggestions[0]})` : '';
-        logger.warn(`[Server] Request failed (${statusCode}): ${errorMessage}${hint}`);
-        if (error.stack) {
-            logger.debug('[Server] Full error details:', error.stack);
-        }
-    } else {
-        const suggestionsSummary = suggestions.length > 0 ? ` | Suggestions: ${suggestions.join('; ')}` : '';
-        logger.error(`\n[Server] Request failed (${statusCode}): ${errorMessage}${suggestionsSummary}`);
-        if (error.stack) {
-            logger.error('[Server] Full error details:', error.stack);
-        }
-    }
-
-    // 检查响应流是否已关闭或结束
-    if (res.writableEnded || res.destroyed || res.finished) {
-        logger.warn('[Server] Response already ended or destroyed, skipping error response');
-        return;
-    }
-
-    if (!res.headersSent) {
-        res.writeHead(statusCode, { 'Content-Type': 'application/json' });
-    }
-
-    let safeDetails = error.response?.data;
-    if (safeDetails && (typeof safeDetails.on === 'function' || typeof safeDetails.read === 'function' || Buffer.isBuffer(safeDetails))) {
-        safeDetails = '[Stream response]';
-    }
-
-    const errorPayload = {
-        error: {
-            message: errorMessage,
-            code: statusCode,
-            suggestions: suggestions,
-            details: safeDetails
-        }
-    };
-    
-    try {
-        res.end(JSON.stringify(errorPayload));
-    } catch (writeError) {
-        logger.error('[Server] Failed to write error response:', writeError.message);
-    }
-}
-
-/**
- * 根据提供商类型获取适配的错误建议
- * @param {number} statusCode - HTTP 状态码
- * @param {string|null} provider - 提供商类型
- * @returns {Object} 包含各类错误建议的对象
- */
-function _getProviderSpecificSuggestions(statusCode, provider) {
-    const protocolPrefix = provider ? getProtocolPrefix(provider) : null;
-    
-    // 默认/通用建议
-    const defaultSuggestions = {
-        auth: [
-            'Verify your API key or credentials are valid',
-            'Check if your credentials have expired',
-            'Ensure the API key has the necessary permissions'
-        ],
-        permission: [
-            'Check if your account has the necessary permissions',
-            'Verify the API endpoint is accessible with your credentials',
-            'Contact your administrator if permissions are restricted'
-        ],
-        rateLimit: [
-            'The request has been automatically retried with exponential backoff',
-            'If the issue persists, try reducing the request frequency',
-            'Consider upgrading your API quota if available'
-        ],
-        serverError: [
-            'The request has been automatically retried',
-            'If the issue persists, try again in a few minutes',
-            'Check the service status page for outages'
-        ],
-        clientError: [
-            'Check your request format and parameters',
-            'Verify the model name is correct',
-            'Ensure all required fields are provided'
-        ]
-    };
-    
-    // 根据提供商返回特定建议
-    switch (protocolPrefix) {
-        case MODEL_PROTOCOL_PREFIX.GEMINI:
-            return {
-                auth: [
-                    'Verify your OAuth credentials are valid',
-                    'Try re-authenticating by deleting the credentials file',
-                    'Check if your Google Cloud project has the necessary permissions'
-                ],
-                permission: [
-                    'Ensure your Google Cloud project has the Gemini API enabled',
-                    'Check if your account has the necessary permissions',
-                    'Verify the project ID is correct'
-                ],
-                rateLimit: [
-                    'The request has been automatically retried with exponential backoff',
-                    'If the issue persists, try reducing the request frequency',
-                    'Consider upgrading your Google Cloud API quota'
-                ],
-                serverError: [
-                    'The request has been automatically retried',
-                    'If the issue persists, try again in a few minutes',
-                    'Check Google Cloud status page for service outages'
-                ],
-                clientError: [
-                    'Check your request format and parameters',
-                    'Verify the model name is a valid Gemini model',
-                    'Ensure all required fields are provided'
-                ]
-            };
-            
-        case MODEL_PROTOCOL_PREFIX.OPENAI:
-        case MODEL_PROTOCOL_PREFIX.OPENAI_RESPONSES:
-            return {
-                auth: [
-                    'Verify your OpenAI API key is valid',
-                    'Check if your API key has expired or been revoked',
-                    'Ensure the API key is correctly formatted (starts with sk-)'
-                ],
-                permission: [
-                    'Check if your OpenAI account has access to the requested model',
-                    'Verify your organization settings allow this operation',
-                    'Ensure you have sufficient credits in your account'
-                ],
-                rateLimit: [
-                    'The request has been automatically retried with exponential backoff',
-                    'If the issue persists, try reducing the request frequency',
-                    'Consider upgrading your OpenAI usage tier for higher limits'
-                ],
-                serverError: [
-                    'The request has been automatically retried',
-                    'If the issue persists, try again in a few minutes',
-                    'Check OpenAI status page (status.openai.com) for outages'
-                ],
-                clientError: [
-                    'Check your request format and parameters',
-                    'Verify the model name is a valid OpenAI model',
-                    'Ensure the message format is correct (role and content fields)'
-                ]
-            };
-            
-        case MODEL_PROTOCOL_PREFIX.CLAUDE:
-            return {
-                auth: [
-                    'Verify your Anthropic API key is valid',
-                    'Check if your API key has expired or been revoked',
-                    'Ensure the x-api-key header is correctly set'
-                ],
-                permission: [
-                    'Check if your Anthropic account has access to the requested model',
-                    'Verify your account is in good standing',
-                    'Ensure you have sufficient credits in your account'
-                ],
-                rateLimit: [
-                    'The request has been automatically retried with exponential backoff',
-                    'If the issue persists, try reducing the request frequency',
-                    'Consider upgrading your Anthropic usage tier for higher limits'
-                ],
-                serverError: [
-                    'The request has been automatically retried',
-                    'If the issue persists, try again in a few minutes',
-                    'Check Anthropic status page for service outages'
-                ],
-                clientError: [
-                    'Check your request format and parameters',
-                    'Verify the model name is a valid Claude model',
-                    'Ensure the message format follows Anthropic API specifications'
-                ]
-            };
-            
-        default:
-            return defaultSuggestions;
-    }
-}
-
 /**
  * 从请求体中提取系统提示词。
  * @param {Object} requestBody - 请求体对象。
@@ -2666,186 +1685,5 @@ export function formatToLocal(dateInput) {
         }).replace(/\//g, '-');
     } catch (e) {
         return '--';
-    }
-}
-
-
-/**
- * 创建符合 fromProvider 格式的错误响应（非流式）
- * @param {Error} error - 错误对象
- * @param {string} fromProvider - 客户端期望的提供商格式
- * @returns {Object} 格式化的错误响应对象
- */
-function createErrorResponse(error, fromProvider) {
-    const protocolPrefix = getProtocolPrefix(fromProvider);
-    const rawStatusCode = error.status || error.code || 500;
-    const statusCode = ensureValidStatusCode(rawStatusCode);
-    const errorMessage = error.message || "An error occurred during processing.";
-    
-    // 根据 HTTP 状态码映射错误类型
-    const getErrorType = (code) => {
-        if (code === 401) return 'authentication_error';
-        if (code === 403) return 'permission_error';
-        if (code === 429) return 'rate_limit_error';
-        if (code >= 500) return 'server_error';
-        return 'invalid_request_error';
-    };
-    
-    // 根据 HTTP 状态码映射 Gemini 的 status
-    const getGeminiStatus = (code) => {
-        if (code === 400) return 'INVALID_ARGUMENT';
-        if (code === 401) return 'UNAUTHENTICATED';
-        if (code === 403) return 'PERMISSION_DENIED';
-        if (code === 404) return 'NOT_FOUND';
-        if (code === 429) return 'RESOURCE_EXHAUSTED';
-        if (code >= 500) return 'INTERNAL';
-        return 'UNKNOWN';
-    };
-    
-    switch (protocolPrefix) {
-        case MODEL_PROTOCOL_PREFIX.OPENAI:
-            // OpenAI 非流式错误格式
-            return {
-                error: {
-                    message: errorMessage,
-                    type: getErrorType(statusCode),
-                    code: getErrorType(statusCode)  // OpenAI 使用 code 字段作为核心判断
-                }
-            };
-            
-        case MODEL_PROTOCOL_PREFIX.OPENAI_RESPONSES:
-            // OpenAI Responses API 非流式错误格式
-            return {
-                error: {
-                    type: getErrorType(statusCode),
-                    message: errorMessage,
-                    code: getErrorType(statusCode)
-                }
-            };
-            
-        case MODEL_PROTOCOL_PREFIX.CLAUDE:
-            // Claude 非流式错误格式（外层有 type 标记）
-            return {
-                type: "error",  // 核心区分标记
-                error: {
-                    type: getErrorType(statusCode),  // Claude 使用 error.type 作为核心判断
-                    message: errorMessage
-                }
-            };
-            
-        case MODEL_PROTOCOL_PREFIX.GEMINI:
-            // Gemini 非流式错误格式（遵循 Google Cloud 标准）
-            return {
-                error: {
-                    code: statusCode,
-                    message: errorMessage,
-                    status: getGeminiStatus(statusCode)  // Gemini 使用 status 作为核心判断
-                }
-            };
-            
-        default:
-            // 默认使用 OpenAI 格式
-            return {
-                error: {
-                    message: errorMessage,
-                    type: getErrorType(statusCode),
-                    code: getErrorType(statusCode)
-                }
-            };
-    }
-}
-
-/**
- * 创建符合 fromProvider 格式的流式错误响应
- * @param {Error} error - 错误对象
- * @param {string} fromProvider - 客户端期望的提供商格式
- * @returns {string} 格式化的流式错误响应字符串
- */
-function createStreamErrorResponse(error, fromProvider) {
-    const protocolPrefix = getProtocolPrefix(fromProvider);
-    const rawStatusCode = error.status || error.code || 500;
-    const statusCode = ensureValidStatusCode(rawStatusCode);
-    const errorMessage = error.message || "An error occurred during streaming.";
-    
-    // 根据 HTTP 状态码映射错误类型
-    const getErrorType = (code) => {
-        if (code === 401) return 'authentication_error';
-        if (code === 403) return 'permission_error';
-        if (code === 429) return 'rate_limit_error';
-        if (code >= 500) return 'server_error';
-        return 'invalid_request_error';
-    };
-    
-    // 根据 HTTP 状态码映射 Gemini 的 status
-    const getGeminiStatus = (code) => {
-        if (code === 400) return 'INVALID_ARGUMENT';
-        if (code === 401) return 'UNAUTHENTICATED';
-        if (code === 403) return 'PERMISSION_DENIED';
-        if (code === 404) return 'NOT_FOUND';
-        if (code === 429) return 'RESOURCE_EXHAUSTED';
-        if (code >= 500) return 'INTERNAL';
-        return 'UNKNOWN';
-    };
-    
-    switch (protocolPrefix) {
-        case MODEL_PROTOCOL_PREFIX.OPENAI:
-            // OpenAI 流式错误格式（SSE data 块）
-            const openaiError = {
-                error: {
-                    message: errorMessage,
-                    type: getErrorType(statusCode),
-                    code: null
-                }
-            };
-            return `data: ${JSON.stringify(openaiError)}\n\n`;
-            
-        case MODEL_PROTOCOL_PREFIX.OPENAI_RESPONSES:
-            // OpenAI Responses API 流式错误格式（SSE event + data）
-            const responsesError = {
-                id: `resp_${Date.now()}`,
-                object: "error",
-                created: Math.floor(Date.now() / 1000),
-                error: {
-                    type: getErrorType(statusCode),
-                    message: errorMessage,
-                    code: getErrorType(statusCode)
-                }
-            };
-            return `event: error\ndata: ${JSON.stringify(responsesError)}\n\n`;
-            
-        case MODEL_PROTOCOL_PREFIX.CLAUDE:
-            // Claude 流式错误格式（SSE event + data）
-            const claudeError = {
-                type: "error",
-                error: {
-                    type: getErrorType(statusCode),
-                    message: errorMessage
-                }
-            };
-            return `event: error\ndata: ${JSON.stringify(claudeError)}\n\n`;
-            
-        case MODEL_PROTOCOL_PREFIX.GEMINI:
-            // Gemini 流式错误格式
-            // 注意：虽然 Gemini 原生使用 JSON 数组，但在我们的实现中已经转换为 SSE 格式
-            // 所以这里也需要使用 data: 前缀，保持与正常流式响应一致
-            const geminiError = {
-                error: {
-                    code: statusCode,
-                    message: errorMessage,
-                    status: getGeminiStatus(statusCode)
-                }
-            };
-            return `data: ${JSON.stringify(geminiError)}\n\n`;
-            
-        default:
-            // 默认使用 OpenAI SSE 格式
-            const defaultError = {
-                error: {
-                    message: errorMessage,
-                    type: getErrorType(statusCode),
-                    code: null
-                }
-            };
-            return `data: ${JSON.stringify(defaultError)}\n\n`;
     }
 }

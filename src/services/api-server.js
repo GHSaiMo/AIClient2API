@@ -126,6 +126,7 @@ const IS_WORKER_PROCESS = process.env.IS_WORKER_PROCESS === 'true';
 
 // 存储服务器实例，用于优雅关闭
 let serverInstance = null;
+let isShuttingDown = false;
 
 /**
  * 发送消息给主进程
@@ -180,9 +181,43 @@ function setupWorkerCommunication() {
  * 优雅关闭服务器
  */
 async function gracefulShutdown(exitCode = 0) {
+    if (isShuttingDown) {
+        return;
+    }
+    isShuttingDown = true;
     logger.info('[Server] Initiating graceful shutdown...');
 
-    // 停止所有插件
+    // 设置兜底强制退出超时，防止无限等待
+    const forceExitTimer = setTimeout(() => {
+        logger.info('[Server] Shutdown timeout, forcing exit...');
+        logger.close();
+        process.exit(exitCode || 1);
+    }, 10000);
+    if (forceExitTimer.unref) {
+        forceExitTimer.unref();
+    }
+
+    // 1. 停止接收新 HTTP 连接（允许在途请求尽快收尾）
+    const serverClosePromise = serverInstance
+        ? new Promise((resolve) => {
+            serverInstance.close(() => {
+                logger.info('[Server] HTTP server closed');
+                resolve();
+            });
+        })
+        : Promise.resolve();
+
+    // 2. 冲刷号池防抖待保存状态，避免冷却时间与健康状态丢失
+    try {
+        const poolManager = getProviderPoolManager();
+        if (poolManager && typeof poolManager.shutdown === 'function') {
+            await poolManager.shutdown();
+        }
+    } catch (err) {
+        logger.error('[Server] Error flushing provider pool state:', err.message);
+    }
+
+    // 3. 停止所有插件（含统计插件同步落盘）
     try {
         const pluginManager = getPluginManager();
         if (pluginManager) {
@@ -192,31 +227,25 @@ async function gracefulShutdown(exitCode = 0) {
         logger.error('[Server] Error destroying plugins:', err.message);
     }
 
-    // 停止 TLS sidecar
+    // 4. 停止附属 Sidecar 与本地 Runner 子进程
     try {
         await getTLSSidecar().stop();
     } catch { /* ignore */ }
 
-    // 停止 Gemini Web sidecar
     try {
         const { stopAllGeminiWebSidecars } = await import('../utils/gemini-web-sidecar.js');
         await stopAllGeminiWebSidecars();
     } catch { /* ignore */ }
 
-    if (serverInstance) {
-        serverInstance.close(() => {
-            logger.info('[Server] HTTP server closed');
-            process.exit(exitCode);
-        });
+    try {
+        const { yuanbaoRunnerManager } = await import('../providers/yuanbao/yuanbao-runner-manager.js');
+        await yuanbaoRunnerManager.stop();
+    } catch { /* ignore */ }
 
-        // 设置超时，防止无限等待
-        setTimeout(() => {
-            logger.info('[Server] Shutdown timeout, forcing exit...');
-            process.exit(exitCode || 1);
-        }, 10000);
-    } else {
-        process.exit(exitCode);
-    }
+    await serverClosePromise;
+    clearTimeout(forceExitTimer);
+    logger.close();
+    process.exit(exitCode);
 }
 
 /**

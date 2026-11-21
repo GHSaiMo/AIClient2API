@@ -1,4 +1,4 @@
-import { describe, test, expect } from 'bun:test';
+import { describe, test, expect } from '@jest/globals';
 import { ConverterFactory } from '../../src/converters/ConverterFactory.js';
 import { MODEL_PROTOCOL_PREFIX } from '../../src/utils/constants.js';
 import '../../src/converters/register-converters.js';

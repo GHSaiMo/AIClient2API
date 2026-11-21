@@ -6,6 +6,7 @@
 import { fetch, Agent as UndiciAgent } from 'undici';
 import { Readable } from 'stream';
 import logger from './logger.js';
+import requestContext from './context.js';
 import { NETWORK } from './constants.js';
 import { computeDynamicTimeout, DYNAMIC_STREAM_IDLE_TIMEOUT_MS } from './dynamic-timeout.js';
 
@@ -250,7 +251,9 @@ export class UndiciHttpClient {
                 reqTimeout = dynamic.timeoutMs;
             }
         }
-        const signal = this._resolveSignal(customSignal, reqTimeout);
+        const contextAbortSignal = !options.ignoreClientAbort ? requestContext.get('upstreamAbortSignal') : null;
+        const effectiveCustomSignal = customSignal || contextAbortSignal || undefined;
+        const signal = this._resolveSignal(effectiveCustomSignal, reqTimeout);
 
         let reqBody = explicitBody !== null ? explicitBody : data;
         let isFormData = false;
@@ -368,8 +371,9 @@ export class UndiciHttpClient {
                 throw error;
             }
 
-            const isTimeout = error.name === 'TimeoutError' || error.code === 23 || (error.name === 'AbortError' && signal.aborted && signal.reason?.name === 'TimeoutError');
-            const isAbort = error.name === 'AbortError' || error.code === 20;
+            const isClientAbort = Boolean(effectiveCustomSignal?.aborted);
+            const isTimeout = !isClientAbort && (error.name === 'TimeoutError' || error.code === 23 || (error.name === 'AbortError' && signal.aborted && signal.reason?.name === 'TimeoutError'));
+            const isAbort = isClientAbort || error.name === 'AbortError' || error.code === 20;
 
             let errorCode = error.code;
             if (isTimeout || errorCode === 23) {
@@ -380,7 +384,7 @@ export class UndiciHttpClient {
                 errorCode = 'ECONNRESET';
             }
 
-            throw new HttpError(error.message, {
+            const httpErr = new HttpError(error.message, {
                 status: isTimeout ? 408 : 0,
                 statusText: isTimeout ? 'Request Timeout' : (isAbort ? 'Aborted' : 'Network Error'),
                 headers: {},
@@ -388,6 +392,11 @@ export class UndiciHttpClient {
                 code: errorCode,
                 request: reqMeta,
             });
+            if (isClientAbort) {
+                httpErr.isClientAbort = true;
+                httpErr.skipErrorCount = true;
+            }
+            throw httpErr;
         }
     }
 
@@ -446,7 +455,9 @@ export class UndiciHttpClient {
             }
         }
 
-        const signal = this._resolveSignal(customSignal, effectiveTimeout);
+        const contextAbortSignal = !options.ignoreClientAbort ? requestContext.get('upstreamAbortSignal') : null;
+        const effectiveCustomSignal = customSignal || contextAbortSignal || undefined;
+        const signal = this._resolveSignal(effectiveCustomSignal, effectiveTimeout);
         let reqBody = explicitBody !== null ? explicitBody : data;
         if (reqBody !== null && typeof reqBody !== 'string' && !(reqBody instanceof ArrayBuffer) && !ArrayBuffer.isView(reqBody)) {
             reqBody = JSON.stringify(reqBody);
@@ -476,8 +487,9 @@ export class UndiciHttpClient {
         try {
             response = await fetch(fullUrl, fetchOptions);
         } catch (error) {
-            const isTimeout = error.name === 'TimeoutError' || error.code === 23 || (error.name === 'AbortError' && signal.aborted && signal.reason?.name === 'TimeoutError');
-            const isAbort = error.name === 'AbortError' || error.code === 20;
+            const isClientAbort = Boolean(effectiveCustomSignal?.aborted);
+            const isTimeout = !isClientAbort && (error.name === 'TimeoutError' || error.code === 23 || (error.name === 'AbortError' && signal.aborted && signal.reason?.name === 'TimeoutError'));
+            const isAbort = isClientAbort || error.name === 'AbortError' || error.code === 20;
 
             let errorCode = error.code;
             if (isTimeout || errorCode === 23) {
@@ -487,7 +499,7 @@ export class UndiciHttpClient {
             } else if (!errorCode || typeof errorCode === 'number') {
                 errorCode = 'ECONNRESET';
             }
-            throw new HttpError(error.message, {
+            const httpErr = new HttpError(error.message, {
                 status: isTimeout ? 408 : 0,
                 statusText: isTimeout ? 'Request Timeout' : (isAbort ? 'Aborted' : 'Network Error'),
                 headers: {},
@@ -495,6 +507,11 @@ export class UndiciHttpClient {
                 code: errorCode,
                 request: reqMeta,
             });
+            if (isClientAbort) {
+                httpErr.isClientAbort = true;
+                httpErr.skipErrorCount = true;
+            }
+            throw httpErr;
         }
 
         const resHeaders = {};
@@ -545,6 +562,21 @@ export class UndiciHttpClient {
                     }
                 };
 
+                const onUpstreamAbort = () => {
+                    const abortErr = new Error('Stream aborted by client disconnect');
+                    abortErr.code = 'ECONNABORTED';
+                    abortErr.isClientAbort = true;
+                    abortErr.skipErrorCount = true;
+                    try { reader.cancel(abortErr); } catch (_) {}
+                };
+                if (effectiveCustomSignal) {
+                    if (effectiveCustomSignal.aborted) {
+                        onUpstreamAbort();
+                    } else {
+                        effectiveCustomSignal.addEventListener('abort', onUpstreamAbort, { once: true });
+                    }
+                }
+
                 const readNext = () => {
                     if (!idleTimeoutMs || idleTimeoutMs <= 0) {
                         return reader.read();
@@ -560,7 +592,14 @@ export class UndiciHttpClient {
 
                         reader.read().then(
                             (res) => { clearIdle(); resolve(res); },
-                            (err) => { clearIdle(); reject(err); }
+                            (err) => {
+                                clearIdle();
+                                if (effectiveCustomSignal?.aborted && err && typeof err === 'object') {
+                                    err.isClientAbort = true;
+                                    err.skipErrorCount = true;
+                                }
+                                reject(err);
+                            }
                         );
                     });
                 };
@@ -569,6 +608,13 @@ export class UndiciHttpClient {
                     while (true) {
                         const { done, value } = await readNext();
                         if (done) break;
+                        if (effectiveCustomSignal?.aborted) {
+                            const abortErr = new Error('Stream aborted by client disconnect');
+                            abortErr.code = 'ECONNABORTED';
+                            abortErr.isClientAbort = true;
+                            abortErr.skipErrorCount = true;
+                            throw abortErr;
+                        }
 
                         buffer += decoder.decode(value, { stream: true });
                         // 用游标切行，只在块末尾做一次 slice，避免长缓冲被反复拷贝
@@ -584,8 +630,17 @@ export class UndiciHttpClient {
                     if (buffer.length > 0) {
                         yield buffer;
                     }
+                } catch (streamErr) {
+                    if (effectiveCustomSignal?.aborted && streamErr && typeof streamErr === 'object') {
+                        streamErr.isClientAbort = true;
+                        streamErr.skipErrorCount = true;
+                    }
+                    throw streamErr;
                 } finally {
                     clearIdle();
+                    if (effectiveCustomSignal) {
+                        try { effectiveCustomSignal.removeEventListener('abort', onUpstreamAbort); } catch (_) {}
+                    }
                     try {
                         await reader.cancel();
                     } catch {

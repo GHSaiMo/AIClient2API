@@ -300,24 +300,6 @@ export function configureTLSSidecar(axiosConfig, config, providerType, defaultBa
 }
 
 /**
- * 为 google-auth-library 配置代理
- * @param {Object} config - 应用配置对象
- * @param {string} providerType - 提供商类型
- * @returns {Object|null} transporter 配置对象或 null
- */
-export function getGoogleAuthProxyConfig(config, providerType) {
-    const proxyConfig = getProxyConfigForProvider(config, providerType);
-
-    if (proxyConfig) {
-        return {
-            agent: proxyConfig.httpsAgent
-        };
-    }
-
-    return null;
-}
-
-/**
  * 根据代理 URL 获取或创建 Undici Dispatcher
  * 完整支持 HTTP、HTTPS 和 SOCKS5/SOCKS5h 代理
  * @param {string} proxyUrl - 代理 URL (http, https, socks5, socks5h)

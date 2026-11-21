@@ -33,7 +33,7 @@ import {
     generateResponseInProgress,
     startToolCall,
     streamStateManager
-} from '../../providers/openai/openai-responses-core.mjs';
+} from '../../providers/openai/responses-stream-state.js';
 
 /**
  * Claude转换器类

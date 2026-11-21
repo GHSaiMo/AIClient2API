@@ -346,6 +346,10 @@ async function handleImageGenerationRequest(req, res, currentConfig, providerPoo
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(clientResponse));
     } catch (error) {
+        if (error?.isClientAbort) {
+            logger.info('[Image Generation] Client disconnected prematurely, skipping provider penalty and retry');
+            return;
+        }
         logger.error('[Image Generation] Error:', error.message);
 
         const shouldSwitchCredential = error.shouldSwitchCredential === true;
@@ -796,6 +800,10 @@ async function handleImageEditsRequest(req, res, currentConfig, providerPoolMana
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify(clientResponse));
     } catch (error) {
+        if (error?.isClientAbort) {
+            logger.info('[Image Edits] Client disconnected prematurely, skipping provider penalty');
+            return;
+        }
         logger.error('[Image Edits] Error:', error.message);
         if (!res.writableEnded) {
             res.writeHead(500, { 'Content-Type': 'application/json' });

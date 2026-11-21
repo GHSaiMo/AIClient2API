@@ -9,7 +9,21 @@
  * 4. URL query: ?key=<key>
  */
 
+import * as crypto from 'crypto';
 import logger from '../../utils/logger.js';
+
+/**
+ * 常量时间密钥比对，消除时序侧信道风险
+ */
+export function timingSafeCompareKey(candidate, expected) {
+    if (typeof candidate !== 'string' || typeof expected !== 'string' || expected.length === 0) {
+        return false;
+    }
+    const hashCandidate = crypto.createHash('sha256').update(candidate, 'utf8').digest();
+    const hashExpected = crypto.createHash('sha256').update(expected, 'utf8').digest();
+    const hashesMatch = crypto.timingSafeEqual(hashCandidate, hashExpected);
+    return hashesMatch && candidate.length === expected.length;
+}
 
 /**
  * 检查请求是否已授权
@@ -27,23 +41,23 @@ function isAuthorized(req, requestUrl, requiredApiKey) {
     // Check for Bearer token in Authorization header (OpenAI style)
     if (authHeader && authHeader.startsWith('Bearer ')) {
         const token = authHeader.substring(7);
-        if (token === requiredApiKey) {
+        if (timingSafeCompareKey(token, requiredApiKey)) {
             return true;
         }
     }
 
     // Check for API key in URL query parameter (Gemini style)
-    if (queryKey === requiredApiKey) {
+    if (timingSafeCompareKey(queryKey, requiredApiKey)) {
         return true;
     }
 
     // Check for API key in x-goog-api-key header (Gemini style)
-    if (googApiKey === requiredApiKey) {
+    if (timingSafeCompareKey(googApiKey, requiredApiKey)) {
         return true;
     }
 
     // Check for API key in x-api-key header (Claude style)
-    if (claudeApiKey === requiredApiKey) {
+    if (timingSafeCompareKey(claudeApiKey, requiredApiKey)) {
         return true;
     }
 

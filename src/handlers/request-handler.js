@@ -35,8 +35,17 @@ export function createRequestHandler(config, providerPoolManager) {
         // Generate unique request ID and set it in logger context
         const clientIp = getClientIp(req, config);
         const requestId = `${clientIp}:${generateRequestId()}`;
+        const clientAbortController = new AbortController();
+        const onPrematureResponseClose = () => {
+            if (!res.writableEnded && !clientAbortController.signal.aborted) {
+                clientAbortController.abort(new Error('Client disconnected prematurely'));
+            }
+        };
+        if (typeof res.on === 'function') {
+            res.on('close', onPrematureResponseClose);
+        }
 
-        return requestContext.run({ requestId }, async () => {
+        return requestContext.run({ requestId, upstreamAbortSignal: clientAbortController.signal }, async () => {
             return logger.runWithContext(requestId, async () => {
                 // 高性能隔离配置：使用顶层浅拷贝替代耗时的全量递归 deepmerge，消除每请求的 GC 垃圾堆积
                 const currentConfig = { ...config, _monitorRequestId: requestId };
@@ -213,8 +222,18 @@ export function createRequestHandler(config, providerPoolManager) {
                             handleError(res, { status: 400, message: `Provider ${firstSegment} is not available.` }, currentConfig.MODEL_PROVIDER, null, req);
                             return;
                         } else if (firstSegment && !isValidProvider) {
-                            logger.info(`[Config] Ignoring invalid MODEL_PROVIDER in path segment: ${firstSegment}`);
+                            logger.debug(`[Config] Ignoring invalid MODEL_PROVIDER in path segment: ${firstSegment}`);
                         }
+                    }
+
+                    // 快速静默拦截浏览器/开发工具常见非业务探针路径，避免打入认证层刷屏 WARN 401 日志
+                    if (
+                        method === 'GET' &&
+                        (path.startsWith('/__') || path.startsWith('/.well-known/') || path === '/favicon.ico')
+                    ) {
+                        res.writeHead(404, { 'Content-Type': 'application/json' });
+                        res.end(JSON.stringify({ error: { message: 'Not Found', code: 404 } }));
+                        return true;
                     }
 
                     // Normalize alternative models endpoint path (e.g. /api/v1/models -> /v1/models)
@@ -301,7 +320,9 @@ export function createRequestHandler(config, providerPoolManager) {
                         handleError(res, error, currentConfig.MODEL_PROVIDER, null, req);
                     }
                 } finally {
-                    // AsyncLocalStorage 自动管理生命周期，不再需要手动清理
+                    if (typeof res.off === 'function') {
+                        res.off('close', onPrematureResponseClose);
+                    }
                 }
             });
         });

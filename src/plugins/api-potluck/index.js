@@ -183,6 +183,11 @@ const apiPotluckPlugin = {
      * 销毁钩子
      */
     async destroy() {
+        if (pendingUsageCleanupTimer) {
+            clearInterval(pendingUsageCleanupTimer);
+            pendingUsageCleanupTimer = null;
+        }
+        pendingUsage.clear();
         logger.info('[API Potluck Plugin] Destroying...');
     },
 
@@ -316,6 +321,12 @@ const apiPotluckPlugin = {
             }
 
             for (const requestId of trackedRequestIds) {
+                pendingUsage.delete(requestId);
+            }
+        },
+
+        async onStreamEnd({ requestId, aborted }) {
+            if (aborted && requestId) {
                 pendingUsage.delete(requestId);
             }
         }

@@ -1,5 +1,6 @@
 import WebSocket from 'ws';
 import logger from '../../utils/logger.js';
+import requestContext from '../../utils/context.js';
 import { v4 as uuidv4 } from 'uuid';
 import { getProxyConfigForProvider, parseProxyUrl } from '../../utils/proxy-utils.js';
 import { MODEL_PROVIDER } from '../../utils/common.js';
@@ -218,17 +219,50 @@ export class ImagineWebSocketService {
             }
         });
 
+        const abortSignal = options?.signal || requestContext.get('upstreamAbortSignal') || null;
+        const onClientAbort = () => {
+            if (done) return;
+            logger.info('[Grok WS] Aborting WebSocket stream due to client disconnect');
+            clearAllTimers();
+            done = true;
+            const abortErr = new Error('Grok WS aborted by client disconnect');
+            abortErr.isClientAbort = true;
+            abortErr.skipErrorCount = true;
+            queue.push({ type: 'client_abort', errorObj: abortErr });
+            if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+                try { ws.close(); } catch {}
+            }
+            if (resolveNext) {
+                resolveNext();
+                resolveNext = null;
+            }
+        };
+        if (abortSignal) {
+            if (abortSignal.aborted) {
+                onClientAbort();
+            } else {
+                abortSignal.addEventListener('abort', onClientAbort, { once: true });
+            }
+        }
+
         try {
             while (!done || queue.length > 0) {
                 if (queue.length === 0 && !done) {
                     await new Promise(r => resolveNext = r);
                 }
                 while (queue.length > 0) {
-                    yield queue.shift();
+                    const item = queue.shift();
+                    if (item?.type === 'client_abort' && item.errorObj) {
+                        throw item.errorObj;
+                    }
+                    yield item;
                 }
             }
         } finally {
             clearAllTimers();
+            if (abortSignal) {
+                try { abortSignal.removeEventListener('abort', onClientAbort); } catch {}
+            }
             if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
                 ws.close();
             }
