@@ -7,7 +7,8 @@ import { fileURLToPath } from 'url';
 import {
   getChromeCookies,
   getChromeProfile1Cookies,
-  getEgoBrowserCookies
+  getEgoBrowserCookies,
+  getMac99EgoBrowserCookies
 } from '../src/providers/grok/grok-token-refresher.js';
 import { getLocalIdentities } from '../src/utils/local-identities.js';
 
@@ -29,18 +30,20 @@ function extractSessionId(token) {
 }
 
 async function extractAllLocalCookies() {
-  const [chromeCookies, chrome1, ego] = await Promise.all([
+  const ids = getLocalIdentities();
+  const [chromeCookies, chrome1, ego, mac99Ego] = await Promise.all([
     getChromeCookies().catch(() => null),
     getChromeProfile1Cookies().catch(() => null),
     getEgoBrowserCookies().catch(() => null),
+    getMac99EgoBrowserCookies().catch(() => null),
   ]);
 
   const result = {};
 
-  // 1. Google Chrome Default (包含 对应账号)
+  // 1. Google Chrome Default
   if (chromeCookies?.sso) {
-    result[getLocalIdentities().grokChromeDefault] = {
-      email: getLocalIdentities().grokChromeDefault,
+    result[ids.grokChromeDefault] = {
+      email: ids.grokChromeDefault,
       sso: chromeCookies.sso,
       cf_clearance: chromeCookies.cf_clearance || '',
       session_id: extractSessionId(chromeCookies.sso),
@@ -50,8 +53,8 @@ async function extractAllLocalCookies() {
 
   // 2. Google Chrome Profile 1 (备用 profile，若与 Default 互斥)
   if (chrome1?.sso && chrome1.sso !== chromeCookies?.sso) {
-    result[getLocalIdentities().chromeProfile1] = {
-      email: getLocalIdentities().chromeProfile1,
+    result[ids.chromeProfile1] = {
+      email: ids.chromeProfile1,
       sso: chrome1.sso,
       cf_clearance: chrome1.cf_clearance || '',
       session_id: extractSessionId(chrome1.sso),
@@ -59,14 +62,25 @@ async function extractAllLocalCookies() {
     };
   }
 
-  // 3. ego-browser / Ego lite (包含 对应账号)
+  // 3. 本机 ego-browser / Ego lite
   if (ego?.sso) {
-    result[getLocalIdentities().grokEgo] = {
-      email: getLocalIdentities().grokEgo,
+    result[ids.grokEgo] = {
+      email: ids.grokEgo,
       sso: ego.sso,
       cf_clearance: ego.cf_clearance || '',
       session_id: extractSessionId(ego.sso),
-      source: 'Ego lite'
+      source: 'ego-browser'
+    };
+  }
+
+  // 4. 远端 mac99 ego-browser
+  if (mac99Ego?.sso) {
+    result[ids.grokMac99Ego] = {
+      email: ids.grokMac99Ego,
+      sso: mac99Ego.sso,
+      cf_clearance: mac99Ego.cf_clearance || '',
+      session_id: extractSessionId(mac99Ego.sso),
+      source: 'mac99 ego-browser'
     };
   }
 
@@ -87,7 +101,7 @@ async function main() {
     try {
       console.log(`正在从 Mac Cookie Bridge (${bridgeBaseUrl}) 实时拉取最新登录态...`);
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 8000);
+      const timer = setTimeout(() => controller.abort(), 12000);
       const res = await fetch(`${bridgeBaseUrl}/api/grok-cookies`, { signal: controller.signal });
       clearTimeout(timer);
 

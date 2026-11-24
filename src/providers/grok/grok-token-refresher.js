@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
-import { execSync, spawnSync } from 'child_process';
+import { execSync, spawn } from 'child_process';
 import logger from '../../utils/logger.js';
 import { getLocalIdentities } from '../../utils/local-identities.js';
 
@@ -181,13 +181,147 @@ export async function getEgoBrowserCookies(preferredProfile = null) {
     }
 }
 
+const MAC99_COOKIE_MARKER = '__GROK_MAC99_COOKIES__:';
+const MAC99_SSH_BIN = fs.existsSync('/usr/bin/ssh') ? '/usr/bin/ssh' : 'ssh';
+
 /**
- * 根据邮箱或者配置，自动从对应的浏览器（Mac本地或通过Mac Cookie Bridge远程）刷新 Grok SSO
+ * 从远端 mac99 (192.168.50.99) 正在运行的 Ego Lite 浏览器通过 ego-browser CLI 提取 Grok Cookies
+ * 使用非阻塞异步 SSH + 固定超时，并在 finally 中释放临时 taskSpace
+ */
+export async function getMac99EgoBrowserCookies(options = {}) {
+    const identities = getLocalIdentities();
+    const host = String(options.host || process.env.GROK_MAC99_HOST || identities.grokMac99Host || 'mac99').trim();
+    const timeoutMs = Number(options.timeoutMs) > 0 ? Number(options.timeoutMs) : 7000;
+    if (!host) return null;
+
+    const remoteNodeScript = [
+        'const task = await taskSpace("grok-cookie-sync");',
+        'try {',
+        '  const page = task.page("p1");',
+        '  let cookies = [];',
+        '  try {',
+        '    const res = await page.cdp("Network.getCookies", { urls: ["https://grok.com", "https://accounts.x.ai", "https://x.ai"] });',
+        '    cookies = res?.cookies || [];',
+        '  } catch {}',
+        '  if (!cookies.some(c => c.name === "sso")) {',
+        '    try {',
+        '      const res = await task.cdp("Storage.getCookies", {});',
+        '      cookies = (res?.cookies || []).filter(c => /grok\\.com|x\\.ai/i.test(c.domain || ""));',
+        '    } catch {}',
+        '  }',
+        '  const out = {};',
+        '  for (const c of cookies) {',
+        '    if (c.name === "sso" || c.name === "sso-rw" || c.name === "cf_clearance") {',
+        '      out[c.name] = c.value;',
+        '    }',
+        '  }',
+        `  console.log(${JSON.stringify(MAC99_COOKIE_MARKER)} + JSON.stringify(out));`,
+        '} finally {',
+        '  await task.finish({ keep: [] }).catch(() => {});',
+        '}',
+        ''
+    ].join('\n');
+
+    const remoteCmd = 'export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$PATH"; ego-browser nodejs';
+
+    return new Promise((resolve) => {
+        let stdout = '';
+        let stderr = '';
+        let settled = false;
+
+        const finish = (value) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            resolve(value);
+        };
+
+        const child = spawn(
+            MAC99_SSH_BIN,
+            [
+                '-o', 'BatchMode=yes',
+                '-o', 'ConnectTimeout=3',
+                '-o', 'ServerAliveInterval=3',
+                '-o', 'ServerAliveCountMax=1',
+                host,
+                remoteCmd
+            ],
+            { stdio: ['pipe', 'pipe', 'pipe'] }
+        );
+
+        const timer = setTimeout(() => {
+            logger.warn(`[GrokRefresher] mac99 (${host}) ego lite cookie extraction timed out after ${timeoutMs}ms`);
+            try { child.kill('SIGKILL'); } catch { /* ignore */ }
+            finish(null);
+        }, timeoutMs);
+
+        child.stdout.on('data', (chunk) => { stdout += chunk.toString('utf8'); });
+        child.stderr.on('data', (chunk) => { stderr += chunk.toString('utf8'); });
+
+        child.on('error', (err) => {
+            logger.warn(`[GrokRefresher] Failed to spawn ssh for ${host}: ${err.message}`);
+            finish(null);
+        });
+
+        child.on('close', (code) => {
+            try {
+                // ego-browser nodejs 在管道模式下可能将 console.log 输出到 stderr，合并双流提取带标记的 JSON
+                const combined = `${stdout}\n${stderr}`;
+                const lines = combined.split(/\r?\n/);
+                for (let i = lines.length - 1; i >= 0; i--) {
+                    const idx = lines[i].indexOf(MAC99_COOKIE_MARKER);
+                    if (idx !== -1) {
+                        const jsonStr = lines[i].slice(idx + MAC99_COOKIE_MARKER.length).trim();
+                        const parsed = JSON.parse(jsonStr);
+                        if (parsed && parsed.sso) {
+                            return finish(parsed);
+                        }
+                        break;
+                    }
+                }
+                if (code !== 0) {
+                    logger.warn(`[GrokRefresher] mac99 (${host}) ego lite extraction exited with code ${code}`);
+                }
+                finish(null);
+            } catch (err) {
+                logger.warn(`[GrokRefresher] Failed to parse mac99 (${host}) cookie payload: ${err.message}`);
+                finish(null);
+            }
+        });
+
+        try {
+            child.stdin.write(remoteNodeScript);
+            child.stdin.end();
+        } catch (err) {
+            logger.warn(`[GrokRefresher] Failed to write remote script to ${host}: ${err.message}`);
+            try { child.kill('SIGKILL'); } catch { /* ignore */ }
+            finish(null);
+        }
+    });
+}
+
+function normalizeEmailFromConfig(config = {}) {
+    const rawEmail = String(config.email || '').toLowerCase().trim();
+    if (rawEmail) return rawEmail;
+    const rawCustom = String(config.customName || '').toLowerCase().trim();
+    const match = rawCustom.match(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/);
+    return match ? match[0] : rawCustom;
+}
+
+function isEmailMatch(candidate, target) {
+    if (!candidate || !target) return false;
+    const a = String(candidate).toLowerCase().trim();
+    const b = String(target).toLowerCase().trim();
+    return a === b || a.includes(b) || b.includes(a);
+}
+
+/**
+ * 根据邮箱或者配置，自动从对应的浏览器（Mac本地、mac99远端或通过Mac Cookie Bridge远程）刷新 Grok SSO
  * @param {Object} config - 提供商配置对象
- * @returns {Promise<{ sso: string, cf_clearance?: string } | null>}
+ * @returns {Promise<{ sso: string, cf_clearance?: string, email?: string, source?: string } | null>}
  */
 export async function refreshGrokToken(config = {}) {
-    let email = (config.email || config.customName || '').toLowerCase().trim();
+    let email = normalizeEmailFromConfig(config);
     // 识别并规避默认占位邮箱或无效邮箱（如 user@grok.com）
     const isPlaceholderEmail = !email || email === 'user@grok.com' || email.startsWith('user@') || email.includes('example.com');
     if (isPlaceholderEmail) {
@@ -212,17 +346,20 @@ export async function refreshGrokToken(config = {}) {
                 : `${bridgeBaseUrl}/api/grok-cookies`;
 
             const controller = new AbortController();
-            const timer = setTimeout(() => controller.abort(), 8000);
+            const timer = setTimeout(() => controller.abort(), 12000);
             const res = await fetch(queryUrl, { signal: controller.signal });
             clearTimeout(timer);
 
             if (res.ok) {
                 let data = await res.json();
-                // 若指定邮箱未查到或响应不合法，自动兜底拉取所有可用 Cookie
-                if (!data || !data.ok) {
-                    logger.info(`[GrokRefresher] Specific query for '${email || 'default'}' not fulfilled on bridge, attempting fallback to available cookies...`);
+                // 仅在未指定真实邮箱（占位节点）时才拉取全量列表兜底；指定真实邮箱未命中时严禁串号回退到其他账号
+                if ((!data || !data.ok) && !email) {
+                    logger.info(`[GrokRefresher] Default query not fulfilled on bridge, attempting fallback to available cookies...`);
                     try {
-                        const fallbackRes = await fetch(`${bridgeBaseUrl}/api/grok-cookies`);
+                        const fbController = new AbortController();
+                        const fbTimer = setTimeout(() => fbController.abort(), 12000);
+                        const fallbackRes = await fetch(`${bridgeBaseUrl}/api/grok-cookies`, { signal: fbController.signal });
+                        clearTimeout(fbTimer);
                         if (fallbackRes.ok) {
                             data = await fallbackRes.json();
                         }
@@ -232,12 +369,16 @@ export async function refreshGrokToken(config = {}) {
                 }
                 if (data && data.ok) {
                     if (data.sso) {
-                        cookies = {
-                            sso: data.sso,
-                            cf_clearance: data.cf_clearance || '',
-                            email: data.email,
-                            source: data.source
-                        };
+                        if (!email || !data.email || isEmailMatch(data.email, email)) {
+                            cookies = {
+                                sso: data.sso,
+                                cf_clearance: data.cf_clearance || '',
+                                email: data.email,
+                                source: data.source
+                            };
+                        } else {
+                            logger.warn(`[GrokRefresher] Bridge returned mismatched email '${data.email}' for '${email}'; refusing cross-account overwrite`);
+                        }
                     } else if (data.cookies && email && data.cookies[email]) {
                         cookies = {
                             sso: data.cookies[email].sso,
@@ -246,21 +387,25 @@ export async function refreshGrokToken(config = {}) {
                             source: data.cookies[email].source
                         };
                     } else if (data.cookies) {
-                        // 优先模糊匹配，其次兜底选取第一个有效账号
-                        const matchedEntry = Object.entries(data.cookies).find(([k]) =>
-                            email && (k.toLowerCase().includes(email.toLowerCase()) || email.toLowerCase().includes(k.toLowerCase()))
-                        );
-                        const fallbackTarget = matchedEntry ? matchedEntry[1] : Object.values(data.cookies)[0];
-                        if (fallbackTarget?.sso) {
-                            logger.info(`[GrokRefresher] Fallback matched available cookie from: ${fallbackTarget.email || fallbackTarget.source || 'default'}`);
+                        const matchedEntry = email
+                            ? Object.entries(data.cookies).find(([k, v]) => isEmailMatch(k, email) || isEmailMatch(v?.email, email))
+                            : null;
+                        // 指定邮箱时仅允许匹配目标账号，严禁回退到其他无关账号导致串号覆盖
+                        const target = matchedEntry ? matchedEntry[1] : (!email ? Object.values(data.cookies)[0] : null);
+                        if (target?.sso) {
+                            logger.info(`[GrokRefresher] Matched cookie from: ${target.email || target.source || 'default'}`);
                             cookies = {
-                                sso: fallbackTarget.sso,
-                                cf_clearance: fallbackTarget.cf_clearance || '',
-                                email: fallbackTarget.email,
-                                source: fallbackTarget.source
+                                sso: target.sso,
+                                cf_clearance: target.cf_clearance || '',
+                                email: target.email,
+                                source: target.source
                             };
+                        } else if (email) {
+                            logger.warn(`[GrokRefresher] No matching cookie on bridge for '${email}'; refusing cross-account fallback`);
                         }
                     }
+                } else if (email) {
+                    logger.warn(`[GrokRefresher] Bridge did not return cookie for '${email}': ${data?.error || 'not found'}`);
                 }
             } else {
                 logger.warn(`[GrokRefresher] Mac bridge returned HTTP ${res.status}`);
@@ -270,15 +415,36 @@ export async function refreshGrokToken(config = {}) {
         }
     }
 
-    // 2. 如果桥接未成功获取，且当前处于 macOS 本地，则尝试本地 Keychain 解密兜底
+    // 2. 如果桥接未成功获取，且当前处于 macOS 本地，则按身份定向从本机浏览器或 mac99 远端提取
     if (!cookies && process.platform === 'darwin') {
-        if (email.includes(getLocalIdentities().grokEgo) || email.includes(getLocalIdentities().chromeProfile1)) {
-            cookies = await getEgoBrowserCookies();
-        } else if (email.includes(getLocalIdentities().grokChromeDefault)) {
-            cookies = await getChromeCookies();
+        const identities = getLocalIdentities();
+        if (email) {
+            if (isEmailMatch(email, identities.grokMac99Ego)) {
+                const remote = await getMac99EgoBrowserCookies();
+                if (remote?.sso) {
+                    cookies = { ...remote, email: identities.grokMac99Ego, source: 'mac99 ego-browser' };
+                }
+            } else if (isEmailMatch(email, identities.grokEgo)) {
+                const ego = await getEgoBrowserCookies();
+                if (ego?.sso) {
+                    cookies = { ...ego, email: identities.grokEgo, source: 'ego-browser' };
+                }
+            } else if (isEmailMatch(email, identities.chromeProfile1)) {
+                const c1 = await getChromeProfile1Cookies();
+                if (c1?.sso) {
+                    cookies = { ...c1, email: identities.chromeProfile1, source: 'Chrome Profile 1' };
+                }
+            } else if (isEmailMatch(email, identities.grokChromeDefault)) {
+                const c0 = await getChromeCookies();
+                if (c0?.sso) {
+                    cookies = { ...c0, email: identities.grokChromeDefault, source: 'Google Chrome' };
+                }
+            } else {
+                logger.warn(`[GrokRefresher] No local/mac99 browser mapping configured for '${email}'; refusing cross-account fallback`);
+            }
         } else {
-            // 未匹配到特定邮箱，按顺序尝试提取
-            cookies = await getChromeCookies() || await getEgoBrowserCookies();
+            // 未指定特定邮箱（占位节点），按顺序兜底尝试提取
+            cookies = await getChromeCookies() || await getEgoBrowserCookies() || await getMac99EgoBrowserCookies();
         }
     }
 

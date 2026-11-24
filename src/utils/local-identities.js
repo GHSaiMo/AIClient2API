@@ -12,6 +12,10 @@ const DEFAULTS = {
     chromeProfile1: 'chrome-profile1@example.invalid',
     // ego-browser 所属账号（Grok）
     grokEgo: 'ego@example.invalid',
+    // mac99 远端 ego-browser 所属账号（Grok）
+    grokMac99Ego: 'mac99-ego@example.invalid',
+    // mac99 远端 SSH Host 别名（~/.ssh/config）
+    grokMac99Host: 'mac99',
     // Gemini ego-browser 取不到 GAUSR 时的兜底账号
     geminiEgoFallback: 'gemini-ego@example.invalid',
 };

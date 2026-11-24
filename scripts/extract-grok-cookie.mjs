@@ -1,7 +1,8 @@
 import {
   getChromeCookies,
   getChromeProfile1Cookies,
-  getEgoBrowserCookies
+  getEgoBrowserCookies,
+  getMac99EgoBrowserCookies
 } from '../src/providers/grok/grok-token-refresher.js';
 import { getLocalIdentities } from '../src/utils/local-identities.js';
 
@@ -17,46 +18,81 @@ function extractSessionId(token) {
   }
 }
 
+function formatEntry(email, raw, source) {
+  return {
+    email,
+    sso: raw.sso,
+    cf_clearance: raw.cf_clearance || '',
+    session_id: extractSessionId(raw.sso),
+    source
+  };
+}
+
+function isEmailMatch(identityEmail, query) {
+  if (!identityEmail || !query) return false;
+  const a = identityEmail.toLowerCase().trim();
+  const b = query.toLowerCase().trim();
+  return a === b || a.includes(b) || b.includes(a);
+}
+
+/**
+ * 指定邮箱时的定向提取：避免查本机账号时触发 mac99 SSH，也避免查 mac99 账号时白读本机 Keychain
+ */
+async function extractTargetedCookie(emailArg) {
+  const ids = getLocalIdentities();
+
+  if (isEmailMatch(ids.grokMac99Ego, emailArg)) {
+    const mac99 = await getMac99EgoBrowserCookies().catch(() => null);
+    return mac99?.sso ? formatEntry(ids.grokMac99Ego, mac99, 'mac99 ego-browser') : null;
+  }
+
+  if (isEmailMatch(ids.grokChromeDefault, emailArg)) {
+    const chromeCookies = await getChromeCookies().catch(() => null);
+    return chromeCookies?.sso ? formatEntry(ids.grokChromeDefault, chromeCookies, 'Google Chrome') : null;
+  }
+
+  if (isEmailMatch(ids.grokEgo, emailArg)) {
+    const ego = await getEgoBrowserCookies().catch(() => null);
+    return ego?.sso ? formatEntry(ids.grokEgo, ego, 'ego-browser') : null;
+  }
+
+  if (isEmailMatch(ids.chromeProfile1, emailArg)) {
+    const chrome1 = await getChromeProfile1Cookies().catch(() => null);
+    return chrome1?.sso ? formatEntry(ids.chromeProfile1, chrome1, 'Chrome Profile 1') : null;
+  }
+
+  return undefined; // 未命中已知身份，交由全量扫描匹配
+}
+
 async function extractAllCookies() {
-  const [chromeCookies, chrome1, ego] = await Promise.all([
+  const ids = getLocalIdentities();
+  const [chromeCookies, chrome1, ego, mac99Ego] = await Promise.all([
     getChromeCookies().catch(() => null),
     getChromeProfile1Cookies().catch(() => null),
     getEgoBrowserCookies().catch(() => null),
+    getMac99EgoBrowserCookies().catch(() => null),
   ]);
 
   const result = {};
 
-  // Google Chrome (默认 Default profile，包含 对应账号)
+  // Google Chrome (默认 Default profile)
   if (chromeCookies?.sso) {
-    result[getLocalIdentities().grokChromeDefault] = {
-      email: getLocalIdentities().grokChromeDefault,
-      sso: chromeCookies.sso,
-      cf_clearance: chromeCookies.cf_clearance || '',
-      session_id: extractSessionId(chromeCookies.sso),
-      source: 'Google Chrome'
-    };
+    result[ids.grokChromeDefault] = formatEntry(ids.grokChromeDefault, chromeCookies, 'Google Chrome');
   }
 
-  // Google Chrome Profile 1 (针对备用 profile，如果与 Default 互斥)
+  // Google Chrome Profile 1 (备用 profile，如果与 Default 互斥)
   if (chrome1?.sso && chrome1.sso !== chromeCookies?.sso) {
-    result[getLocalIdentities().chromeProfile1] = {
-      email: getLocalIdentities().chromeProfile1,
-      sso: chrome1.sso,
-      cf_clearance: chrome1.cf_clearance || '',
-      session_id: extractSessionId(chrome1.sso),
-      source: 'Chrome Profile 1'
-    };
+    result[ids.chromeProfile1] = formatEntry(ids.chromeProfile1, chrome1, 'Chrome Profile 1');
   }
 
-  // ego-browser (针对 对应账号)
+  // 本机 ego-browser
   if (ego?.sso) {
-    result[getLocalIdentities().grokEgo] = {
-      email: getLocalIdentities().grokEgo,
-      sso: ego.sso,
-      cf_clearance: ego.cf_clearance || '',
-      session_id: extractSessionId(ego.sso),
-      source: 'ego-browser'
-    };
+    result[ids.grokEgo] = formatEntry(ids.grokEgo, ego, 'ego-browser');
+  }
+
+  // 远端 mac99 ego-browser
+  if (mac99Ego?.sso) {
+    result[ids.grokMac99Ego] = formatEntry(ids.grokMac99Ego, mac99Ego, 'mac99 ego-browser');
   }
 
   return result;
@@ -75,13 +111,27 @@ async function main() {
     }
   }
 
-  const all = await extractAllCookies();
-
   if (emailArg) {
-    // Exact or partial match
-    let matchedKey = Object.keys(all).find(k => k === emailArg);
+    const targeted = await extractTargetedCookie(emailArg);
+    if (targeted) {
+      console.log(JSON.stringify({
+        ok: true,
+        ...targeted
+      }));
+      return;
+    }
+    if (targeted === null) {
+      console.log(JSON.stringify({
+        ok: false,
+        error: `No Grok cookie found for email: ${emailArg}`
+      }));
+      return;
+    }
+
+    const all = await extractAllCookies();
+    let matchedKey = Object.keys(all).find(k => k.toLowerCase() === emailArg);
     if (!matchedKey) {
-      matchedKey = Object.keys(all).find(k => k.includes(emailArg) || emailArg.includes(k));
+      matchedKey = Object.keys(all).find(k => k.toLowerCase().includes(emailArg) || emailArg.includes(k.toLowerCase()));
     }
 
     if (matchedKey && all[matchedKey]) {
@@ -100,6 +150,7 @@ async function main() {
     return;
   }
 
+  const all = await extractAllCookies();
   console.log(JSON.stringify({
     ok: true,
     cookies: all,
