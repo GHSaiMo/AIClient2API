@@ -627,6 +627,29 @@
       "_lastSelectionSeq": 0,
       "lastRefreshTime": 1794931244752,
       "lastHealthCheckModel": null
+    },
+    {
+      "uuid": "30ee86a2-18ec-4d30-90c6-f735f5890cd8",
+      "email": "user1@redacted.example",
+      "customName": "user1@redacted.example (mac99 ego-browser)",
+      "GROK_COOKIE_TOKEN": "<REDACTED>",
+      "GROK_CF_CLEARANCE": "<REDACTED>",
+      "GROK_BASE_URL": "https://grok.com",
+      "checkModelName": "grok-4.1-mini",
+      "checkHealth": false,
+      "isHealthy": true,
+      "isDisabled": false,
+      "lastUsed": null,
+      "usageCount": 0,
+      "errorCount": 0,
+      "lastErrorTime": null,
+      "lastHealthCheckTime": "2026-11-24T03:18:55.458Z",
+      "lastHealthCheckModel": null,
+      "lastErrorMessage": null,
+      "needsRefresh": false,
+      "refreshCount": 0,
+      "_lastSelectionSeq": 0,
+      "lastRefreshTime": 1795490335461
     }
   ],
   "chatgpt-web": [

@@ -29,8 +29,8 @@
      - **NAS 生产环境**：`TLS_SIDECAR_PORT: 9090`
      - **Mac 本地环境**：`TLS_SIDECAR_PORT: 9095`（避让本地 FlClash 占用的 9090 端口）
    - **Grok Cookie 动态提取自适应**：
-     - **NAS 端**：通过网络向 Mac Cookie Bridge (`http://192.168.50.9:7899`) 拉取
-     - **Mac 本地**：原生直接读取并解密 macOS Keychain 与本地 Google Chrome / ego lite 数据库（30ms 毫秒级原生直取）
+     - **NAS 端**：通过网络向 Mac Cookie Bridge (`http://192.168.50.9:7899`) 拉取（定向路由至 Mac 本地浏览器或 `mac99` 远端 Ego Lite）
+     - **Mac 本地**：原生直接读取并解密 macOS Keychain 与本地 Google Chrome / ego lite 数据库（30ms 毫秒级原生直取），并对 `mac99` 节点通过免密 SSH + `ego-browser` 异步提取
 4. **双端流量调度与一键切换 (Canary 灰度测试)**：
    - 本地提供一键流量切换工具 `./scripts/switch-traffic.sh`：
      - **切至本地开发版**：`./scripts/switch-traffic.sh local`（自动通知 `lan-proxy-bridge` 释放 3005 端口并拉起 Mac 本地服务）
@@ -66,14 +66,14 @@ curl http://127.0.0.1:3005/
 ## 3. 黄金基准凭据池规范与回滚约定
 
 > [!IMPORTANT]
-> **基准凭据池黄金版本**（2026-11-18 更新归档）：
+> **基准凭据池黄金版本**（2026-11-18 归档，2026-11-24 定向增量追加 `grok-web` 第 3 节点）：
 > - 用户已完成最新一轮凭据调整与启停状态配置，并将当前截面（含供应商列表、账户凭据、健康状态及启用/禁用开关）定为**唯一准则基准**。
 > - 归档路径：`configs/baselines/provider_pools.baseline.json` 与 `configs/baselines/snapshot-2026-11-18/`（含完整凭据文件副本、`config.nas.json`、`config.local.json`、`plugins.nas.json` 及 `manifest.json`，双端同步）。
 > - **回滚准则**：后续无论发生任何配置错乱、重启异常、自动关联异常或重置需求，**必须严格以此基准凭据池为准进行回滚恢复**，严禁使用旧的历史备份冲刷覆盖。
-> - **各供应商基准节点规模与开关状态（共 6 个 Provider，29 个节点）**：
+> - **各供应商基准节点规模与开关状态（共 6 个 Provider，30 个节点）**：
 >   - `claude-kiro-oauth`: 16 个节点，全部启用且健康 (`isDisabled: false`, `isHealthy: true`)
 >   - `openai-codex-oauth`: 8 个节点，全部启用且健康 (`isDisabled: false`, `isHealthy: true`)
->   - `grok-web`: 2 个节点（含 `taoxy0305@gmail.com` 与 `alexanderrorymartinez01@hotmail.com`），全部启用且健康 (`isDisabled: false`, `isHealthy: true`)
+>   - `grok-web`: 3 个节点（含 `taoxy0305@gmail.com`、`alexanderrorymartinez01@hotmail.com` 与 `jiugegemini@gmail.com` @ `mac99 ego-browser`），全部启用且健康 (`isDisabled: false`, `isHealthy: true`)
 >   - `gemini-web`: 1 个节点 (`gemini-4-argon`)，启用且健康 (`isDisabled: false`, `isHealthy: true`)
 >   - `yuanbao-web`: 1 个节点 (`yuanbao-hunyuan`)，启用且健康 (`isDisabled: false`, `isHealthy: true`)
 >   - `chatgpt-web`: 1 个节点 (`gpt-image-2` / Ego Lite Session)，启用且健康 (`isDisabled: false`, `isHealthy: true`)
@@ -115,5 +115,5 @@ curl http://127.0.0.1:3005/
    ```bash
    ssh nas "cd /vol1/1000/apps/AIClient2API && systemctl is-active aiclient2api && node -e \"const p=JSON.parse(require('fs').readFileSync('configs/provider_pools.json','utf8')); for(const [k,v] of Object.entries(p)) console.log(k, 'total:', v.length, 'enabled:', v.filter(x=>!x.isDisabled).length, 'disabled:', v.filter(x=>x.isDisabled).length, 'healthy:', v.filter(x=>x.isHealthy).length);\""
    ```
-   验收期望输出：`aiclient2api` 为 `active`，且节点数量与开关状态严格匹配上述基准（`claude-kiro-oauth` 16/16 启用、`openai-codex-oauth` 8/8 启用、`grok-web` 2/2 启用、`gemini-web` 1/1 启用、`yuanbao-web` 1/1 启用、`chatgpt-web` 1/1 启用）；详细节点清单可对照 `configs/baselines/snapshot-2026-11-18/manifest.json`。
+   验收期望输出：`aiclient2api` 为 `active`，且节点数量与开关状态严格匹配上述基准（`claude-kiro-oauth` 16/16 启用、`openai-codex-oauth` 8/8 启用、`grok-web` 3/3 启用、`gemini-web` 1/1 启用、`yuanbao-web` 1/1 启用、`chatgpt-web` 1/1 启用）；详细节点清单可对照 `configs/baselines/snapshot-2026-11-18/manifest.json`。
 
